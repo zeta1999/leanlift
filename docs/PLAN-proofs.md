@@ -189,8 +189,14 @@ kernels never did. Do `isqrt` first (single postcondition, simpler loop), then
    reusing the isqrt recipe (Appendix A) + squaring-monotonicity for the ε-widened
    bound. The LLM (`cpp-bisect`) needed the repair loop (iter 2) on the ε-loop.
    *First numerical method.*
-5. **Float-tolerance comparator + trapezoidal rule** with an error-bound theorem
-   (Mathlib). Research milestone — where numerical analysis proof is fundamental.
+5. **Float & low-precision (DNN) formats** — f32/f64 + bf16/fp16/fp8/fp4. Needs a
+   parametric float model with a *proven* rounder (Lean's native `Float` is opaque
+   to the kernel), the comparator's `ulp/rel/abs` modes, and per-format oracles.
+   Real Lean libraries now exist (FLoPS/P3109, Flean — both sorry-free & parametric;
+   FloatSpec/Flocq port — proofs still mostly `sorry`). Full plan + landscape +
+   TODOs in [`docs/float-formats.md`](float-formats.md). The end-to-end rounding
+   proof is the research endpoint; method-error bounds (trapezoidal `C·h²`) over ℝ
+   are tractable in Mathlib independently.
 6. **Support-lib proof kernel** (`UInt.*` lemmas) so the LLM C++/Go/Solidity
    candidates can carry proofs too, not just the Aeneas/Rust path.
 
