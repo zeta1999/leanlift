@@ -16,6 +16,25 @@ pub enum IntType {
 }
 
 impl IntType {
+    pub fn bits(self) -> u32 {
+        match self {
+            IntType::U8 => 8,
+            IntType::U16 => 16,
+            IntType::U32 => 32,
+            IntType::U64 => 64,
+        }
+    }
+
+    /// The Aeneas `Std.U*` type name (for the extracted-model runner/proof).
+    pub fn aeneas_name(self) -> &'static str {
+        match self {
+            IntType::U8 => "Std.U8",
+            IntType::U16 => "Std.U16",
+            IntType::U32 => "Std.U32",
+            IntType::U64 => "Std.U64",
+        }
+    }
+
     /// The C/C++ fixed-width type name used in the generated oracle runner.
     pub fn c_name(self) -> &'static str {
         match self {

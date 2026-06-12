@@ -23,6 +23,7 @@ pub struct Example {
 
 pub const NAMES: &[&str] = &[
     "streamed", "avg", "rust-streamed", "cpp-streamed", "cpp-dot2", "go-avg", "sol-dot2",
+    "rust-isqrt", "cpp-isqrt",
 ];
 
 fn lean_lib() -> PathBuf {
@@ -127,6 +128,32 @@ pub fn lookup(name: &str) -> Option<Example> {
             signature: u(IntType::U32, 4),
             profile: Profile::Dot2,
             gen: vectors::dot2_vectors,
+            frontend: Frontend::Llm { max_iters: 4 },
+            proof_frag: None,
+        }),
+        // First numerical kernel (a LOOP): integer square root over u32.
+        "rust-isqrt" => Some(Example {
+            name: "rust-isqrt",
+            lang: Lang::Cpp, // oracle = the C++ mirror
+            source: "examples/isqrt/isqrt.cpp".into(),
+            fn_name: "isqrt",
+            signature: u(IntType::U32, 1),
+            profile: Profile::Isqrt,
+            gen: vectors::isqrt_vectors,
+            frontend: Frontend::RustAeneas {
+                crate_dir: "examples/rust-kernels".into(),
+                entrypoint: "isqrt".into(),
+            },
+            proof_frag: None, // L3 loop proof is WIP (docs/PLAN-proofs.md)
+        }),
+        "cpp-isqrt" => Some(Example {
+            name: "cpp-isqrt",
+            lang: Lang::Cpp,
+            source: "examples/isqrt/isqrt.cpp".into(),
+            fn_name: "isqrt",
+            signature: u(IntType::U32, 1),
+            profile: Profile::Isqrt,
+            gen: vectors::isqrt_vectors,
             frontend: Frontend::Llm { max_iters: 4 },
             proof_frag: None,
         }),

@@ -1,5 +1,8 @@
 # Rust
-/target
+target/
+
+# Charon/Aeneas intermediate
+*.llbc
 
 # Lean build artifacts
 *.olean

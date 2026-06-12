@@ -68,6 +68,14 @@ pub fn print_human(cmp: &Comparison, v: &Verdict, fn_name: &str) {
     }
     println!();
 
+    // Empirical postcondition ("analysis") if the profile declares one.
+    if let (Some((held, total)), Some(desc)) =
+        (cmp.postcondition(), cmp.profile.postcondition_desc())
+    {
+        let mark = if held == total { "✔" } else { "✘" };
+        println!("  postcond: {held}/{total} hold  ({desc})  {mark}");
+    }
+
     if let Some(l) = cmp.lines.iter().find(|l| l.class == Class::DeclaredOverflow) {
         println!();
         println!("  divergence (declared, overflow class):");
