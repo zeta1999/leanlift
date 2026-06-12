@@ -23,7 +23,7 @@ pub struct Example {
 
 pub const NAMES: &[&str] = &[
     "streamed", "avg", "rust-streamed", "cpp-streamed", "cpp-dot2", "go-avg", "sol-dot2",
-    "rust-isqrt", "cpp-isqrt", "rust-bisect", "cpp-bisect",
+    "rust-isqrt", "cpp-isqrt", "rust-bisect", "cpp-bisect", "quant", "cpp-quant",
 ];
 
 fn lean_lib() -> PathBuf {
@@ -177,6 +177,34 @@ pub fn lookup(name: &str) -> Option<Example> {
             signature: u(IntType::U32, 2),
             profile: Profile::Bisect,
             gen: vectors::bisect_vectors,
+            frontend: Frontend::Llm { max_iters: 4 },
+            proof_frag: None,
+        }),
+        // Parametric float-cast rounding: ONE quantizer across fp8 → f64 (the
+        // format is the `prec` arg). Hand-written Lean model vs the C++ oracle;
+        // the rounding-error bound |q-n| ≤ ulp/2 is checked empirically (L1).
+        "quant" => Some(Example {
+            name: "quant",
+            lang: Lang::Cpp,
+            source: "examples/quant/quant.cpp".into(),
+            fn_name: "quantize_rne",
+            signature: Signature { args: vec![IntType::U8, IntType::U64], ret: IntType::U64 },
+            profile: Profile::Quant,
+            gen: vectors::quant_vectors,
+            frontend: Frontend::Prewritten {
+                runner: "examples/quant/Quant.lean".into(),
+                lean_path: lean_lib(),
+            },
+            proof_frag: None,
+        }),
+        "cpp-quant" => Some(Example {
+            name: "cpp-quant",
+            lang: Lang::Cpp,
+            source: "examples/quant/quant.cpp".into(),
+            fn_name: "quantize_rne",
+            signature: Signature { args: vec![IntType::U8, IntType::U64], ret: IntType::U64 },
+            profile: Profile::Quant,
+            gen: vectors::quant_vectors,
             frontend: Frontend::Llm { max_iters: 4 },
             proof_frag: None,
         }),

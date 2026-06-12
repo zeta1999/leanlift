@@ -73,6 +73,12 @@ namespace UInt
 
 end UInt
 
+/-- The 8-bit checked integer. -/
+abbrev U8 := UInt 8
+
+/-- The 16-bit checked integer. -/
+abbrev U16 := UInt 16
+
 /-- The 32-bit checked integer (used by the `avg` example). -/
 abbrev U32 := UInt 32
 

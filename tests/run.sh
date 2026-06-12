@@ -23,6 +23,12 @@ for ex in streamed avg; do
     bad "$ex did not verify"; cat "$TMP/$ex.out"
   fi
 done
+# quant: one parametric quantizer across fp8 → f64; rounding-error bound at L1
+if "$LIFT" verify quant --out "$TMP/quant.json" >"$TMP/quant.out" 2>&1; then
+  pass "quant (fp8→f64)  ($(grep -o 'L1 conformant/[0-9]*' "$TMP/quant.out"); $(grep -o 'postcond: [0-9]*/[0-9]* hold' "$TMP/quant.out"))"
+else
+  bad "quant did not verify"; cat "$TMP/quant.out"
+fi
 
 echo "== sound path: Rust → Aeneas extraction (if built) =="
 AENEAS="${LEANLIFT_AENEAS:-$HOME/work/_verif-tools/aeneas}"
@@ -56,7 +62,7 @@ echo "== LLM path: claude -p translates C++ (cached → free + deterministic) ==
 SOL=""
 command -v forge >/dev/null 2>&1 && SOL="sol-dot2"
 if command -v claude >/dev/null 2>&1; then
-  for ex in cpp-streamed cpp-dot2 go-avg cpp-isqrt cpp-bisect $SOL; do
+  for ex in cpp-streamed cpp-dot2 go-avg cpp-isqrt cpp-bisect cpp-quant $SOL; do
     if "$LIFT" verify "$ex" --out "$TMP/$ex.json" >"$TMP/$ex.out" 2>&1; then
       pass "$ex  ($(grep -o 'L1 conformant/[0-9]*' "$TMP/$ex.out"); $(grep -o 'settled after [0-9]* iter' "$TMP/$ex.out"))"
     else

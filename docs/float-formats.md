@@ -97,3 +97,28 @@ Takeaways:
 - [FLoPS: P3109 Floating-Point in Lean (arXiv 2602.15965)](https://arxiv.org/html/2602.15965)
 - [Flocq (the Coq original)](https://flocq.gitlabpages.inria.fr/)
 - [Lean Zulip — IEEE floats](https://leanprover-community.github.io/archive/stream/270676-lean4/topic/IEEE.20floats.html)
+
+## 6. Spike result (2026-06-13) — parametric quantizer, fp8 → f64
+
+First float example landed at **L1**, validating the parametric-config approach
+*before* any rounding-bound proof: `quantize_rne(prec, n)` — round `n` to `prec`
+mantissa bits, round-to-nearest-even. **One function; the format is the `prec`
+argument** (2=fp8-E5M2, 3=fp8-E4M3, 7=bf16, 10=fp16, **23=f32, 52=f64**).
+
+- `lift verify quant` — the hand-written Lean model is **bit-exact vs the C++
+  oracle on 894 vectors** spanning all six formats (small ints exact at high prec;
+  large ints exercise f32/f64 rounding — e.g. `52, 2⁵³+1 → 2⁵³`, the textbook
+  round-to-even).
+- The **rounding-error bound `|q−n| ≤ ulp/2` holds 894/894** (checked empirically
+  by `Profile::Quant`) — a real per-element error estimate at L1.
+- `lift verify cpp-quant` — the LLM (`claude -p`) translated it **conformantly,
+  staying inside the audited support-library API**: it synthesized the shifts and
+  `log2` from checked `*`/`/` + bounded loops (`1<<<s` → repeated `*2`,
+  `n>>>s` → `/2^s`, tie-to-even via quotient parity) rather than reaching for raw
+  `Nat` bit-ops. Encouraging for the eventual L3 path (proofs need the audited lib).
+
+Caveats (deliberately out of scope for this first test, tracked in §5): this is the
+*significand-rounding core* only — exponent/bias/**subnormal**/NaN/Inf encoding and
+saturation are not yet modeled, and the comparison is integer bit-exact (the
+`ulp/rel/abs`/NaN comparator modes are still unimplemented). The L3 rounding-bound
+*proof* still needs one of the libraries in §2.
