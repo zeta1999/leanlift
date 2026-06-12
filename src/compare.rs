@@ -20,6 +20,7 @@ pub enum Profile {
     Dot2,
     Isqrt,
     Bisect,
+    Quant,
 }
 
 impl Profile {
@@ -31,6 +32,7 @@ impl Profile {
             Profile::Dot2 => &["dot2"],
             Profile::Isqrt => &["isqrt"],
             Profile::Bisect => &["bisect"],
+            Profile::Quant => &["quant"],
         }
     }
 
@@ -49,6 +51,22 @@ impl Profile {
                 let (n, eps, lo) = (args[0] as u128, args[1] as u128, result as u128);
                 Some(lo * lo <= n && n < (lo + eps + 1) * (lo + eps + 1))
             }
+            // q is representable at `prec` bits and within ulp/2 of n (the RNE
+            // rounding-error bound — a real error estimate, checked empirically).
+            Profile::Quant => {
+                let (prec, n, q) = (args[0], args[1], result);
+                if n == 0 {
+                    return Some(q == 0);
+                }
+                let e = n.ilog2() as u64;
+                if e <= prec {
+                    return Some(q == n); // exact
+                }
+                let step = 1u128 << (e - prec);
+                let repr = (q as u128) % step == 0;
+                let err = (q as i128 - n as i128).unsigned_abs() <= step / 2;
+                Some(repr && err)
+            }
             _ => None,
         }
     }
@@ -58,6 +76,7 @@ impl Profile {
         match self {
             Profile::Isqrt => Some("r·r ≤ n < (r+1)²"),
             Profile::Bisect => Some("lo·lo ≤ n < (lo+eps+1)²"),
+            Profile::Quant => Some("q representable, |q−n| ≤ ulp/2"),
             _ => None,
         }
     }
@@ -79,6 +98,7 @@ impl Profile {
             Profile::Dot2 => "dot2",
             Profile::Isqrt => "isqrt",
             Profile::Bisect => "bisect",
+            Profile::Quant => "quant",
         }
     }
 
@@ -97,7 +117,8 @@ impl Profile {
             Profile::Dot2 => {
                 a[0] as u128 * a[1] as u128 + a[2] as u128 * a[3] as u128 >= (1u128 << 32)
             }
-            Profile::Isqrt | Profile::Bisect => false, // bounded: no overflow class
+            // bounded / deterministic: no overflow-divergence class
+            Profile::Isqrt | Profile::Bisect | Profile::Quant => false,
         }
     }
 }

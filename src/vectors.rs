@@ -208,3 +208,23 @@ pub fn bisect_vectors() -> Vec<Vector> {
     }
     v
 }
+
+/// `quantize_rne(prec, n)` — one quantizer across the float formats. `prec`
+/// selects fp8-E5M2 (2), fp8-E4M3 (3), bf16 (7), fp16 (10), f32 (23), f64 (52).
+/// Inputs span small ints (exact at high prec) and large ints `≥ 2^prec` (so each
+/// format's rounding actually fires — incl. f32/f64 on wide values).
+pub fn quant_vectors() -> Vec<Vector> {
+    let mut v = Vec::new();
+    let mut rng = SplitMix64(SEED);
+    for &prec in &[2u64, 3, 7, 10, 23, 52] {
+        for n in 0u64..=48 {
+            v.push(Vector::new(vec![prec, n]));
+        }
+        // n in [2^prec, 2^62): more than `prec` significant bits ⇒ rounding fires
+        let lo = 1u64 << prec;
+        for _ in 0..100 {
+            v.push(Vector::new(vec![prec, rng.range(lo, (1u64 << 62) - 1)]));
+        }
+    }
+    v
+}
