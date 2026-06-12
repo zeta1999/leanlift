@@ -166,3 +166,24 @@ pub fn dot2_vectors() -> Vec<Vector> {
     }
     v
 }
+
+/// `isqrt(n)` over u32 — edges around perfect squares + random. No overflow
+/// class; the interesting property is the postcondition r*r ≤ n < (r+1)².
+pub fn isqrt_vectors() -> Vec<Vector> {
+    const U32MAX: u64 = u32::MAX as u64;
+    let mut v = Vec::new();
+    // 1. edges: small ints, perfect squares and their neighbours, the max
+    for n in [
+        0, 1, 2, 3, 4, 5, 8, 9, 10, 15, 16, 17, 24, 25, 26, 35, 36, 99, 100, 101,
+        65535, 65536, 1_000_000, 4_294_836_224, 4_294_836_225, // 65535^2
+        4_294_967_295, // u32::MAX
+    ] {
+        v.push(Vector::new(vec![n]));
+    }
+    let mut rng = SplitMix64(SEED);
+    // 2. random across the whole u32 range
+    for _ in 0..200 {
+        v.push(Vector::new(vec![rng.range(0, U32MAX)]));
+    }
+    v
+}

@@ -18,6 +18,7 @@ pub enum Profile {
     Streamed,
     Avg,
     Dot2,
+    Isqrt,
 }
 
 impl Profile {
@@ -27,6 +28,29 @@ impl Profile {
             Profile::Streamed => &["clamp-low (t<=start)", "clamp-high (t>=stop)", "ramp"],
             Profile::Avg => &["avg"],
             Profile::Dot2 => &["dot2"],
+            Profile::Isqrt => &["isqrt"],
+        }
+    }
+
+    /// A per-result postcondition to check empirically (L1 "analysis"): given
+    /// the inputs and the (agreed) result, does the spec hold? `None` = no
+    /// postcondition declared for this profile.
+    pub fn postcondition(self, args: &[u64], result: u64) -> Option<bool> {
+        match self {
+            // r*r ≤ n < (r+1)*(r+1), in wide arithmetic.
+            Profile::Isqrt => {
+                let (n, r) = (args[0] as u128, result as u128);
+                Some(r * r <= n && n < (r + 1) * (r + 1))
+            }
+            _ => None,
+        }
+    }
+
+    /// Human description of the postcondition (for the report).
+    pub fn postcondition_desc(self) -> Option<&'static str> {
+        match self {
+            Profile::Isqrt => Some("r·r ≤ n < (r+1)²"),
+            _ => None,
         }
     }
 
@@ -45,6 +69,7 @@ impl Profile {
             }
             Profile::Avg => "avg",
             Profile::Dot2 => "dot2",
+            Profile::Isqrt => "isqrt",
         }
     }
 
@@ -63,6 +88,7 @@ impl Profile {
             Profile::Dot2 => {
                 a[0] as u128 * a[1] as u128 + a[2] as u128 * a[3] as u128 >= (1u128 << 32)
             }
+            Profile::Isqrt => false, // bounded algorithm: no overflow class
         }
     }
 }
@@ -109,6 +135,25 @@ impl Comparison {
             *m.entry(l.branch).or_insert(0) += 1;
         }
         m
+    }
+
+    /// Empirically check the profile's postcondition on every result. Returns
+    /// `(held, total)`, or `None` if the profile declares no postcondition.
+    pub fn postcondition(&self) -> Option<(usize, usize)> {
+        self.profile.postcondition_desc()?;
+        let mut held = 0;
+        let mut total = 0;
+        for l in &self.lines {
+            if let Ok(r) = l.cpp.parse::<u64>() {
+                if let Some(ok) = self.profile.postcondition(&l.vector.args, r) {
+                    total += 1;
+                    if ok {
+                        held += 1;
+                    }
+                }
+            }
+        }
+        Some((held, total))
     }
 }
 
