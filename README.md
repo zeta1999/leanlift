@@ -71,6 +71,7 @@ LLM front-end writes to). Run `tests/run.sh` for the positive + negative suite.
 | `src/leanrt.rs` | run the candidate (support-lib `lean --run`, or Aeneas `lake env lean`) |
 | `src/compare.rs` | bit-exact comparator + profile-driven divergence classifier |
 | `src/report.rs` | L0/L1 verdict, human report, `report.json` |
+| `src/prove.rs` | L3 path: assemble model + theorems, certify sorry-free, recipe |
 | `src/examples.rs` | built-in example registry |
 | `src/main.rs` | the `lift` CLI |
 | `scripts/build_aeneas.sh` | build Charon+Aeneas from source (the sound Rust path) |
@@ -86,14 +87,33 @@ cargo build --release
 
 The engine compiles the Lean support library to `.olean` on first run.
 
-## Next: from conformance to proof
+## Proof: L3 (`lift prove`)
 
-L0/L1 (testing) is done across all four languages. The next arc — **L2/L3**
-(prove a property on the extracted Lean), then a **numerical algorithm** where
-proof of correctness is the point — is planned in
-[`docs/PLAN-proofs.md`](docs/PLAN-proofs.md). First milestone there:
-`lift prove rust-streamed` closing `streamed_mono`/`streamed_bounded` (the spike's
-theorems) for an L3 certificate; first numerical kernels: `isqrt` then bisection.
+Beyond L1 conformance, `lift prove` discharges a theorem on the extracted model:
 
-Also pending: signed/float types, structs/arrays, annotation ingestion →
-Contract IR (SPEC §7).
+```
+lift prove rust-streamed
+  → level: L3 proved  (Lean theorems closed, sorry-free)
+    obligations: streamed_low, streamed_high, streamed_bounded, streamed_mono
+    axioms: propext, Classical.choice, Quot.sound   # no sorryAx → kernel-checked
+```
+
+It runs Charon+Aeneas to extract the `Result Std.U64` model, prepends it to a
+proven theorem fragment (`examples/streamed/StreamedProofs.lean`), elaborates via
+`lake env lean`, and certifies the result is **sorry-free** (`#print axioms`
+shows no `sorryAx`). It emits a worked `*.recipe.md` (source → model → obligations
+→ certificate) and a `proof.json`. A false theorem fails to elaborate and exits
+nonzero — the Lean kernel is the gate (the agent-assisted *closing* of harder
+goals is the generalization).
+
+`streamed_bounded` is proved **under** the no-overflow hypothesis
+`deposit*(t-start) ≤ U64.max` — the exact side-condition the differential test
+discovered empirically. Same boundary, now a proof premise.
+
+## Next
+
+The proof procedure and the path toward a numerical algorithm (isqrt → bisection
+→ float error-bounds) are planned in
+[`docs/PLAN-proofs.md`](docs/PLAN-proofs.md). Also pending: a proof kernel for the
+support library (so LLM/hand candidates carry proofs too), signed/float types,
+structs/arrays, annotation ingestion → Contract IR (SPEC §7).

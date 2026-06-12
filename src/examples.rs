@@ -18,6 +18,7 @@ pub struct Example {
     pub profile: Profile,
     pub gen: fn() -> Vec<Vector>,
     pub frontend: Frontend, // how the candidate Lean is produced
+    pub proof_frag: Option<PathBuf>, // L3 theorem fragment (Aeneas examples)
 }
 
 pub const NAMES: &[&str] = &[
@@ -50,6 +51,7 @@ pub fn lookup(name: &str) -> Option<Example> {
                 runner: "examples/streamed/Streamed.lean".into(),
                 lean_path: lean_lib(),
             },
+            proof_frag: None,
         }),
         "avg" => Some(Example {
             name: "avg",
@@ -63,6 +65,7 @@ pub fn lookup(name: &str) -> Option<Example> {
                 runner: "examples/avg/Avg.lean".into(),
                 lean_path: lean_lib(),
             },
+            proof_frag: None,
         }),
         // Sound path: candidate Lean EXTRACTED from Rust by Charon+Aeneas,
         // validated against the C++ reference oracle.
@@ -78,6 +81,7 @@ pub fn lookup(name: &str) -> Option<Example> {
                 crate_dir: home().join("work/propaganda/tutor-tech/rust-day39-iterator-vesting"),
                 entrypoint: "streamed".into(),
             },
+            proof_frag: Some("examples/streamed/StreamedProofs.lean".into()),
         }),
         // LLM path, C++.
         "cpp-streamed" => Some(Example {
@@ -89,6 +93,7 @@ pub fn lookup(name: &str) -> Option<Example> {
             profile: Profile::Streamed,
             gen: vectors::streamed_vectors,
             frontend: Frontend::Llm { max_iters: 4 },
+            proof_frag: None,
         }),
         "cpp-dot2" => Some(Example {
             name: "cpp-dot2",
@@ -99,6 +104,7 @@ pub fn lookup(name: &str) -> Option<Example> {
             profile: Profile::Dot2,
             gen: vectors::dot2_vectors,
             frontend: Frontend::Llm { max_iters: 4 },
+            proof_frag: None,
         }),
         // LLM path, Go — avg again, but Go also wraps on overflow.
         "go-avg" => Some(Example {
@@ -110,6 +116,7 @@ pub fn lookup(name: &str) -> Option<Example> {
             profile: Profile::Avg,
             gen: vectors::avg_vectors,
             frontend: Frontend::Llm { max_iters: 4 },
+            proof_frag: None,
         }),
         // LLM path, Solidity — dot2 in an `unchecked` block (so it wraps).
         "sol-dot2" => Some(Example {
@@ -121,6 +128,7 @@ pub fn lookup(name: &str) -> Option<Example> {
             profile: Profile::Dot2,
             gen: vectors::dot2_vectors,
             frontend: Frontend::Llm { max_iters: 4 },
+            proof_frag: None,
         }),
         _ => None,
     }

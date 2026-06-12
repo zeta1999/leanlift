@@ -8,6 +8,8 @@
 
 # Engine output
 /report.json
+/proof.json
+/*.recipe.md
 
 # LLM response cache (content-addressed claude -p results)
 /.leanlift-cache
