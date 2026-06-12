@@ -1,0 +1,16 @@
+[package]
+name = "leanlift"
+version = "0.1.0"
+edition = "2021"
+description = "Lift a function into a Lean 4 model and prove it equivalent by bit-exact differential execution."
+
+[[bin]]
+name = "lift"
+path = "src/main.rs"
+
+[profile.release]
+opt-level = 2
+
+# Intentionally dependency-free for the M0 slice: the dlopen oracle uses raw
+# libdl FFI (linked from the system loader), report.json is hand-serialized,
+# and vector generation uses a fixed-seed PRNG. Keeps the build offline-safe.
