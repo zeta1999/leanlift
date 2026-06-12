@@ -187,3 +187,24 @@ pub fn isqrt_vectors() -> Vec<Vector> {
     }
     v
 }
+
+/// `bisect_sqrt(n, eps)` over u32 — n across the range × a spread of tolerances
+/// (eps=0 is exact isqrt; large eps exits the loop early).
+pub fn bisect_vectors() -> Vec<Vector> {
+    const U32MAX: u64 = u32::MAX as u64;
+    let mut v = Vec::new();
+    let epss = [0u64, 1, 2, 3, 5, 10, 100, 1000, 65535, 100_000];
+    // edges: perfect squares and neighbours, paired with each eps
+    for n in [0u64, 1, 3, 4, 24, 25, 100, 65535, 4_294_836_225, U32MAX] {
+        for &e in &epss {
+            v.push(Vector::new(vec![n, e]));
+        }
+    }
+    let mut rng = SplitMix64(SEED);
+    for _ in 0..200 {
+        let n = rng.range(0, U32MAX);
+        let e = epss[(rng.range(0, epss.len() as u64 - 1)) as usize];
+        v.push(Vector::new(vec![n, e]));
+    }
+    v
+}

@@ -23,7 +23,7 @@ pub struct Example {
 
 pub const NAMES: &[&str] = &[
     "streamed", "avg", "rust-streamed", "cpp-streamed", "cpp-dot2", "go-avg", "sol-dot2",
-    "rust-isqrt", "cpp-isqrt",
+    "rust-isqrt", "cpp-isqrt", "rust-bisect", "cpp-bisect",
 ];
 
 fn lean_lib() -> PathBuf {
@@ -151,6 +151,32 @@ pub fn lookup(name: &str) -> Option<Example> {
             signature: u(IntType::U32, 1),
             profile: Profile::Isqrt,
             gen: vectors::isqrt_vectors,
+            frontend: Frontend::Llm { max_iters: 4 },
+            proof_frag: None,
+        }),
+        // First numerical METHOD: bisection with ε-termination.
+        "rust-bisect" => Some(Example {
+            name: "rust-bisect",
+            lang: Lang::Cpp,
+            source: "examples/bisect/bisect.cpp".into(),
+            fn_name: "bisect_sqrt",
+            signature: u(IntType::U32, 2),
+            profile: Profile::Bisect,
+            gen: vectors::bisect_vectors,
+            frontend: Frontend::RustAeneas {
+                crate_dir: "examples/rust-kernels".into(),
+                entrypoint: "bisect_sqrt".into(),
+            },
+            proof_frag: Some("examples/bisect/BisectProofs.lean".into()),
+        }),
+        "cpp-bisect" => Some(Example {
+            name: "cpp-bisect",
+            lang: Lang::Cpp,
+            source: "examples/bisect/bisect.cpp".into(),
+            fn_name: "bisect_sqrt",
+            signature: u(IntType::U32, 2),
+            profile: Profile::Bisect,
+            gen: vectors::bisect_vectors,
             frontend: Frontend::Llm { max_iters: 4 },
             proof_frag: None,
         }),

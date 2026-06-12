@@ -19,6 +19,7 @@ pub enum Profile {
     Avg,
     Dot2,
     Isqrt,
+    Bisect,
 }
 
 impl Profile {
@@ -29,6 +30,7 @@ impl Profile {
             Profile::Avg => &["avg"],
             Profile::Dot2 => &["dot2"],
             Profile::Isqrt => &["isqrt"],
+            Profile::Bisect => &["bisect"],
         }
     }
 
@@ -42,6 +44,11 @@ impl Profile {
                 let (n, r) = (args[0] as u128, result as u128);
                 Some(r * r <= n && n < (r + 1) * (r + 1))
             }
+            // lo*lo ≤ n < (lo + eps + 1)²  (the ε-bracket guarantee)
+            Profile::Bisect => {
+                let (n, eps, lo) = (args[0] as u128, args[1] as u128, result as u128);
+                Some(lo * lo <= n && n < (lo + eps + 1) * (lo + eps + 1))
+            }
             _ => None,
         }
     }
@@ -50,6 +57,7 @@ impl Profile {
     pub fn postcondition_desc(self) -> Option<&'static str> {
         match self {
             Profile::Isqrt => Some("r·r ≤ n < (r+1)²"),
+            Profile::Bisect => Some("lo·lo ≤ n < (lo+eps+1)²"),
             _ => None,
         }
     }
@@ -70,6 +78,7 @@ impl Profile {
             Profile::Avg => "avg",
             Profile::Dot2 => "dot2",
             Profile::Isqrt => "isqrt",
+            Profile::Bisect => "bisect",
         }
     }
 
@@ -88,7 +97,7 @@ impl Profile {
             Profile::Dot2 => {
                 a[0] as u128 * a[1] as u128 + a[2] as u128 * a[3] as u128 >= (1u128 << 32)
             }
-            Profile::Isqrt => false, // bounded algorithm: no overflow class
+            Profile::Isqrt | Profile::Bisect => false, // bounded: no overflow class
         }
     }
 }

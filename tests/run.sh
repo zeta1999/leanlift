@@ -32,13 +32,15 @@ if [ -x "$AENEAS/bin/aeneas" ]; then
   else
     bad "rust-streamed did not verify"; tail -20 "$TMP/rust.out"
   fi
-  if "$LIFT" verify rust-isqrt --out "$TMP/isqrt.json" >"$TMP/isqrt.out" 2>&1; then
-    pass "rust-isqrt (loop)  ($(grep -o 'L1 conformant/[0-9]*' "$TMP/isqrt.out"); $(grep -o 'postcond: [0-9]*/[0-9]* hold' "$TMP/isqrt.out"))"
-  else
-    bad "rust-isqrt did not verify"; tail -20 "$TMP/isqrt.out"
-  fi
-  echo "== L3 proof: prove rust-streamed =="
-  for pe in rust-streamed rust-isqrt; do
+  for le in rust-isqrt rust-bisect; do
+    if "$LIFT" verify "$le" --out "$TMP/$le.json" >"$TMP/$le.out" 2>&1; then
+      pass "$le (loop)  ($(grep -o 'L1 conformant/[0-9]*' "$TMP/$le.out"); $(grep -o 'postcond: [0-9]*/[0-9]* hold' "$TMP/$le.out"))"
+    else
+      bad "$le did not verify"; tail -20 "$TMP/$le.out"
+    fi
+  done
+  echo "== L3 proofs =="
+  for pe in rust-streamed rust-isqrt rust-bisect; do
     if "$LIFT" prove "$pe" --out "$TMP/proof_$pe.json" >"$TMP/prove_$pe.out" 2>&1; then
       n=$(grep -c '✓' "$TMP/prove_$pe.out")
       pass "prove $pe  ($(grep -o 'L3 proved' "$TMP/prove_$pe.out"), $n obligations, sorry-free)"
@@ -54,7 +56,7 @@ echo "== LLM path: claude -p translates C++ (cached → free + deterministic) ==
 SOL=""
 command -v forge >/dev/null 2>&1 && SOL="sol-dot2"
 if command -v claude >/dev/null 2>&1; then
-  for ex in cpp-streamed cpp-dot2 go-avg cpp-isqrt $SOL; do
+  for ex in cpp-streamed cpp-dot2 go-avg cpp-isqrt cpp-bisect $SOL; do
     if "$LIFT" verify "$ex" --out "$TMP/$ex.json" >"$TMP/$ex.out" 2>&1; then
       pass "$ex  ($(grep -o 'L1 conformant/[0-9]*' "$TMP/$ex.out"); $(grep -o 'settled after [0-9]* iter' "$TMP/$ex.out"))"
     else

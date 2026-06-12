@@ -19,6 +19,8 @@ lift verify cpp-streamed   # C++    LLM: claude -p translates streamed.cpp → L
 lift verify cpp-dot2       # C++    LLM: a fresh kernel (a*b + c*d), no reference
 lift verify go-avg         # Go     LLM: Go oracle (go build), Go also wraps
 lift verify sol-dot2       # Solidity LLM: EVM oracle (forge), unchecked overflow
+lift verify rust-isqrt     # Rust   LOOP kernel: isqrt; postcond checked at L1
+lift verify rust-bisect    # Rust   bisection METHOD (ε-termination); + cpp-* via LLM
 ```
 
 Oracle per language (SPEC §6): **C++** `clang++` + typed runner; **Go**
@@ -93,7 +95,8 @@ Beyond L1 conformance, `lift prove` discharges a theorem on the extracted model:
 
 ```
 lift prove rust-streamed   # streamed_low/high/bounded/mono
-lift prove rust-isqrt       # isqrt_correct: r·r ≤ n < (r+1)² over the extracted LOOP
+lift prove rust-isqrt       # isqrt_correct:  r·r ≤ n < (r+1)²            (a LOOP)
+lift prove rust-bisect      # bisect_correct: lo² ≤ n < (lo+eps+1)²  (bisection METHOD)
   → level: L3 proved  (Lean theorems closed, sorry-free)
     axioms: propext, Classical.choice, Quot.sound   # no sorryAx → kernel-checked
 ```
