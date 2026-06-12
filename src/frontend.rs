@@ -58,6 +58,25 @@ fn extract_rust(
     sig: &Signature,
     work_dir: &Path,
 ) -> Result<Candidate, String> {
+    let def = extract_rust_def(crate_dir, entrypoint, work_dir)?;
+    let runner = work_dir.join("RustRunner.lean");
+    std::fs::write(&runner, rust_runner(&def, entrypoint, sig))
+        .map_err(|e| format!("cannot write runner: {e}"))?;
+    Ok(Candidate { runner, env: LeanEnv::Aeneas { aeneas_dir: aeneas_dir() } })
+}
+
+/// The Aeneas install dir (exposed so the prove path can run `lake env lean`).
+pub fn aeneas_install() -> PathBuf {
+    aeneas_dir()
+}
+
+/// Run Charon+Aeneas and return the extracted entrypoint `def` as Lean text.
+/// Shared by the candidate runner (L1) and the proof assembler (L3).
+pub fn extract_rust_def(
+    crate_dir: &Path,
+    entrypoint: &str,
+    work_dir: &Path,
+) -> Result<String, String> {
     let aeneas = aeneas_dir();
     let charon = aeneas.join("charon/bin/charon");
     let aeneas_bin = aeneas.join("bin/aeneas");
@@ -106,13 +125,9 @@ fn extract_rust(
     let def = slice_def(&text, entrypoint).ok_or_else(|| {
         format!("entrypoint `{entrypoint}` not found in extracted {}", module.display())
     })?;
-    eprintln!("  front-end: extracted `{entrypoint}` ({} lines) → runner", def.lines().count());
-
-    // 4. Wrap it in a runner and hand back an Aeneas-environment candidate.
-    let runner = work_dir.join("RustRunner.lean");
-    std::fs::write(&runner, rust_runner(&def, entrypoint, sig))
-        .map_err(|e| format!("cannot write runner: {e}"))?;
-    Ok(Candidate { runner, env: LeanEnv::Aeneas { aeneas_dir: aeneas } })
+    eprintln!("  front-end: extracted `{entrypoint}` ({} lines)", def.lines().count());
+    let _ = aeneas_bin; // (kept above only to validate the install exists)
+    Ok(def)
 }
 
 /// Write a tool's captured stdout+stderr to `<work>/<name>.log`.

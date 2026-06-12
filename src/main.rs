@@ -19,6 +19,7 @@ mod lang;
 mod leanrt;
 mod oracle;
 mod oracle_sol;
+mod prove;
 mod report;
 mod sig;
 mod vectors;
@@ -35,23 +36,18 @@ struct Args {
 
 fn usage() -> ! {
     eprintln!(
-        "usage: lift verify <example> [--lean <candidate.lean>] \\\n\
-        \x20            [--lean-path <dir>] [--out <report.json>]\n\n\
-        \x20 verify a source function against a Lean candidate by bit-exact\n\
-        \x20 differential execution (M0 slice). --lean overrides the example's\n\
-        \x20 built-in candidate (the hook the LLM front-end writes to).\n\n\
+        "usage:\n\
+        \x20 lift verify <example> [--lean <candidate.lean>] [--lean-path <dir>] [--out <report.json>]\n\
+        \x20     bit-exact differential validation (L1). --lean overrides the example's candidate.\n\
+        \x20 lift prove  <example> [--out <proof.json>]\n\
+        \x20     discharge the example's proof obligation on the extracted model (L3, Aeneas only).\n\n\
         \x20 examples: {}\n",
         examples::NAMES.join(", ")
     );
     exit(2);
 }
 
-fn parse_args() -> Args {
-    let mut a: Vec<String> = std::env::args().skip(1).collect();
-    if a.first().map(String::as_str) != Some("verify") {
-        usage();
-    }
-    a.remove(0);
+fn parse_verify_args(a: Vec<String>) -> Args {
 
     let mut example: Option<String> = None;
     let mut lean_path = PathBuf::from("lean");
@@ -125,7 +121,132 @@ fn ensure_support_lib(lean_path: &Path) -> Result<(), String> {
 }
 
 fn main() {
-    let args = parse_args();
+    let mut argv: Vec<String> = std::env::args().skip(1).collect();
+    match argv.first().map(String::as_str) {
+        Some("verify") => {
+            argv.remove(0);
+            verify_cmd(parse_verify_args(argv));
+        }
+        Some("prove") => {
+            argv.remove(0);
+            prove_cmd(argv);
+        }
+        _ => usage(),
+    }
+}
+
+/// `lift prove <example>` — extract the model and discharge its proof obligation.
+fn prove_cmd(a: Vec<String>) {
+    let mut example: Option<String> = None;
+    let mut out = PathBuf::from("proof.json");
+    let mut i = 0;
+    while i < a.len() {
+        match a[i].as_str() {
+            "--out" => out = PathBuf::from(take(&a, &mut i)),
+            s if s.starts_with("--") => {
+                eprintln!("unknown flag: {s}");
+                usage();
+            }
+            _ => {
+                if example.is_some() {
+                    usage();
+                }
+                example = Some(a[i].clone());
+            }
+        }
+        i += 1;
+    }
+    let name = example.unwrap_or_else(|| usage());
+    let ex = examples::lookup(&name).unwrap_or_else(|| {
+        eprintln!("unknown example `{name}` (have: {})", examples::NAMES.join(", "));
+        exit(2);
+    });
+    let frag = ex.proof_frag.clone().unwrap_or_else(|| {
+        eprintln!("no proof obligation defined for `{}`", ex.name);
+        exit(2);
+    });
+    let (crate_dir, entrypoint) = match &ex.frontend {
+        frontend::Frontend::RustAeneas { crate_dir, entrypoint } => {
+            (crate_dir.clone(), entrypoint.clone())
+        }
+        _ => {
+            eprintln!("`lift prove` currently supports Aeneas-extracted (Rust) examples only");
+            exit(2);
+        }
+    };
+
+    let work = std::env::temp_dir().join("leanlift-work");
+    let _ = std::fs::create_dir_all(&work);
+    eprintln!("  proving `{}` (L3) — extract model, discharge obligations", ex.name);
+
+    let def = match frontend::extract_rust_def(&crate_dir, &entrypoint, &work) {
+        Ok(d) => d,
+        Err(e) => {
+            eprintln!("error extracting model: {e}");
+            exit(1);
+        }
+    };
+    let rep = match prove::prove_aeneas(&def, &frag, &frontend::aeneas_install(), &work) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("\n  level: L1 (proof did NOT close):\n{e}");
+            exit(1);
+        }
+    };
+
+    println!();
+    println!("  leanlift certificate — fn `{}`", ex.fn_name);
+    println!("  ────────────────────────────────────────────────");
+    if rep.sorry_free {
+        println!("  level: L3 proved  (Lean theorems closed, sorry-free)");
+    } else {
+        println!("  level: L2  —  proof present but NOT sorry-free");
+    }
+    println!();
+    println!("  obligations ({}):", rep.theorems.len());
+    for t in &rep.theorems {
+        println!("    ✓ {t}");
+    }
+    println!("  axioms  : {}", rep.axioms.join(", "));
+    println!("  sorry-free: {}", rep.sorry_free);
+
+    let lib = std::fs::read_to_string(crate_dir.join("src/lib.rs")).unwrap_or_default();
+    let crate_src = slice_rust_fn(&lib, &entrypoint).unwrap_or(lib);
+    let recipe = PathBuf::from(format!("{}.recipe.md", ex.name));
+    if prove::write_recipe(&recipe, ex.name, &crate_src, &def, &rep).is_ok() {
+        eprintln!("  recipe  -> {}", recipe.display());
+    }
+    let _ = std::fs::write(
+        &out,
+        format!(
+            "{{\n  \"fn\": \"{}\",\n  \"level\": \"{}\",\n  \"sorry_free\": {},\n  \"theorems\": [{}],\n  \"axioms\": [{}]\n}}\n",
+            ex.fn_name,
+            if rep.sorry_free { "L3_proved" } else { "L2_unverified" },
+            rep.sorry_free,
+            rep.theorems.iter().map(|t| format!("\"{t}\"")).collect::<Vec<_>>().join(", "),
+            rep.axioms.iter().map(|x| format!("\"{x}\"")).collect::<Vec<_>>().join(", "),
+        ),
+    );
+    eprintln!("  proof.json -> {}", out.display());
+    exit(if rep.sorry_free { 0 } else { 1 });
+}
+
+/// Slice `fn <name>( … )` from Rust source: from the signature line down to the
+/// first column-0 `}` (for the recipe — avoids dumping the whole file).
+fn slice_rust_fn(src: &str, name: &str) -> Option<String> {
+    let lines: Vec<&str> = src.lines().collect();
+    let start = lines.iter().position(|l| l.contains(&format!("fn {name}(")))?;
+    let mut end = lines.len();
+    for (i, l) in lines.iter().enumerate().skip(start) {
+        if i > start && l.starts_with('}') {
+            end = i + 1;
+            break;
+        }
+    }
+    Some(lines[start..end].join("\n"))
+}
+
+fn verify_cmd(args: Args) {
     let ex = examples::lookup(&args.example).unwrap_or_else(|| {
         eprintln!("unknown example `{}` (have: {})", args.example, examples::NAMES.join(", "));
         exit(2);

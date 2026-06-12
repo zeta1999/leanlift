@@ -32,8 +32,15 @@ if [ -x "$AENEAS/bin/aeneas" ]; then
   else
     bad "rust-streamed did not verify"; tail -20 "$TMP/rust.out"
   fi
+  echo "== L3 proof: prove rust-streamed =="
+  if "$LIFT" prove rust-streamed --out "$TMP/proof.json" >"$TMP/prove.out" 2>&1; then
+    n=$(grep -c '✓' "$TMP/prove.out")
+    pass "prove rust-streamed  ($(grep -o 'L3 proved' "$TMP/prove.out"), $n obligations, sorry-free)"
+  else
+    bad "prove rust-streamed did not certify L3"; tail -15 "$TMP/prove.out"
+  fi
 else
-  printf '  \033[33mSKIP\033[0m  rust-streamed (aeneas not built — scripts/build_aeneas.sh)\n'
+  printf '  \033[33mSKIP\033[0m  rust-streamed + prove (aeneas not built — scripts/build_aeneas.sh)\n'
 fi
 
 echo "== LLM path: claude -p translates C++ (cached → free + deterministic) =="
