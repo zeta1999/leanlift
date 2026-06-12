@@ -30,9 +30,6 @@ fn lean_lib() -> PathBuf {
     PathBuf::from("lean")
 }
 
-fn home() -> PathBuf {
-    PathBuf::from(std::env::var("HOME").unwrap_or_default())
-}
 
 fn u(width: IntType, n: usize) -> Signature {
     Signature { args: vec![width; n], ret: width }
@@ -79,7 +76,7 @@ pub fn lookup(name: &str) -> Option<Example> {
             profile: Profile::Streamed,
             gen: vectors::streamed_vectors,
             frontend: Frontend::RustAeneas {
-                crate_dir: home().join("work/propaganda/tutor-tech/rust-day39-iterator-vesting"),
+                crate_dir: "examples/rust-kernels".into(),
                 entrypoint: "streamed".into(),
             },
             proof_frag: Some("examples/streamed/StreamedProofs.lean".into()),
@@ -144,7 +141,7 @@ pub fn lookup(name: &str) -> Option<Example> {
                 crate_dir: "examples/rust-kernels".into(),
                 entrypoint: "isqrt".into(),
             },
-            proof_frag: None, // L3 loop proof is WIP (docs/PLAN-proofs.md)
+            proof_frag: Some("examples/isqrt/IsqrtProofs.lean".into()),
         }),
         "cpp-isqrt" => Some(Example {
             name: "cpp-isqrt",

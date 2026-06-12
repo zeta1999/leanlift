@@ -172,16 +172,19 @@ kernels never did. Do `isqrt` first (single postcondition, simpler loop), then
 
 ## Part III — Ordered next steps
 
-1. **L3 on existing code.** `lift prove rust-streamed` → close `streamed_mono` +
-   `streamed_bounded` (Aeneas + `scalar_tac`), emit L3 cert + `streamed.recipe.md`.
-   *Proves the procedure on code we already have.* (Part I.4)
-2. **Proof kernel for the support lib.** Audited lemmas about `UInt.*` so
-   support-lib candidates (LLM/hand) can carry proofs too; close a property on
-   `avg`/`dot2` (e.g. `avg a b ≤ max a b` under no-overflow).
-3. **`isqrt` example** (C++ + Rust) → extract → prove `r·r ≤ n < (r+1)²`. First
-   numerical postcondition; first loop. Document the recipe.
+1. ~~**L3 on existing code.** `lift prove rust-streamed` → `streamed_low/high/
+   bounded/mono`.~~ ✅ **done** — L3 cert + `rust-streamed.recipe.md`.
+2. ~~**`isqrt` → prove `r·r ≤ n < (r+1)²`.** First numerical postcondition, first
+   LOOP.~~ ✅ **done** — `lift prove rust-isqrt` closes `isqrt_correct` over the
+   Aeneas-extracted `loop` via `loop.spec_decr_nat` (measure `hi-lo`, invariant
+   `lo²≤n ∧ n<(hi+1)² ∧ lo≤hi ∧ hi≤65535`), sorry-free. Developed through the
+   propose→kernel→repair loop (a one-shot `claude -p` timed out — iteration is the
+   point). The empirical postcondition (226/226) is checked at L1.
+3. **Proof kernel for the support lib.** Audited lemmas about `UInt.*` so
+   support-lib candidates (LLM/hand, i.e. C++/Go/Solidity) can carry proofs too —
+   not just the Aeneas/Rust path. Close a property on `avg`/`dot2`.
 4. **`bisection` example** (integer/fixed-point) → prove bracketing invariant +
-   termination + ε-guarantee. First real numerical method.
+   termination + ε-guarantee. First real numerical *method* (isqrt is a kernel).
 5. **Float-tolerance comparator + trapezoidal rule** with an error-bound theorem
    (Mathlib). Research milestone — where numerical analysis proof is fundamental.
 
