@@ -1,0 +1,13 @@
+# Rust
+/target
+
+# Lean build artifacts
+*.olean
+*.ilean
+/lean/.lake
+
+# Engine output
+/report.json
+
+# LLM response cache (content-addressed claude -p results)
+/.leanlift-cache
