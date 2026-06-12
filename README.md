@@ -92,11 +92,17 @@ The engine compiles the Lean support library to `.olean` on first run.
 Beyond L1 conformance, `lift prove` discharges a theorem on the extracted model:
 
 ```
-lift prove rust-streamed
+lift prove rust-streamed   # streamed_low/high/bounded/mono
+lift prove rust-isqrt       # isqrt_correct: r·r ≤ n < (r+1)² over the extracted LOOP
   → level: L3 proved  (Lean theorems closed, sorry-free)
-    obligations: streamed_low, streamed_high, streamed_bounded, streamed_mono
     axioms: propext, Classical.choice, Quot.sound   # no sorryAx → kernel-checked
 ```
+
+The Rust sources live in-repo at `examples/rust-kernels/src/lib.rs`; the proof
+obligations are hand-written fragments wired per example via `proof_frag` in
+`src/examples.rs` (`examples/*/​*Proofs.lean`). `isqrt_correct` is proved over the
+Aeneas-extracted binary-search loop with `loop.spec_decr_nat` (measure `hi-lo`,
+invariant `lo²≤n ∧ n<(hi+1)² ∧ lo≤hi ∧ hi≤65535`).
 
 It runs Charon+Aeneas to extract the `Result Std.U64` model, prepends it to a
 proven theorem fragment (`examples/streamed/StreamedProofs.lean`), elaborates via

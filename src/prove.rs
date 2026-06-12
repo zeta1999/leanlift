@@ -34,7 +34,7 @@ pub fn prove_aeneas(
 
     let file = work_dir.join("Proofs.lean");
     let content = format!(
-        "import Aeneas\nopen Aeneas Aeneas.Std Result\n\nnamespace kernel\n{def}\n\n{frag}\nend kernel\n"
+        "import Aeneas\nopen Aeneas Aeneas.Std Result ControlFlow Error\n\nnamespace kernel\n{def}\n\n{frag}\nend kernel\n"
     );
     std::fs::write(&file, content).map_err(|e| format!("cannot write proof file: {e}"))?;
 
@@ -69,8 +69,10 @@ pub fn prove_aeneas(
             }
         }
     }
-    let sorry_free =
-        !stdout.contains("sorryAx") && !axioms.iter().any(|a| a.contains("sorry")) && !frag.contains(" sorry");
+    // The authoritative check is `#print axioms`: a `sorry` anywhere in a
+    // theorem's proof surfaces as the `sorryAx` axiom. (A textual scan of the
+    // fragment would false-positive on the word "sorry" in comments.)
+    let sorry_free = !stdout.contains("sorryAx") && !axioms.iter().any(|a| a.contains("sorry"));
 
     Ok(ProofReport { theorems, axioms, sorry_free })
 }

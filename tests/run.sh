@@ -38,12 +38,14 @@ if [ -x "$AENEAS/bin/aeneas" ]; then
     bad "rust-isqrt did not verify"; tail -20 "$TMP/isqrt.out"
   fi
   echo "== L3 proof: prove rust-streamed =="
-  if "$LIFT" prove rust-streamed --out "$TMP/proof.json" >"$TMP/prove.out" 2>&1; then
-    n=$(grep -c '✓' "$TMP/prove.out")
-    pass "prove rust-streamed  ($(grep -o 'L3 proved' "$TMP/prove.out"), $n obligations, sorry-free)"
-  else
-    bad "prove rust-streamed did not certify L3"; tail -15 "$TMP/prove.out"
-  fi
+  for pe in rust-streamed rust-isqrt; do
+    if "$LIFT" prove "$pe" --out "$TMP/proof_$pe.json" >"$TMP/prove_$pe.out" 2>&1; then
+      n=$(grep -c '✓' "$TMP/prove_$pe.out")
+      pass "prove $pe  ($(grep -o 'L3 proved' "$TMP/prove_$pe.out"), $n obligations, sorry-free)"
+    else
+      bad "prove $pe did not certify L3"; tail -15 "$TMP/prove_$pe.out"
+    fi
+  done
 else
   printf '  \033[33mSKIP\033[0m  rust-streamed + prove (aeneas not built — scripts/build_aeneas.sh)\n'
 fi
