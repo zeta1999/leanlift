@@ -37,3 +37,24 @@ pub fn isqrt(n: u32) -> u32 {
     }
     lo
 }
+
+/// Bisection method: bracket `sqrt(n)` to within `eps`. Halves the interval
+/// `[lo, hi]` (initially `[0, 65535]`), preserving `lo*lo <= n < (hi+1)^2`, until
+/// the bracket width `hi - lo <= eps`. Returns `lo`, which then satisfies the
+/// ε-guarantee `lo*lo <= n < (lo + eps + 1)^2` (with `eps = 0` this is `isqrt`).
+///
+/// This is the first numerical *method* (vs. the `isqrt` kernel): the new
+/// ingredient is ε-termination — the loop stops on bracket width, not exactness.
+pub fn bisect_sqrt(n: u32, eps: u32) -> u32 {
+    let mut lo: u32 = 0;
+    let mut hi: u32 = 65535;
+    while hi - lo > eps {
+        let mid = (lo + hi + 1) / 2;
+        if mid * mid <= n {
+            lo = mid;
+        } else {
+            hi = mid - 1;
+        }
+    }
+    lo
+}

@@ -183,10 +183,16 @@ kernels never did. Do `isqrt` first (single postcondition, simpler loop), then
 3. **Proof kernel for the support lib.** Audited lemmas about `UInt.*` so
    support-lib candidates (LLM/hand, i.e. C++/Go/Solidity) can carry proofs too —
    not just the Aeneas/Rust path. Close a property on `avg`/`dot2`.
-4. **`bisection` example** (integer/fixed-point) → prove bracketing invariant +
-   termination + ε-guarantee. First real numerical *method* (isqrt is a kernel).
+4. ~~**`bisection` example** → bracketing invariant + termination + ε-guarantee.~~
+   ✅ **done** — `bisect_sqrt(n, eps)` brackets √n within ε; `lift prove
+   rust-bisect` closes `bisect_correct : lo²≤n ∧ n<(lo+eps+1)²`, sorry-free,
+   reusing the isqrt recipe (Appendix A) + squaring-monotonicity for the ε-widened
+   bound. The LLM (`cpp-bisect`) needed the repair loop (iter 2) on the ε-loop.
+   *First numerical method.*
 5. **Float-tolerance comparator + trapezoidal rule** with an error-bound theorem
    (Mathlib). Research milestone — where numerical analysis proof is fundamental.
+6. **Support-lib proof kernel** (`UInt.*` lemmas) so the LLM C++/Go/Solidity
+   candidates can carry proofs too, not just the Aeneas/Rust path.
 
 ## Open questions / risks
 
@@ -203,3 +209,58 @@ kernels never did. Do `isqrt` first (single postcondition, simpler loop), then
 - **Termination obligations.** Well-founded recursion measures (e.g. `hi−lo`)
   must be supplied; for LLM models this is another thing the prompt/agent must
   get right and the kernel will check.
+
+---
+
+## Appendix A — worked example: proving a loop (the `isqrt` recipe)
+
+This documents, reproducibly, how `lift prove rust-isqrt` closes
+`isqrt_correct : isqrt n ⦃ r => r.val*r.val ≤ n.val ∧ n.val < (r.val+1)*(r.val+1) ⦄`
+over the **Aeneas-extracted loop** — the concrete instance of §I.1's procedure for
+a kernel with a `while`. The full proof is `examples/isqrt/IsqrtProofs.lean`.
+
+**1. What Aeneas gives you.** A Rust `while` becomes three defs: a one-iteration
+`isqrt_loop.body : … → Result (ControlFlow (U32×U32) U32)` (returning `cont s` to
+continue or `done r` to stop), `isqrt_loop` applying the `loop` combinator, and
+`isqrt` seeding it. The slicer keeps all three (`<fn>_loop*` helpers).
+
+**2. The one lemma.** `loop.spec_decr_nat` (Aeneas WP) turns a loop into three
+obligations, given a `measure : α → Nat` and an `inv : α → Prop`:
+```
+apply loop.spec_decr_nat
+  (measure := fun (lo,hi) => hi.val - lo.val)        -- strictly decreases
+  (inv     := fun (lo,hi) => lo²≤n ∧ n<(hi+1)² ∧ lo≤hi ∧ hi≤65535)
+```
+- **hBody**: each iteration either `done`s with the postcondition, or `cont`s in a
+  state that still satisfies `inv` *and* has a strictly smaller `measure`.
+- **hInv**: the seed `(0, 65535)` satisfies `inv` (`scalar_tac`; uses `n < 2³²`).
+
+**3. The invariant is where the thinking is.** Two non-obvious conjuncts:
+- `hi ≤ 65535` — *not* about correctness but about **no overflow**: it bounds
+  `mid ≤ hi ≤ 65535` so `mid*mid < 2³²` and the extracted checked `*` cannot fail.
+  Without it the `mid*mid` step leaves an undischargeable `mid*mid ≤ U32.max` goal.
+- `n < (hi+1)²` (not `n ≤ hi²`) — keeps the *upper* bracket; on `done` (when
+  `¬ lo<hi` with `lo≤hi`, so `lo=hi`) it becomes the postcondition's upper half.
+
+**4. Stepping the body.** `simp only [isqrt_loop.body]` (beta-reduces the
+`loop`-body lambda — `unfold` alone leaves a redex), then `split` the `if lo<hi`.
+Each `let x ← e` is advanced with `progress as ⟨x, hx⟩`; linear overflow
+side-goals auto-discharge, the nonlinear `mid*mid ≤ U32.max` is closed by
+`scalar_tac` after `have : mid.val ≤ 65535`. The inner `if i2 ≤ n` is the
+*scrutinee* of the WP, so use `split_ifs`, not `split`. A trailing `ok v` reduces
+with `Aeneas.Std.WP.spec_ok` (`ok x ⦃p⦄ ↔ p x`).
+
+**5. Carry nonlinear facts, don't re-derive them.** The proof never reasons about
+`mid²` symbolically: `mid²≤n` *is* the `then`-branch hypothesis; `n<mid²` *is* the
+`else`-branch hypothesis, and `(hi1+1) = mid` (a linear `scalar_tac` fact) rewrites
+it into `n < (hi1+1)²`. Everything else — `mid≤hi`, `mid>lo`, the measure drop — is
+linear and falls to `scalar_tac`/`omega`.
+
+**6. Certify.** `#print axioms isqrt_correct` → `[propext, Classical.choice,
+Quot.sound]`, **no `sorryAx`** ⇒ L3. `lift prove` checks exactly this.
+
+**How it was developed.** Not one-shot: a headless `claude -p` attempt timed out.
+The proof was built against the kernel — propose a tactic, read the error, repair —
+which is the *same* loop the LLM front-end uses for translations, applied to
+proofs. The next loop kernel (`bisect`) reuses this whole recipe with an `eps`
+early-exit added to the measure/termination.
