@@ -118,12 +118,22 @@ pub(crate) fn marking_enabled(m: &[u32], pre: &[u32]) -> bool {
     pre.iter().zip(m).all(|(&c, &have)| c <= have)
 }
 
+/// Per-place firing: `m − pre + post` at one place. The whole tool's marking
+/// arithmetic reduces to this scalar body. It is mirrored verbatim by
+/// `examples/rust-kernels::fire_place`, which leanlift's OWN Charon+Aeneas
+/// pipeline extracts and proves sorry-free against `Petri.lean`'s `fire_le` /
+/// `le_preserved` (PLAN-verification §V3 — `lift prove models-fire`).
+/// PRECONDITION: `pre ≤ m` (enabled) — then no `u32` underflow (Kani V1.2).
+pub(crate) fn fire_place(m: u32, pre: u32, post: u32) -> u32 {
+    m - pre + post
+}
+
 /// Fire kernel: the successor marking `m − pre + post`, index-wise.
 /// PRECONDITION: `marking_enabled(m, pre)` — under it no `u32` underflow occurs,
 /// which the `fire_no_underflow` Kani harness proves. Shared by `PtNet::step`,
 /// so the proof covers production.
 pub(crate) fn fire_marking(m: &[u32], pre: &[u32], post: &[u32]) -> Vec<u32> {
-    (0..m.len()).map(|i| m[i] - pre[i] + post[i]).collect()
+    (0..m.len()).map(|i| fire_place(m[i], pre[i], post[i])).collect()
 }
 
 impl Model for PtNet {

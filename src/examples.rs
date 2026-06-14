@@ -23,7 +23,7 @@ pub struct Example {
 
 pub const NAMES: &[&str] = &[
     "streamed", "avg", "rust-streamed", "cpp-streamed", "cpp-dot2", "go-avg", "sol-dot2",
-    "rust-isqrt", "cpp-isqrt", "rust-bisect", "cpp-bisect", "quant", "cpp-quant",
+    "rust-isqrt", "cpp-isqrt", "rust-bisect", "cpp-bisect", "quant", "cpp-quant", "models-fire",
 ];
 
 fn lean_lib() -> PathBuf {
@@ -207,6 +207,26 @@ pub fn lookup(name: &str) -> Option<Example> {
             gen: vectors::quant_vectors,
             frontend: Frontend::Llm { max_iters: 4 },
             proof_frag: None,
+        }),
+        // The Aeneas DOGFOOD (PLAN-verification §V3): leanlift extracts its OWN
+        // Petri firing kernel (`fire_place = m - pre + post`, the scalar body of
+        // `src/models/ir.rs::fire_marking`) from Rust via Charon+Aeneas and proves
+        // it sorry-free against the concrete u32 instances of `Petri.lean`'s
+        // `fire_le` / `le_preserved`. Prove-only: the verify/oracle fields are
+        // unused by `lift prove`. `lift prove models-fire`.
+        "models-fire" => Some(Example {
+            name: "models-fire",
+            lang: Lang::Cpp,
+            source: "examples/rust-kernels/src/lib.rs".into(),
+            fn_name: "fire_place",
+            signature: u(IntType::U32, 3),
+            profile: Profile::Avg, // unused by prove (no differential oracle)
+            gen: vectors::avg_vectors, // unused by prove
+            frontend: Frontend::RustAeneas {
+                crate_dir: "examples/rust-kernels".into(),
+                entrypoint: "fire_place".into(),
+            },
+            proof_frag: Some("examples/models/FireProofs.lean".into()),
         }),
         _ => None,
     }
