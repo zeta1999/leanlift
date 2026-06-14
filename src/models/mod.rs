@@ -502,6 +502,12 @@ fn prism_cmd(a: Vec<String>) {
         }
     }
     let net = gspn::parse(&src).unwrap_or_else(|e| fail(&format!("{file}: {e}")));
+    if net.has_immediate_cycle() {
+        fail(&format!(
+            "{file}: GSPN has an immediate-transition cycle (a 'timeless trap') — the CTMC is \
+             ill-defined; give the immediate loop a timed transition or a budget"
+        ));
+    }
 
     eprintln!("  measuring `{file}` (M2) — build tangible CTMC, solve, export PRISM");
     let (tang, q) = net.ctmc();

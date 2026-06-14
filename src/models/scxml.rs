@@ -24,6 +24,22 @@ pub fn to_lts(root: &Node) -> Result<Lts, String> {
         return Err("SCXML has no <state>/<final> elements".into());
     }
 
+    // Warn loudly if the chart is hierarchical: we flatten it to a flat id set,
+    // which does NOT capture compound/parallel SCXML semantics (entering a
+    // compound state enters its initial child). Silent flattening would give
+    // wrong results; make it visible.
+    let hierarchical = state_nodes.iter().any(|n| {
+        n.children("state").next().is_some()
+            || n.children("parallel").next().is_some()
+            || n.children("final").next().is_some()
+    });
+    if hierarchical {
+        eprintln!(
+            "  warning: SCXML has compound/parallel states — flattening to a flat id set; \
+             hierarchical entry semantics are NOT modelled (results may be incomplete)"
+        );
+    }
+
     let mut states: Vec<String> = Vec::new();
     for n in &state_nodes {
         let id = n.attr("id").ok_or("SCXML <state>/<final> is missing `id`")?.to_string();
