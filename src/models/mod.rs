@@ -20,6 +20,8 @@ mod lean;
 mod pnml;
 mod prism;
 #[cfg(test)]
+mod fuzz;
+#[cfg(test)]
 mod proptest;
 mod report;
 mod scxml;
