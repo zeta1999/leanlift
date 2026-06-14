@@ -89,11 +89,19 @@ exhaustive enumeration in `cargo test` (complete for the bound, sub-millisecond)
   each, complete for the bound) plus named adversarial inputs — non-empty, valid
   first char, valid body. Exactly the digit-leading / punctuation-leading bug
   class fixed in the review, now an exhaustive guard.
-- **V1.4 CTMC outputs finite & in range.** For a bounded generator `Q`:
-  `prob_reach ∈ [0,1]`, transient rows sum ≤ 1, no `NaN`/`inf`; `solve` does not
-  panic on any k×k input. (Bounded k — strong for these small dimensions.)
-- **V1.5 parser no-panic** for bounded inputs (complements V2 fuzzing with a
-  bounded *proof*).
+- **V1.4 CTMC outputs finite & in range.** ✅ but **via property test, not
+  Kani** (CBMC over floats — Gaussian elimination, `exp`, uniformization — is
+  intractable; the day49 division of labour keeps floats out of the proof
+  assistant). `gspn` tests over random well-posed absorbing generators
+  (`ctmc_outputs_finite_and_in_range`): `prob_reach ∈ [0,1]` & finite,
+  `expected_time` finite & ≥ 0, `transient` a sub-distribution (each ∈ [0,1],
+  Σ ≤ 1, all finite, π(0) a point mass). Plus `solve_never_panics_on_finite_input`
+  — `solve` survives 3 000 random (often-singular) k×k systems under
+  `catch_unwind`. Non-vacuity asserted (probs strictly inside (0,1)).
+- **V1.5 parser no-panic** ✅ **subsumed by V2** — the in-crate fuzzer
+  (`parsers_never_panic`, 20 000 mutated inputs) already discharges "no panic"
+  for the parsers; a separate bounded Kani proof would hit the same symbolic-UTF-8
+  intractability as V1.3 and add nothing over the fuzzer.
 - **V1.6 CI.** `verify-kani.sh` is standalone and goes in the **deep/nightly
   tier** (V5.2), *not* fast `ci.sh`: `cargo kani` recompiles the crate with its
   own toolchain (minutes, heavy) — too costly per-commit. The exhaustive V1.3
@@ -200,7 +208,7 @@ that produces proofs is itself proved by the same tool. ✅ **DONE** (2026-06-14
 | `format::product` | commutativity | — | — | — |
 | `cpn::unfold` | **unfold ≡ coloured** ✅ | — | — | — |
 | `PtNet::fire/enabled` | loss monotonicity ✅ | **no underflow** ✅ | — | **Aeneas vs Petri.lean** ✅ ★ |
-| `gspn` CTMC solver | vs PRISM (gate ✅) + closed forms ✅ | finite/in-range | — | — (floats) |
+| `gspn` CTMC solver | vs PRISM (gate ✅) + closed forms ✅ + finite/in-range ✅ | (floats: intractable) | — | — (floats) |
 | `lean`/`codegen` emit | M1↔M3, loop closure ✅; `vid`/`ctor` exhaustive ASCII≤2 ✅ | (string-decode intractable) | — | — |
 
 ## Ordered next steps
@@ -215,8 +223,8 @@ that produces proofs is itself proved by the same tool. ✅ **DONE** (2026-06-14
    and proved sorry-free against `Petri.lean`'s `fire_le`/`le_preserved`
    (`lift prove models-fire`). Leanlift verifies its own substrate.
 4. ✅ V0.4–V0.6 (random CPNs, M1↔M3, CTMC-vs-PRISM gate) + ✅ V2 parser fuzzing
-   (in-crate, `parsers_never_panic`). **TODO:** V1.4/V1.5 (CTMC-range / parser
-   no-panic Kani — likely float/string-intractable, may go property-test route);
-   V3.5 Creusot (tool not installed).
+   (in-crate, `parsers_never_panic`) + ✅ V1.4 (CTMC finite/in-range, property
+   test) + ✅ V1.5 (subsumed by V2). **Only remaining:** V3.5 Creusot (tool not
+   installed) — optional; the substantive program is complete.
 5. ✅ V5 consolidation (`verify.sh` deep-tier orchestrator; cross-referenced
    with `ci.sh`). **VERIFY GREEN** end to end.

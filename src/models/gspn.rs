@@ -632,4 +632,117 @@ mod tests {
         assert_eq!(eval_expr("a * a / (1 - 0.5)", &v).unwrap(), 8.0);
         assert!(eval_expr("nope", &v).is_err());
     }
+
+    // --- V1.4: CTMC solver outputs finite & in range (PLAN-verification) ----- //
+
+    /// A tiny seeded xorshift PRNG (test-local; mirrors proptest.rs's).
+    struct Rng(u64);
+    impl Rng {
+        fn next(&mut self) -> u64 {
+            self.0 ^= self.0 << 13;
+            self.0 ^= self.0 >> 7;
+            self.0 ^= self.0 << 17;
+            self.0
+        }
+        fn upto(&mut self, n: usize) -> usize {
+            (self.next() as usize) % n.max(1)
+        }
+        /// A float in [0, 1).
+        fn f(&mut self) -> f64 {
+            (self.next() >> 11) as f64 / (1u64 << 53) as f64
+        }
+    }
+
+    /// A random, well-posed absorbing CTMC generator: states `0` and `n-1` are
+    /// absorbing (rows all zero); only `n-1` "bears the target" (place 0). Every
+    /// transient state has a forced positive rate to `n-1`, so absorption is a.s.
+    /// reachable ⇒ `expected_time` is finite and `prob_reach` is well-defined.
+    /// Returns `(q, tang, transient_indices)`.
+    fn random_generator(r: &mut Rng) -> (Vec<Vec<f64>>, Vec<String>, Vec<usize>) {
+        let n = 3 + r.upto(3); // 3..=5
+        let mut q = vec![vec![0.0; n]; n];
+        for i in 1..n - 1 {
+            // forced exit toward the absorber n-1 (guarantees absorption)
+            q[i][n - 1] = 0.1 + r.f();
+            // optional rate to the other absorber 0
+            q[i][0] = r.f();
+            // rates among transient states
+            for j in 1..n - 1 {
+                if j != i && r.upto(2) == 0 {
+                    q[i][j] = r.f();
+                }
+            }
+            let off: f64 = (0..n).filter(|&j| j != i).map(|j| q[i][j]).sum();
+            q[i][i] = -off;
+        }
+        // tang: only state n-1 carries a token in place 0 ("freed"); rest empty.
+        let tang: Vec<String> = (0..n).map(|i| if i == n - 1 { "1".to_string() } else { "0".to_string() }).collect();
+        let trans: Vec<usize> = (1..n - 1).collect();
+        (q, tang, trans)
+    }
+
+    #[test]
+    fn ctmc_outputs_finite_and_in_range() {
+        let mut r = Rng(0xC7_3C_5E_9A_11_22_33_44);
+        let mut nontrivial = 0u32; // prob strictly inside (0,1) ⇒ non-vacuous
+        for _ in 0..2000 {
+            let (q, tang, trans) = random_generator(&mut r);
+            for &start in &trans {
+                // prob_reach ∈ [0,1], finite.
+                let p = prob_reach(&q, &tang, start, 0);
+                assert!(p.is_finite(), "prob_reach not finite: {p}");
+                assert!((-1e-9..=1.0 + 1e-9).contains(&p), "prob_reach out of [0,1]: {p}");
+                if (0.01..=0.99).contains(&p) {
+                    nontrivial += 1;
+                }
+                // expected_time finite and ≥ 0.
+                let et = expected_time(&q, start);
+                assert!(et.is_finite() && et >= -1e-9, "expected_time bad: {et}");
+                // transient: a sub-distribution (each ∈[0,1], Σ ≤ 1), all finite.
+                for &t in &[0.0, 0.5, 3.0] {
+                    let pi = transient(&q, start, t);
+                    let mut sum = 0.0;
+                    for &x in &pi {
+                        assert!(x.is_finite(), "transient entry not finite: {x}");
+                        assert!((-1e-9..=1.0 + 1e-6).contains(&x), "transient entry out of [0,1]: {x}");
+                        sum += x;
+                    }
+                    assert!(sum <= 1.0 + 1e-6, "transient mass > 1: {sum}");
+                    if t == 0.0 {
+                        assert!((pi[start] - 1.0).abs() < 1e-9, "π(0) not a point mass at start");
+                    }
+                }
+            }
+        }
+        assert!(nontrivial > 100, "CTMC test near-vacuous: only {nontrivial} probs strictly in (0,1)");
+    }
+
+    #[test]
+    fn solve_never_panics_on_finite_input() {
+        // `solve` must not panic on any finite k×k system (it may return garbage
+        // for a singular matrix, but must not crash). Random, often-singular.
+        use std::panic::{self, AssertUnwindSafe};
+        let prev = panic::take_hook();
+        panic::set_hook(Box::new(|_| {}));
+        let mut r = Rng(0x5A_5A_0F_F0_DE_AD_BE_EF);
+        let mut failed: Option<String> = None;
+        'outer: for _ in 0..3000 {
+            let k = 1 + r.upto(5);
+            let a: Vec<Vec<f64>> = (0..k)
+                .map(|_| (0..k).map(|_| (r.f() - 0.5) * if r.upto(4) == 0 { 0.0 } else { 10.0 }).collect())
+                .collect();
+            let b: Vec<f64> = (0..k).map(|_| (r.f() - 0.5) * 10.0).collect();
+            if panic::catch_unwind(AssertUnwindSafe(|| {
+                let x = solve(a.clone(), b.clone());
+                x.len()
+            }))
+            .is_err()
+            {
+                failed = Some(format!("solve panicked on k={k}"));
+                break 'outer;
+            }
+        }
+        panic::set_hook(prev);
+        assert!(failed.is_none(), "{}", failed.unwrap());
+    }
 }
