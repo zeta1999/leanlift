@@ -206,8 +206,14 @@ Standard formats are detected from content and handled with no conversion step
   `lift model prove mission.scxml`, `lift model export mission.scxml` all work
   directly — the `<scxml>` root is auto-detected. Subset: `<state id>`/`<final
   id>` (flattened) and `<transition event= target=>`; the safety property is
-  authored in-file as `forbid="true"` on a `<state>`. (PNML for Petri and
-  BehaviorTree.CPP/Groot XML for BTs are further steps.)
+  authored in-file as `forbid="true"` on a `<state>`.
+- **PNML** (ISO/IEC 15909-2) → PT-net. `lift model check dock.pnml` is detected
+  from the `<pnml>` root and reuses the Petri checker (reachability, the
+  loss-induced deadlock, the loss/conservation classification). Subset:
+  `<place>`/`<initialMarking>`, `<transition>`, `<arc source= target=>` with an
+  optional `<inscription>` weight. PNML carries no safety bound, so the M3 mutex
+  proof is authored in the native `.model.toml`. (BehaviorTree.CPP/Groot XML for
+  BTs is a further step.)
 
 ```xml
 <scxml initial="locked">

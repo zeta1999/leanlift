@@ -254,6 +254,12 @@ else
 fi
 "$LIFT" model export examples/models/mcl.model.toml --lang dot --emit "$TMP/mcl.dot" >/dev/null 2>&1 \
   && grep -q "digraph" "$TMP/mcl.dot" && pass "dot export (graphviz)" || bad "dot export failed"
+# dock.pnml: standard PNML import → the Petri checker (same 6 reachable + sink).
+if "$LIFT" model check examples/models/dock.pnml --out "$TMP/pn.json" >"$TMP/pn.out" 2>&1; then
+  pass "dock.pnml import (PT-net auto-detected, $(grep -o 'reachable : [0-9]* state' "$TMP/pn.out"); lossy)"
+else
+  bad "dock.pnml did not check"; cat "$TMP/pn.out"
+fi
 
 echo "== models (M3 Lean proof — Phases 1–4, needs lean on PATH) =="
 if command -v lean >/dev/null 2>&1; then
