@@ -408,6 +408,99 @@ mod tests {
         assert_unfold_equiv(&std::fs::read_to_string("examples/models/resource.model.toml").unwrap());
     }
 
+    /// A tiny seeded xorshift PRNG (test-local; mirrors proptest.rs's).
+    struct Rng(u64);
+    impl Rng {
+        fn next(&mut self) -> u64 {
+            self.0 ^= self.0 << 13;
+            self.0 ^= self.0 >> 7;
+            self.0 ^= self.0 << 17;
+            self.0
+        }
+        fn upto(&mut self, n: usize) -> usize {
+            (self.next() as usize) % n.max(1)
+        }
+    }
+
+    /// A random, BOUNDED, valid coloured net (V0.4). Every transition is
+    /// non-increasing in token count (`|post| ≤ |pre|`) and the initial marking
+    /// holds ≤ 3 tokens, so the reachable set is finite and small (≤ ~100
+    /// markings) — the differential BFS can't diverge or eat memory. Arc exprs
+    /// are always valid (the bound variable only on places of its own colour,
+    /// otherwise a constant of the place's colour), so the unfolder never errors.
+    fn random_cpn(seed: u64) -> Cpn {
+        let mut r = Rng(seed | 1);
+        let ncol = 1 + r.upto(2);
+        let mut colour_names = Vec::new();
+        let mut colours: HashMap<String, Vec<String>> = HashMap::new();
+        for ci in 0..ncol {
+            let name = format!("C{ci}");
+            let nv = 1 + r.upto(2);
+            let vals: Vec<String> = (0..nv).map(|vi| format!("c{ci}v{vi}")).collect();
+            colour_names.push(name.clone());
+            colours.insert(name, vals);
+        }
+        let np = 2 + r.upto(2);
+        let mut places = Vec::new();
+        for pi in 0..np {
+            let colour = colour_names[r.upto(ncol)].clone();
+            let cvals = colours[&colour].clone();
+            let init: Vec<String> = (0..r.upto(2)).map(|_| cvals[r.upto(cvals.len())].clone()).collect();
+            places.push(Place { name: format!("p{pi}"), colour, init });
+        }
+        let nt = 1 + r.upto(3);
+        let mut transitions = Vec::new();
+        for ti in 0..nt {
+            let var = if r.upto(2) == 0 {
+                Some(("v".to_string(), colour_names[r.upto(ncol)].clone()))
+            } else {
+                None
+            };
+            // one valid arc (variable on its own colour, else a constant).
+            let mk = |r: &mut Rng| -> Arc {
+                let p = &places[r.upto(places.len())];
+                let expr = match &var {
+                    Some((vn, vc)) if *vc == p.colour && r.upto(2) == 0 => vn.clone(),
+                    _ => {
+                        let cv = &colours[&p.colour];
+                        cv[r.upto(cv.len())].clone()
+                    }
+                };
+                Arc { place: p.name.clone(), expr }
+            };
+            let kpre = 1 + r.upto(2);
+            let pre: Vec<Arc> = (0..kpre).map(|_| mk(&mut r)).collect();
+            let kpost = r.upto(kpre + 1); // 0..=kpre ⇒ non-increasing ⇒ bounded
+            let post: Vec<Arc> = (0..kpost).map(|_| mk(&mut r)).collect();
+            transitions.push(CTrans { name: format!("t{ti}"), var, pre, post });
+        }
+        Cpn { colours, places, transitions }
+    }
+
+    #[test]
+    fn random_unfold_equiv() {
+        // V0.4: the unfold≡coloured differential over RANDOM bounded CPNs —
+        // broadening the prime-suspect unfolder far past the fixed examples. For
+        // every random net, the independent coloured occurrence graph must equal
+        // the unfolded PT-net's reachable graph.
+        let empty_doc = toml::parse("kind = \"cpn\"\n").expect("doc");
+        let mut checked = 0;
+        let mut nonvacuous = 0;
+        for seed in 1..400u64 {
+            let cpn = random_cpn(seed.wrapping_mul(0x9E3779B97F4A7C15));
+            let (net, origin) = unfold_cpn(&cpn, &empty_doc).expect("unfold");
+            let coloured = occurrence_graph(&cpn).expect("occurrence graph");
+            let unfolded = unfolded_reachable(&net, &origin);
+            assert_eq!(coloured, unfolded, "unfold ≢ coloured (seed {seed})");
+            checked += 1;
+            if coloured.len() > 1 {
+                nonvacuous += 1;
+            }
+        }
+        assert!(checked == 399, "some random nets failed to unfold: {checked}/399");
+        assert!(nonvacuous > 40, "random nets near-vacuous ({nonvacuous} moved) — generator too weak");
+    }
+
     #[test]
     fn synthetic_unfold_equiv() {
         // A two-colour producer/consumer with a constant-valued lock arc.
