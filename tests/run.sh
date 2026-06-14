@@ -87,6 +87,30 @@ for pair in "streamed:$TMP/BadStreamed.lean" "avg:$TMP/BadAvg.lean"; do
   fi
 done
 
+echo "== models (M1 native checker — docs/PLAN-models.md Phase 0) =="
+# positive: the tiny FSM checks clean (exit 0), family auto-detected.
+if "$LIFT" model check examples/models/tiny.model.toml --out "$TMP/tiny.json" >"$TMP/tiny.out" 2>&1; then
+  pass "tiny.model.toml  ($(grep -o 'M1 checked' "$TMP/tiny.out"); $(grep -o 'reachable : [0-9]* state' "$TMP/tiny.out"))"
+else
+  bad "tiny.model.toml did not check"; cat "$TMP/tiny.out"
+fi
+# teeth: a model that can reach a forbidden state must go red (exit nonzero).
+cat > "$TMP/bad.model.toml" <<'EOF'
+initial = "off"
+states  = ["off", "error"]
+[[transition]]
+from = "off"
+on   = "break"
+to   = "error"
+[[forbid]]
+state = "error"
+EOF
+if "$LIFT" model check "$TMP/bad.model.toml" --out "$TMP/badm.json" >"$TMP/badm.out" 2>&1; then
+  bad "reachable forbidden state was NOT caught (exit 0)"
+else
+  pass "forbidden-state model caught ($(grep -o 'safety VIOLATED' "$TMP/badm.out" | head -1 || echo 'safety VIOLATED'))"
+fi
+
 echo
 [ "$fail" -eq 0 ] && echo "all green" || echo "REGRESSIONS"
 exit "$fail"
