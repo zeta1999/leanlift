@@ -183,6 +183,36 @@ else
   pass "broken resource caught at M1 ($(grep -o 'crit_p1+crit_p2+crit_p3 = 2 > 1' "$TMP/resb.out" | head -1))"
 fi
 
+# dock-gspn: a GSPN → tangible CTMC, quantitative M2 (Phase 5). Native solver
+# results cross-checked against the day49 closed forms; giveup teeth.
+if "$LIFT" model prism examples/models/dock-gspn.model.toml --emit "$TMP/dg" --out "$TMP/dg.json" >"$TMP/dg.out" 2>&1; then
+  pf=$(grep 'P(freed)' "$TMP/dg.out" | grep -o '[0-9]\.[0-9]*')
+  et=$(grep 'E\[time\]' "$TMP/dg.out" | grep -o '[0-9]\.[0-9]*')
+  if [ "$pf" = "1.000000" ] && [ "$et" = "1.000000" ]; then
+    pass "dock-gspn lease M2  (P(freed)=$pf=1, E[time]=$et=1/μd; $(grep -o 'tangible states : [0-9]*' "$TMP/dg.out"))"
+  else
+    bad "dock-gspn lease wrong: P(freed)=$pf E[time]=$et (expected 1.0, 1.0)"; cat "$TMP/dg.out"
+  fi
+else
+  bad "dock-gspn did not measure"; cat "$TMP/dg.out"
+fi
+# giveup teeth: P(freed) drops to 1 - p^(K+1) = 1 - 0.5^4 = 0.9375.
+python3 - <<'PY'
+src=open("examples/models/dock-gspn.model.toml").read()
+src=src.replace('mode    = "lease"','mode    = "giveup"')
+src=src.replace('places  = ["holding", "inflight", "freed", "budget"]',
+                'places  = ["holding", "inflight", "freed", "budget", "stuck"]')
+src+='\n[[transition]]\nname="abort"\nkind="timed"\nrate="mu_l"\npre="inflight:1"\ninhibit="budget"\npost="stuck:1"\n'
+open("/tmp/dock-giveup-test.model.toml","w").write(src)
+PY
+gp=$("$LIFT" model prism /tmp/dock-giveup-test.model.toml --emit "$TMP/dgg" --out "$TMP/dgg.json" 2>/dev/null | grep 'P(freed)' | grep -o '[0-9]\.[0-9]*')
+if [ "$gp" = "0.937500" ]; then
+  pass "dock-gspn giveup M2  (P(freed)=$gp = 1-p^(K+1), lease→giveup teeth)"
+else
+  bad "dock-gspn giveup wrong: P(freed)=$gp (expected 0.937500)"
+fi
+rm -f /tmp/dock-giveup-test.model.toml
+
 echo "== models (M3 Lean proof — Phases 1–4, needs lean on PATH) =="
 if command -v lean >/dev/null 2>&1; then
   for me in mcl dock mission resource; do

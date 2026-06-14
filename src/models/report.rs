@@ -105,6 +105,36 @@ pub fn write_prove_json(
     std::fs::write(out, body)
 }
 
+/// Report for `lift model prism`: the quantitative results + the PRISM status.
+pub fn write_prism_json(
+    mode: &str,
+    results: &[(String, f64)],
+    file: &str,
+    hash: &str,
+    prism_ok: Option<bool>,
+    out: &Path,
+) -> std::io::Result<()> {
+    let checked = match prism_ok {
+        Some(true) => "machine_checked",
+        Some(false) => "disagreement",
+        None => "self_checked",
+    };
+    let body_results = results
+        .iter()
+        .map(|(n, v)| format!("    {{ \"query\": {}, \"value\": {} }}", json_str(n), v))
+        .collect::<Vec<_>>()
+        .join(",\n");
+    let body = format!(
+        "{{\n  \"family\": \"gspn\",\n  \"mode\": {},\n  \"file\": {},\n  \"level\": \"M2_measured\",\n  \"prism\": \"{}\",\n  \"results\": [\n{}\n  ],\n  \"hash\": \"{}\"\n}}\n",
+        json_str(mode),
+        json_str(file),
+        checked,
+        body_results,
+        hash,
+    );
+    std::fs::write(out, body)
+}
+
 /// Minimal JSON string escaping (quotes + backslashes + control chars).
 fn json_str(s: &str) -> String {
     let mut out = String::with_capacity(s.len() + 2);

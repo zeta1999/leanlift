@@ -13,8 +13,10 @@ mod bt;
 mod check;
 mod cpn;
 mod format;
+mod gspn;
 mod ir;
 mod lean;
+mod prism;
 mod report;
 mod toml;
 
@@ -28,8 +30,10 @@ fn usage() -> ! {
         \x20 lift model check <file> [--bound <N>] [--out <model-report.json>]\n\
         \x20     bounded reachability + safety (M1). Family auto-detected from <file>.\n\
         \x20 lift model prove <file> [--emit <Model.lean>] [--lean-path <dir>] [--out ...]\n\
-        \x20     export a Lean model + safety proof and certify it sorry-free (M3, FSM).\n\n\
-        \x20 (further phases: prism → M2 quantitative, export → code)\n"
+        \x20     export a Lean model + safety proof and certify it sorry-free (M3, FSM/BT/Petri/CPN).\n\
+        \x20 lift model prism <file> [--emit <prefix>] [--out ...]\n\
+        \x20     GSPN → tangible CTMC: solve quantitative queries + export PRISM (M2).\n\n\
+        \x20 (further phases: export → code)\n"
     );
     exit(2);
 }
@@ -46,7 +50,11 @@ pub fn main(mut argv: Vec<String>) {
             argv.remove(0);
             prove_cmd(argv);
         }
-        Some(verb @ ("prism" | "export" | "simulate" | "import")) => {
+        Some("prism") => {
+            argv.remove(0);
+            prism_cmd(argv);
+        }
+        Some(verb @ ("export" | "simulate" | "import")) => {
             eprintln!("`lift model {verb}` is planned (see docs/PLAN-models.md) — not in this build");
             exit(2);
         }
@@ -113,7 +121,7 @@ fn check_cmd(a: Vec<String>) {
             r
         }
         Family::Spn => {
-            eprintln!("detected `spn` model — stochastic is Phase 5 (not in this build); see docs/PLAN-models.md");
+            eprintln!("detected a stochastic (gspn) model — use `lift model prism <file>` for M2 quantitative analysis");
             exit(2);
         }
     };
@@ -250,6 +258,111 @@ fn prove_cmd(a: Vec<String>) {
         eprintln!("  model-report.json -> {}", out.display());
     }
     exit(if sorry_free { 0 } else { 1 });
+}
+
+fn prism_cmd(a: Vec<String>) {
+    let mut file: Option<String> = None;
+    let mut out = PathBuf::from("model-report.json");
+    let mut emit: Option<String> = None;
+
+    let mut i = 0;
+    while i < a.len() {
+        match a[i].as_str() {
+            "--out" => out = PathBuf::from(take(&a, &mut i)),
+            "--emit" => emit = Some(take(&a, &mut i)),
+            s if s.starts_with("--") => fail(&format!("unknown flag: {s}")),
+            _ => {
+                if file.is_some() {
+                    usage();
+                }
+                file = Some(a[i].clone());
+            }
+        }
+        i += 1;
+    }
+    let file = file.unwrap_or_else(|| usage());
+    let src = std::fs::read_to_string(&file).unwrap_or_else(|e| fail(&format!("cannot read {file}: {e}")));
+    let hash = report::content_hash(&src);
+
+    let doc = toml::parse(&src).unwrap_or_else(|e| fail(&format!("{file}: {e}")));
+    match format::detect(&doc).unwrap_or_else(|e| fail(&format!("{file}: {e}"))) {
+        Family::Spn => {}
+        other => {
+            eprintln!("`lift model prism` needs a `kind = \"gspn\"` model; detected `{}`", other.tag());
+            exit(2);
+        }
+    }
+    let net = gspn::parse(&src).unwrap_or_else(|e| fail(&format!("{file}: {e}")));
+
+    eprintln!("  measuring `{file}` (M2) — build tangible CTMC, solve, export PRISM");
+    let (tang, q) = net.ctmc();
+    let start = net.dominant_start(&tang);
+
+    // Native quantitative results (the self-check anchor).
+    let results: Vec<(String, f64)> =
+        net.queries.iter().map(|qq| (qq.name.clone(), net.evaluate(qq, &tang, &q))).collect();
+
+    // Emit the PRISM model + props.
+    let prefix = emit.unwrap_or_else(|| file_stem(&file));
+    let model_path = PathBuf::from(format!("{prefix}.prism"));
+    let props_path = PathBuf::from(format!("{prefix}.props"));
+    let _ = std::fs::write(&model_path, prism::emit_model(&net, &tang, &q, start));
+    let _ = std::fs::write(&props_path, prism::emit_props(&net));
+
+    // Run PRISM if present, and diff; else self-check against the native solver.
+    let prism_ok = run_prism_and_diff(&model_path, &props_path, &results);
+
+    println!();
+    println!("  leanlift model certificate — gspn `{file}` (mode: {})", net.mode);
+    println!("  ────────────────────────────────────────────────");
+    println!("  level : M2 measured  (quantitative CTMC analysis)");
+    println!();
+    println!("  tangible states : {}", tang.len());
+    for (name, val) in &results {
+        println!("    {name:<24} = {val:.6}");
+    }
+    match &prism_ok {
+        Some(true) => println!("  PRISM     : present — results agree (machine-checked)"),
+        Some(false) => println!("  PRISM     : present — DISAGREEMENT (see above)"),
+        None => println!("  PRISM     : not on PATH — self-checked against the native CTMC solver"),
+    }
+    println!("  PRISM model : {}  /  {}", model_path.display(), props_path.display());
+    println!("  hash      : {hash}");
+    println!();
+    eprintln!("  (qualitative companion: the inevitability skeleton is provable in Lean —");
+    eprintln!("   LeanLift/Models/Ctmc.lean; PRISM says how likely/fast, Lean says it must.)");
+
+    if let Err(e) = report::write_prism_json(&net.mode, &results, &file, &hash, prism_ok, &out) {
+        eprintln!("warning: could not write {}: {e}", out.display());
+    } else {
+        eprintln!("  model-report.json -> {}", out.display());
+    }
+    exit(0);
+}
+
+/// Run the PRISM binary (if on PATH) and compare its `Result:` lines to the
+/// native results. `Some(true)` agree, `Some(false)` disagree, `None` no binary.
+fn run_prism_and_diff(model: &Path, props: &Path, results: &[(String, f64)]) -> Option<bool> {
+    let out = Command::new("prism").arg(model).arg(props).output().ok()?;
+    let text = String::from_utf8_lossy(&out.stdout);
+    let prism_vals: Vec<f64> = text
+        .lines()
+        .filter_map(|l| l.trim().strip_prefix("Result:"))
+        .filter_map(|r| r.trim().split_whitespace().next())
+        .filter_map(|n| n.parse::<f64>().ok())
+        .collect();
+    if prism_vals.len() != results.len() {
+        eprintln!("  (PRISM ran but returned {} results vs {} queries)", prism_vals.len(), results.len());
+        return Some(false);
+    }
+    let mut agree = true;
+    for ((name, ours), theirs) in results.iter().zip(&prism_vals) {
+        if (ours - theirs).abs() > 1e-4 {
+            agree = false;
+            eprintln!("  PRISM mismatch on {name}: native {ours:.6} vs prism {theirs:.6}");
+        }
+    }
+    Some(agree)
 }
 
 /// Compile `lean/LeanLift/Models/*.lean` → `.olean` if stale, so generated
