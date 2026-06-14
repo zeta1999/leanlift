@@ -56,12 +56,45 @@ pub fn parse(src: &str) -> Result<Doc, String> {
     let mut doc = Doc::default();
     let mut cur: Option<String> = None;
 
-    for (n, raw) in src.lines().enumerate() {
-        let line = strip_comment(raw).trim();
-        if line.is_empty() {
+    let lines: Vec<&str> = src.lines().collect();
+    let mut n = 0;
+    while n < lines.len() {
+        let raw = lines[n];
+        let ln = n + 1;
+
+        // Multi-line triple-quoted value: `key = """ … """` spanning lines. We
+        // accumulate raw lines (no comment-strip) until the closing `"""`.
+        if let Some((key, after)) = split_triple(raw) {
+            let mut body = String::new();
+            if let Some(end) = after.find("\"\"\"") {
+                body.push_str(&after[..end]); // closes on the same line
+            } else {
+                body.push_str(after);
+                loop {
+                    n += 1;
+                    if n >= lines.len() {
+                        return Err(format!("line {ln}: unterminated `\"\"\"` string"));
+                    }
+                    if let Some(end) = lines[n].find("\"\"\"") {
+                        body.push('\n');
+                        body.push_str(&lines[n][..end]);
+                        break;
+                    } else {
+                        body.push('\n');
+                        body.push_str(lines[n]);
+                    }
+                }
+            }
+            insert(&mut doc, &cur, key.trim().to_string(), Value::Str(body));
+            n += 1;
             continue;
         }
-        let ln = n + 1;
+
+        let line = strip_comment(raw).trim();
+        if line.is_empty() {
+            n += 1;
+            continue;
+        }
 
         if let Some(rest) = line.strip_prefix("[[") {
             let name = rest
@@ -74,6 +107,7 @@ pub fn parse(src: &str) -> Result<Doc, String> {
             }
             doc.tables.entry(name.clone()).or_default().push(HashMap::new());
             cur = Some(name);
+            n += 1;
             continue;
         }
 
@@ -85,18 +119,35 @@ pub fn parse(src: &str) -> Result<Doc, String> {
         if key.is_empty() {
             return Err(format!("line {ln}: empty key"));
         }
-
-        match &cur {
-            Some(name) => {
-                let block = doc.tables.get_mut(name).and_then(|v| v.last_mut()).unwrap();
-                block.insert(key, val);
-            }
-            None => {
-                doc.scalars.insert(key, val);
-            }
-        }
+        insert(&mut doc, &cur, key, val);
+        n += 1;
     }
     Ok(doc)
+}
+
+/// Insert a `key = value` into the current table block (if inside one) or the
+/// top-level scalars.
+fn insert(doc: &mut Doc, cur: &Option<String>, key: String, val: Value) {
+    match cur {
+        Some(name) => {
+            let block = doc.tables.get_mut(name).and_then(|v| v.last_mut()).unwrap();
+            block.insert(key, val);
+        }
+        None => {
+            doc.scalars.insert(key, val);
+        }
+    }
+}
+
+/// If `raw` is `key = """…`, return `(key, rest-after-the-opening-triple-quote)`.
+fn split_triple(raw: &str) -> Option<(&str, &str)> {
+    let eq = raw.find('=')?;
+    let (key, rhs) = (raw[..eq].trim_start(), raw[eq + 1..].trim_start());
+    // Reject if the `=` is inside brackets/quotes (cheap guard: keys are bare).
+    if key.is_empty() || key.contains(['[', '"', '#']) {
+        return None;
+    }
+    rhs.strip_prefix("\"\"\"").map(|rest| (key, rest))
 }
 
 /// Drop a `#` comment, but not one inside a quoted string. Whole-line and

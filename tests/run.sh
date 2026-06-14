@@ -143,9 +143,36 @@ else
   pass "broken dock caught at M1 ($(grep -o 'csA+csB = 2 > 1' "$TMP/dockb.out" | head -1))"
 fi
 
-echo "== models (M3 Lean proof — Phases 1–2, needs lean on PATH) =="
+# mission: a behaviour tree compiled to an LTS (Phase 3). M1 check + teeth.
+if "$LIFT" model check examples/models/mission.model.toml --out "$TMP/mis.json" >"$TMP/mis.out" 2>&1; then
+  pass "mission BT check  ($(grep -o 'reachable : [0-9]* state' "$TMP/mis.out"); compiled to LTS)"
+else
+  bad "mission did not check"; cat "$TMP/mis.out"
+fi
+cat > /tmp/mission-broken-test.model.toml <<'EOF'
+kind = "bt"
+vars = ["lost", "atGoal", "moving"]
+initial = ["lost"]
+tree = "fallback( act:navigate, sequence(cond:lost, act:recover) )"
+[[action]]
+name = "navigate"
+effect = "moving=true, atGoal=true"
+[[action]]
+name = "recover"
+guard = "lost=true"
+effect = "lost=false"
+[[forbid]]
+true = ["lost", "moving"]
+EOF
+if "$LIFT" model check /tmp/mission-broken-test.model.toml --out "$TMP/misb.json" >"$TMP/misb.out" 2>&1; then
+  bad "broken mission (unguarded navigate) NOT caught at M1 (exit 0)"
+else
+  pass "broken mission caught at M1 ($(grep -o 'lost_atGoal_moving' "$TMP/misb.out" | head -1))"
+fi
+
+echo "== models (M3 Lean proof — Phases 1–3, needs lean on PATH) =="
 if command -v lean >/dev/null 2>&1; then
-  for me in mcl dock; do
+  for me in mcl dock mission; do
     if "$LIFT" model prove "examples/models/$me.model.toml" --emit "$TMP/$me.gen.lean" --out "$TMP/${me}p.json" >"$TMP/${me}p.out" 2>&1; then
       pass "$me prove  ($(grep -o 'M3 proved' "$TMP/${me}p.out"), sorry-free)"
     else
@@ -163,9 +190,14 @@ if command -v lean >/dev/null 2>&1; then
   else
     pass "broken dock proof fails to elaborate ($(grep -o 'did NOT elaborate' "$TMP/dockbp.out" | head -1))"
   fi
-  rm -f /tmp/mcl-broken-test.model.toml /tmp/dock-broken-test.model.toml
+  if "$LIFT" model prove /tmp/mission-broken-test.model.toml --emit "$TMP/MisBad.gen.lean" --out "$TMP/misbp.json" >"$TMP/misbp.out" 2>&1; then
+    bad "broken mission proof did NOT fail (exit 0)"
+  else
+    pass "broken mission proof fails to elaborate ($(grep -o 'did NOT elaborate' "$TMP/misbp.out" | head -1))"
+  fi
+  rm -f /tmp/mcl-broken-test.model.toml /tmp/dock-broken-test.model.toml /tmp/mission-broken-test.model.toml
 else
-  printf '  \033[33mSKIP\033[0m  mcl/dock prove (lean not on PATH)\n'
+  printf '  \033[33mSKIP\033[0m  mcl/dock/mission prove (lean not on PATH)\n'
 fi
 
 echo

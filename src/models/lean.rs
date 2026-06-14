@@ -58,21 +58,26 @@ pub fn emit_fsm(lts: &Lts, namespace: &str) -> String {
     o.push('\n');
 
     // step — one arm per defined transition; a catch-all `none` iff some
-    // (state, event) pair is blocked (else Lean rejects the redundant arm).
-    o.push_str("def step : State → Event → Option State\n");
-    for s in &lts.states {
-        for e in &lts.alphabet {
-            if let Some(t) = lts.transitions.get(&(s.clone(), e.clone())) {
-                o.push_str(&format!("  | .{}, .{} => some .{}\n", ctor(s), ctor(e), ctor(t)));
+    // (state, event) pair is blocked (else Lean rejects the redundant arm). A
+    // model with no events at all (e.g. a BT that is immediately quiescent) has
+    // an empty `Event`, so `step` is written via `nomatch`.
+    if lts.alphabet.is_empty() {
+        o.push_str("def step : State → Event → Option State := fun _ e => nomatch e\n");
+    } else {
+        o.push_str("def step : State → Event → Option State\n");
+        for s in &lts.states {
+            for e in &lts.alphabet {
+                if let Some(t) = lts.transitions.get(&(s.clone(), e.clone())) {
+                    o.push_str(&format!("  | .{}, .{} => some .{}\n", ctor(s), ctor(e), ctor(t)));
+                }
             }
         }
-    }
-    let some_blocked = lts
-        .states
-        .iter()
-        .any(|s| lts.alphabet.iter().any(|e| !lts.transitions.contains_key(&(s.clone(), e.clone()))));
-    if some_blocked {
-        o.push_str("  | _, _ => none\n");
+        let some_blocked = lts.states.iter().any(|s| {
+            lts.alphabet.iter().any(|e| !lts.transitions.contains_key(&(s.clone(), e.clone())))
+        });
+        if some_blocked {
+            o.push_str("  | _, _ => none\n");
+        }
     }
     o.push('\n');
 

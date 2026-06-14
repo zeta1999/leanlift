@@ -59,14 +59,18 @@ pub fn detect(doc: &Doc) -> Result<Family, String> {
             other => Err(format!("unknown kind `{other}` (have: fsm, petri, cpn, bt, spn)")),
         };
     }
-    // Shape inference: places ⇒ Petri-family, states ⇒ FSM.
+    // Shape inference: a `tree` ⇒ BT, `places` ⇒ Petri-family, `states`/
+    // `machines` ⇒ FSM.
+    if doc.scalar("tree").is_some() {
+        return Ok(Family::Bt);
+    }
     if doc.scalar("places").is_some() {
         return Ok(Family::Petri);
     }
-    if doc.scalar("states").is_some() {
+    if doc.scalar("states").is_some() || doc.scalar("machines").is_some() {
         return Ok(Family::Fsm);
     }
-    Err("cannot detect model family: no `kind`, `states`, or `places`".into())
+    Err("cannot detect model family: no `kind`, `states`, `machines`, `places`, or `tree`".into())
 }
 
 /// Parse a source string into an FSM `Lts`. A document with a `machines` array

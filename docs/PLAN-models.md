@@ -145,6 +145,16 @@ The shared substrate every later phase reuses. No new model family yet.
 
 ## Phase 3 — Behaviour trees
 
+> **Status (landed 3.1–3.4):** BT IR + native `*.model.toml` tree DSL
+> (`src/models/bt.rs`: `seq`/`fallback`/`cond`/`act` over a boolean blackboard,
+> reactive tick semantics), BT→LTS compilation (one tick ⇒ one transition) so
+> `check`/`prove` reuse the FSM backends **unchanged** → M1/M3, and the
+> `mission` example (`mission.model.toml`, `mission.recipe.md`). Empty-alphabet
+> (immediately-quiescent) BTs export correctly (`emit_fsm` `nomatch` branch).
+> Teeth: an unguarded navigate placed first reaches `lost∧moving` and fails both
+> gates. **Deferred:** BehaviorTree.CPP/Groot XML import (3.1), Decorator/
+> Parallel nodes, code export (3.5 → Phase 6).
+
 - **3.1 BT IR + standard format.** Sequence / Fallback(Selector) / Parallel /
   Decorator / Action / Condition, with reactive variants; **BehaviorTree.CPP /
   Groot XML** as the canonical format (it is the de-facto robotics standard, so

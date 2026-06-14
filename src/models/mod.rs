@@ -9,6 +9,7 @@
 //! builders and the Lean/PRISM/code exporters land in later phases behind this
 //! same one-command path.
 
+mod bt;
 mod check;
 mod format;
 mod ir;
@@ -90,6 +91,11 @@ fn check_cmd(a: Vec<String>) {
             let m = format::parse_fsm(&src).unwrap_or_else(|e| fail(&format!("{file}: {e}")));
             check::check(&m, bound)
         }
+        Family::Bt => {
+            // A BT compiles to an LTS, so the FSM checker applies unchanged.
+            let m = bt::parse_bt(&src).unwrap_or_else(|e| fail(&format!("{file}: {e}")));
+            check::check(&m, bound)
+        }
         Family::Petri => {
             let net = format::parse_petri(&src).unwrap_or_else(|e| fail(&format!("{file}: {e}")));
             let mut r = check::check(&net, bound);
@@ -98,7 +104,7 @@ fn check_cmd(a: Vec<String>) {
         }
         other => {
             eprintln!(
-                "detected `{}` model — `fsm` and `petri` are wired in this build (see docs/PLAN-models.md)",
+                "detected `{}` model — fsm/bt/petri are wired in this build (see docs/PLAN-models.md)",
                 other.tag()
             );
             exit(2);
@@ -153,6 +159,12 @@ fn prove_cmd(a: Vec<String>) {
             let r = check::check(&m, check::DEFAULT_BOUND);
             (r, lean::emit_fsm(&m, &ns))
         }
+        Family::Bt => {
+            // BT → LTS → the FSM exporter (the §3.3 reuse payoff).
+            let m = bt::parse_bt(&src).unwrap_or_else(|e| fail(&format!("{file}: {e}")));
+            let r = check::check(&m, check::DEFAULT_BOUND);
+            (r, lean::emit_fsm(&m, &ns))
+        }
         Family::Petri => {
             let net = format::parse_petri(&src).unwrap_or_else(|e| fail(&format!("{file}: {e}")));
             let mut r = check::check(&net, check::DEFAULT_BOUND);
@@ -161,7 +173,7 @@ fn prove_cmd(a: Vec<String>) {
         }
         other => {
             eprintln!(
-                "`lift model prove` supports `fsm` and `petri` in this build; detected `{}`",
+                "`lift model prove` supports fsm/bt/petri in this build; detected `{}`",
                 other.tag()
             );
             exit(2);
