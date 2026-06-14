@@ -34,34 +34,38 @@ Boot|Delocalized Localize|Delocalized Navigate|Localized Recover|Delocalized
 
 ```
 $ lift model export examples/models/mcl.model.toml --lang rust --verify
-  loop closure : L1 conformant — 300/300 traces match the native model
+  loop closure : L1 conformant — 21/21 reachable edges match the native model
   (generated code ≡ model semantics — the two halves of leanlift meet)
 
 $ lift model export examples/models/mission.model.toml --lang go --verify
-  loop closure : L1 conformant — 300/300 traces match the native model
+  loop closure : L1 conformant — 7/7 reachable edges match the native model
 ```
 
 `--verify` compiles the generated executor (`rustc` / `c++` / `go build`), runs
-it over 300 deterministic action traces (fixed seed), and compares its output
-line-by-line to the native simulator. Conformant ⇒ the generated code *is* the
+it over **exhaustive (state, action)-edge coverage** — a witness path to every
+reachable state, each extended by every action — and compares its output
+line-by-line to the native simulator. For a deterministic model this is a
+*complete* equivalence check, not a sample: every reachable edge is exercised
+(`mcl`: 21 = 5 states × 4 events + 1). Conformant ⇒ the generated code *is* the
 model. Rust, C++, and Go all conform on `mcl` (FSM) and `mission` (BT).
 
 ## 3. Teeth
 
-A code-generator bug is caught as a trace divergence. Corrupt one transition in
+A code-generator bug is caught as an edge divergence. Corrupt one transition in
 the emitted Rust — point `Localize|Delocalized --converged-->` at `Recover`
 instead of `Navigate`:
 
 ```
-  loop closure : FAILED — trace 7 diverges:
+  loop closure : FAILED — edge trace N diverges:
       trace   : start converged …
       native  : … Navigate|Localized …
       codegen : … Recover|Delocalized …
 ```
 
-The native model is the oracle; any drift in the generated code shows up
-immediately. (This is the same difftest discipline as the engine's bit-exact L1,
-applied to state traces instead of numeric vectors.)
+Because coverage is exhaustive over reachable edges, *any* single-edge codegen
+bug is guaranteed to surface (not just statistically likely). The native model
+is the oracle; this is the same difftest discipline as the engine's bit-exact
+L1, applied to state traces instead of numeric vectors.
 
 ## Petri / CPN executors
 
@@ -71,13 +75,13 @@ and the loop closure difftests **marking** traces instead of state names.
 
 ```
 $ lift model export examples/models/dock.model.toml --lang go --verify
-  loop closure : L1 conformant — 299/299 traces match the native model
+  loop closure : L1 conformant — 49/49 reachable edges match the native model
 $ lift model export examples/models/resource.model.toml --lang rust --verify
-  loop closure : L1 conformant — 299/299 traces match the native model
+  loop closure : L1 conformant — 25/25 reachable edges match the native model
 ```
 
-(299 vs 300: a trailing empty trace is dropped identically on both sides — the
-native reference is computed over exactly the input lines the executor reads.)
+(dock: 49 = 6 reachable markings × 8 transitions + 1; resource: 25 = 4 × 6 + 1.
+On an unbounded net the BFS is capped and the verdict says "coverage partial".)
 `--lang dot` emits a place/transition Petri diagram (places as circles with
 token counts, transitions as boxes).
 
