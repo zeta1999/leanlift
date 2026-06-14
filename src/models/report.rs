@@ -80,6 +80,28 @@ pub fn write_json(r: &CheckResult, file: &str, hash: &str, out: &Path) -> std::i
     std::fs::write(out, body)
 }
 
+/// Report for `lift model prove`: the M1 facts plus the M3 verdict.
+pub fn write_prove_json(
+    m1: &CheckResult,
+    file: &str,
+    hash: &str,
+    sorry_free: bool,
+    out: &Path,
+) -> std::io::Result<()> {
+    let level = if sorry_free { "M3_proved" } else { "M2_unverified" };
+    let body = format!(
+        "{{\n  \"family\": {},\n  \"file\": {},\n  \"level\": \"{}\",\n  \"sorry_free\": {},\n  \"reachable\": {},\n  \"deadlocks\": [{}],\n  \"hash\": \"{}\"\n}}\n",
+        json_str(&m1.family),
+        json_str(file),
+        level,
+        sorry_free,
+        m1.reachable,
+        m1.deadlocks.iter().map(|s| json_str(s)).collect::<Vec<_>>().join(", "),
+        hash,
+    );
+    std::fs::write(out, body)
+}
+
 /// Minimal JSON string escaping (quotes + backslashes + control chars).
 fn json_str(s: &str) -> String {
     let mut out = String::with_capacity(s.len() + 2);

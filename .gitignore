@@ -13,6 +13,8 @@ target/
 /report.json
 /proof.json
 /*.recipe.md
+/model-report.json
+*.gen.lean
 
 # LLM response cache (content-addressed claude -p results)
 /.leanlift-cache

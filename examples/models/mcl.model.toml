@@ -1,0 +1,95 @@
+# mcl — the Day-45 MCL robot, as two small FSMs sharing {converged, kidnapped}.
+# A synchronous (alphabetised) product: the tool composes `supervisor` × `belief`
+# into one flat machine and proves the safety property over the product.
+#
+#   supervisor : Boot -start-> Localize -converged-> Navigate
+#                Navigate -kidnapped-> Recover -converged-> Navigate
+#                Navigate -goal_reached-> Done
+#   belief     : Delocalized <-kidnapped- / -converged-> Localized  (private to
+#                neither start nor goal_reached — it self-loops on those)
+#
+# Safety: the product must NEVER reach (Navigate, Delocalized) — "never navigate
+# while delocalized". `check` BFS-verifies it (M1); `prove` closes it in Lean (M3).
+
+kind     = "fsm"
+machines = ["supervisor", "belief"]
+initial  = ["Boot", "Delocalized"]   # one per machine, in `machines` order
+
+# --- supervisor ----------------------------------------------------------------
+[[transition]]
+machine = "supervisor"
+from = "Boot"
+on   = "start"
+to   = "Localize"
+
+[[transition]]
+machine = "supervisor"
+from = "Localize"
+on   = "converged"
+to   = "Navigate"
+
+[[transition]]
+machine = "supervisor"
+from = "Localize"
+on   = "kidnapped"
+to   = "Localize"
+
+[[transition]]
+machine = "supervisor"
+from = "Navigate"
+on   = "converged"
+to   = "Navigate"
+
+[[transition]]
+machine = "supervisor"
+from = "Navigate"
+on   = "kidnapped"
+to   = "Recover"
+
+[[transition]]
+machine = "supervisor"
+from = "Navigate"
+on   = "goal_reached"
+to   = "Done"
+
+[[transition]]
+machine = "supervisor"
+from = "Recover"
+on   = "converged"
+to   = "Navigate"
+
+[[transition]]
+machine = "supervisor"
+from = "Recover"
+on   = "kidnapped"
+to   = "Recover"
+
+# --- belief --------------------------------------------------------------------
+[[transition]]
+machine = "belief"
+from = "Delocalized"
+on   = "converged"
+to   = "Localized"
+
+[[transition]]
+machine = "belief"
+from = "Localized"
+on   = "converged"
+to   = "Localized"
+
+[[transition]]
+machine = "belief"
+from = "Localized"
+on   = "kidnapped"
+to   = "Delocalized"
+
+[[transition]]
+machine = "belief"
+from = "Delocalized"
+on   = "kidnapped"
+to   = "Delocalized"
+
+# --- safety property -----------------------------------------------------------
+[[forbid]]
+supervisor = "Navigate"
+belief     = "Delocalized"

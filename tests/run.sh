@@ -111,6 +111,42 @@ else
   pass "forbidden-state model caught ($(grep -o 'safety VIOLATED' "$TMP/badm.out" | head -1 || echo 'safety VIOLATED'))"
 fi
 
+# mcl: the supervisor × belief product (Phase 1). M1 check, then teeth.
+if "$LIFT" model check examples/models/mcl.model.toml --out "$TMP/mcl.json" >"$TMP/mcl.out" 2>&1; then
+  pass "mcl product check  ($(grep -o 'reachable : [0-9]* state' "$TMP/mcl.out"))"
+else
+  bad "mcl did not check"; cat "$TMP/mcl.out"
+fi
+python3 - <<'PY'
+src = open("examples/models/mcl.model.toml").read()
+old = 'machine = "belief"\nfrom = "Delocalized"\non   = "converged"\nto   = "Localized"'
+new = 'machine = "belief"\nfrom = "Delocalized"\non   = "converged"\nto   = "Delocalized"'
+open("/tmp/mcl-broken-test.model.toml","w").write(src.replace(old,new,1))
+PY
+if "$LIFT" model check /tmp/mcl-broken-test.model.toml --out "$TMP/mclb.json" >"$TMP/mclb.out" 2>&1; then
+  bad "broken mcl was NOT caught at M1 (exit 0)"
+else
+  pass "broken mcl caught at M1 ($(grep -o 'Navigate|Delocalized' "$TMP/mclb.out" | head -1))"
+fi
+
+echo "== models (M3 Lean proof — Phase 1, needs lean on PATH) =="
+if command -v lean >/dev/null 2>&1; then
+  if "$LIFT" model prove examples/models/mcl.model.toml --emit "$TMP/Mcl.gen.lean" --out "$TMP/mclp.json" >"$TMP/mclp.out" 2>&1; then
+    pass "mcl prove  ($(grep -o 'M3 proved' "$TMP/mclp.out"), sorry-free)"
+  else
+    bad "mcl did not certify M3"; tail -15 "$TMP/mclp.out"
+  fi
+  # teeth: the broken product must FAIL to elaborate (M3 red).
+  if "$LIFT" model prove /tmp/mcl-broken-test.model.toml --emit "$TMP/Broken.gen.lean" --out "$TMP/mclbp.json" >"$TMP/mclbp.out" 2>&1; then
+    bad "broken mcl proof did NOT fail (exit 0)"
+  else
+    pass "broken mcl proof fails to elaborate ($(grep -o 'did NOT elaborate' "$TMP/mclbp.out" | head -1))"
+  fi
+  rm -f /tmp/mcl-broken-test.model.toml
+else
+  printf '  \033[33mSKIP\033[0m  mcl prove (lean not on PATH)\n'
+fi
+
 echo
 [ "$fail" -eq 0 ] && echo "all green" || echo "REGRESSIONS"
 exit "$fail"
