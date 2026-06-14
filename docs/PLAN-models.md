@@ -107,6 +107,17 @@ The shared substrate every later phase reuses. No new model family yet.
 
 ## Phase 2 — PT-net (place/transition Petri) **with token loss** (day48 Part 2)
 
+> **Status (landed 2.1–2.4):** PT-net IR (`PtNet`/`PtTrans`/`BoundProp`, marking
+> = aligned `Vec<u32>`), `*.model.toml` Petri shape (`places`, `[[transition]]`
+> pre/post, `post=""` loss, `[[bound]]` safety), native check reusing the BFS
+> with the **safety-survives-loss / liveness-doesn't** split + loss-induced sink
+> as report notes, Lean exporter (`emit_petri`: `structure M`, guarded `step`,
+> the inductive `total ≤ B` strengthening, `inv_holds` by cases+split+omega,
+> `safety` corollary) → **M3** sorry-free, and the `dock` example
+> (`dock.model.toml`, `dock.recipe.md`). Teeth: `free:2` breaks both M1
+> (`csA+csB=2`) and M3 (omega can't derive the bound). **Deferred:** 2.5 bounded
+> liveness (retry-budget variant), 2.6 PNML, 2.7 UDP coordinator codegen.
+
 - **2.1 PT-net IR + native format.** `places`, `transitions:⟨pre,post⟩`, `initial`
   marking; **loss** = `post = ∅` (`petri.py`).
 - **2.2 Native check.** Bounded reachability, `deadlocks`, the **mutex upper-bound**

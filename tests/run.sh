@@ -129,22 +129,43 @@ else
   pass "broken mcl caught at M1 ($(grep -o 'Navigate|Delocalized' "$TMP/mclb.out" | head -1))"
 fi
 
-echo "== models (M3 Lean proof — Phase 1, needs lean on PATH) =="
+# dock: PT-net with token loss (Phase 2). M1 check + the safety-survives-loss
+# note, then teeth (free:2 breaks mutual exclusion).
+if "$LIFT" model check examples/models/dock.model.toml --out "$TMP/dock.json" >"$TMP/dock.out" 2>&1; then
+  pass "dock PT-net check  ($(grep -o 'reachable : [0-9]* state' "$TMP/dock.out"); lossy, mutex safe)"
+else
+  bad "dock did not check"; cat "$TMP/dock.out"
+fi
+sed 's/initial = "free:1"/initial = "free:2"/' examples/models/dock.model.toml > /tmp/dock-broken-test.model.toml
+if "$LIFT" model check /tmp/dock-broken-test.model.toml --out "$TMP/dockb.json" >"$TMP/dockb.out" 2>&1; then
+  bad "broken dock (free:2) was NOT caught at M1 (exit 0)"
+else
+  pass "broken dock caught at M1 ($(grep -o 'csA+csB = 2 > 1' "$TMP/dockb.out" | head -1))"
+fi
+
+echo "== models (M3 Lean proof — Phases 1–2, needs lean on PATH) =="
 if command -v lean >/dev/null 2>&1; then
-  if "$LIFT" model prove examples/models/mcl.model.toml --emit "$TMP/Mcl.gen.lean" --out "$TMP/mclp.json" >"$TMP/mclp.out" 2>&1; then
-    pass "mcl prove  ($(grep -o 'M3 proved' "$TMP/mclp.out"), sorry-free)"
-  else
-    bad "mcl did not certify M3"; tail -15 "$TMP/mclp.out"
-  fi
-  # teeth: the broken product must FAIL to elaborate (M3 red).
+  for me in mcl dock; do
+    if "$LIFT" model prove "examples/models/$me.model.toml" --emit "$TMP/$me.gen.lean" --out "$TMP/${me}p.json" >"$TMP/${me}p.out" 2>&1; then
+      pass "$me prove  ($(grep -o 'M3 proved' "$TMP/${me}p.out"), sorry-free)"
+    else
+      bad "$me did not certify M3"; tail -15 "$TMP/${me}p.out"
+    fi
+  done
+  # teeth: the broken product / broken net must FAIL to elaborate (M3 red).
   if "$LIFT" model prove /tmp/mcl-broken-test.model.toml --emit "$TMP/Broken.gen.lean" --out "$TMP/mclbp.json" >"$TMP/mclbp.out" 2>&1; then
     bad "broken mcl proof did NOT fail (exit 0)"
   else
     pass "broken mcl proof fails to elaborate ($(grep -o 'did NOT elaborate' "$TMP/mclbp.out" | head -1))"
   fi
-  rm -f /tmp/mcl-broken-test.model.toml
+  if "$LIFT" model prove /tmp/dock-broken-test.model.toml --emit "$TMP/DockBad.gen.lean" --out "$TMP/dockbp.json" >"$TMP/dockbp.out" 2>&1; then
+    bad "broken dock proof did NOT fail (exit 0)"
+  else
+    pass "broken dock proof fails to elaborate ($(grep -o 'did NOT elaborate' "$TMP/dockbp.out" | head -1))"
+  fi
+  rm -f /tmp/mcl-broken-test.model.toml /tmp/dock-broken-test.model.toml
 else
-  printf '  \033[33mSKIP\033[0m  mcl prove (lean not on PATH)\n'
+  printf '  \033[33mSKIP\033[0m  mcl/dock prove (lean not on PATH)\n'
 fi
 
 echo

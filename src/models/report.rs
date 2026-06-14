@@ -42,6 +42,9 @@ pub fn print_human(r: &CheckResult, file: &str, hash: &str) {
             println!("    ✗ {s} — {why}");
         }
     }
+    for note in &r.notes {
+        println!("  note      : {note}");
+    }
     println!("  hash      : {hash}");
     println!();
 }
