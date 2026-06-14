@@ -59,21 +59,37 @@ Kani proves panic-freedom and bounded assertions for Rust — the right tool for
 this integer/array logic. Harnesses behind `#[cfg(kani)]`, run by `cargo kani`
 (an external tool, like `lean`/`forge`/`aeneas` — not a shipped dependency).
 
-- **V1.1 scaffold.** A `#[cfg(kani)] mod kani_harness` per target module; a
-  `verify-kani.sh` that runs `cargo kani` if installed, SKIPs otherwise.
-- **V1.2 `PtNet::fire` never underflows.** `kani::assume(enabled(m,t))` over a
-  bounded marking ⇒ prove no `u32` subtraction overflow in `fire`. Proves the
-  safety the production code relies on implicitly.
-- **V1.3 `vid`/`ctor` always emit a valid identifier.** For any input up to
-  length k: non-empty, first char a letter, all chars alphanumeric — exactly the
-  bug class fixed in the review, now a proof.
+**Tool-fit learned (2026-06-14):** Kani is excellent for the *integer kernel*
+but intractable for the *string* emitters — CBMC chokes on the symbolic UTF-8
+decode behind `&str::chars()` (a single `vid`/`ctor` harness ran >50 min without
+converging). So V1 is split: integer properties → Kani; identifier-validity →
+exhaustive enumeration in `cargo test` (complete for the bound, sub-millisecond).
+
+- **V1.1 scaffold.** ✅ `#[cfg(kani)] mod kani_harness` in `ir.rs`; a
+  `verify-kani.sh` that runs each harness in isolation if `cargo-kani` is
+  installed, SKIPs (exit 0) otherwise.
+- **V1.2 `PtNet::fire` never underflows.** ✅ Marking arithmetic factored into
+  pure `ir::{marking_enabled, fire_marking}` (shared by `step`, so the proof
+  covers production). `kani::assume(marking_enabled(m,pre))` over a bounded
+  marking ⇒ no `u32` subtraction underflow in `fire_marking`. Dropping the
+  assume makes Kani find the underflow — the precondition is exactly what makes
+  `step` safe. (`fire_no_underflow`, KANI GREEN.)
+- **V1.3 `vid`/`ctor` always emit a valid identifier.** ✅ but **via exhaustive
+  enumeration, not Kani** (see tool-fit note): `cargo test` checks `vid`
+  (codegen.rs) and `ctor` (lean.rs) over ALL ASCII strings of length ≤ 2 (~16k
+  each, complete for the bound) plus named adversarial inputs — non-empty, valid
+  first char, valid body. Exactly the digit-leading / punctuation-leading bug
+  class fixed in the review, now an exhaustive guard.
 - **V1.4 CTMC outputs finite & in range.** For a bounded generator `Q`:
   `prob_reach ∈ [0,1]`, transient rows sum ≤ 1, no `NaN`/`inf`; `solve` does not
   panic on any k×k input. (Bounded k — strong for these small dimensions.)
 - **V1.5 parser no-panic** for bounded inputs (complements V2 fuzzing with a
   bounded *proof*).
-- **V1.6 CI.** `ci.sh` calls `verify-kani.sh` (SKIP when Kani absent), so the
-  bounded proofs run wherever Kani is installed.
+- **V1.6 CI.** `verify-kani.sh` is standalone and goes in the **deep/nightly
+  tier** (V5.2), *not* fast `ci.sh`: `cargo kani` recompiles the crate with its
+  own toolchain (minutes, heavy) — too costly per-commit. The exhaustive V1.3
+  enumeration *is* in fast `ci.sh` (it rides `cargo test`). Run Kani via
+  `./verify-kani.sh` (SKIPs cleanly when Kani is absent).
 
 ---
 
@@ -151,17 +167,18 @@ that produces proofs is itself proved by the same tool.
 | `check` BFS | reach soundness, det. | no-panic | — | Creusot loop-invariant |
 | `format::product` | commutativity | — | — | — |
 | `cpn::unfold` | **unfold ≡ coloured** ✅ | — | — | — |
-| `PtNet::fire/enabled` | loss monotonicity | **no underflow** | — | **Aeneas vs Petri.lean** ★ |
+| `PtNet::fire/enabled` | loss monotonicity ✅ | **no underflow** ✅ | — | **Aeneas vs Petri.lean** ★ |
 | `gspn` CTMC solver | vs PRISM + closed forms | finite/in-range | — | — (floats) |
-| `lean`/`codegen` emit | M1↔M3, loop closure ✅ | `vid`/`ctor` valid | — | — |
+| `lean`/`codegen` emit | M1↔M3, loop closure ✅; `vid`/`ctor` exhaustive ASCII≤2 ✅ | (string-decode intractable) | — | — |
 
 ## Ordered next steps
 
 1. ✅ V0.1–V0.3 (coloured sim, unfold≡coloured differential, FSM proptests:
    determinism, rename, BFS-count, product commutativity, dead-state-addition,
    loss monotonicity) + V4 coverage policy + `--samples`.
-2. **V1.2/V1.3 Kani** — `fire` no-underflow and `vid`/`ctor` validity (the
-   fixed-bug regression guards), behind `verify-kani.sh`.
+2. ✅ **V1.2 Kani** `fire` no-underflow (`verify-kani.sh`, deep tier) + **V1.3**
+   `vid`/`ctor` validity via exhaustive ASCII≤2 enumeration in `cargo test`
+   (Kani string-decode proved intractable — see V1 tool-fit note).
 3. **V3.1–V3.4 Aeneas dogfood** — extract the Petri core and prove it against
    `Petri.lean` (the headline: leanlift verifies its own substrate).
 4. V0.4–V0.6 (random CPNs, M1↔M3, CTMC-vs-PRISM gate); V2 parser fuzzing.

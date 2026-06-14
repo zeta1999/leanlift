@@ -267,3 +267,41 @@ pub fn emit_petri(net: &PtNet, namespace: &str) -> String {
     o.push_str(&format!("#print axioms {namespace}.safety\n\nend {namespace}\n"));
     o
 }
+
+#[cfg(test)]
+mod tests {
+    use super::ctor;
+
+    /// A legal Lean lowerCamel identifier: non-empty, first char a lowercase
+    /// ASCII letter, every char ASCII-alphanumeric.
+    fn valid_lean_id(id: &str) -> bool {
+        let mut cs = id.chars();
+        match cs.next() {
+            None => false,
+            Some(f) => f.is_ascii_lowercase() && id.chars().all(|c| c.is_ascii_alphanumeric()),
+        }
+    }
+
+    /// V1.3 (PLAN-verification): `ctor` emits a legal Lean identifier for EVERY
+    /// input. Enumerates the bound directly — all ASCII strings of length ≤ 2
+    /// (complete: ~16k cases), plus named adversarial inputs at greater length.
+    /// (Kani's symbolic UTF-8 decode is intractable here; brute force is complete
+    /// for the bound and sub-millisecond.)
+    #[test]
+    fn ctor_valid_over_all_ascii_le_2() {
+        assert!(valid_lean_id(&ctor("")), "empty");
+        for a in 0u8..128 {
+            let s1 = (a as char).to_string();
+            assert!(valid_lean_id(&ctor(&s1)), "len1 {s1:?}");
+            for b in 0u8..128 {
+                let mut s2 = String::new();
+                s2.push(a as char);
+                s2.push(b as char);
+                assert!(valid_lean_id(&ctor(&s2)), "len2 {s2:?}");
+            }
+        }
+        for s in ["999", "1a2", "...", "|||", "Navigate|Delocalized", "a.b.c", "-x-", "   "] {
+            assert!(valid_lean_id(&ctor(s)), "adversarial {s:?}");
+        }
+    }
+}

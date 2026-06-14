@@ -690,3 +690,43 @@ fn go(lts: &Lts) -> String {
     ));
     o
 }
+
+#[cfg(test)]
+mod tests {
+    use super::vid;
+
+    /// A valid code identifier: non-empty, first char a letter or `_`, every
+    /// char alphanumeric or `_`.
+    fn valid_id(id: &str) -> bool {
+        let mut cs = id.chars();
+        match cs.next() {
+            None => false,
+            Some(f) => {
+                (f.is_ascii_alphabetic() || f == '_')
+                    && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+            }
+        }
+    }
+
+    /// V1.3 (PLAN-verification): `vid` emits a valid identifier for EVERY input.
+    /// Kani's symbolic UTF-8 decode is intractable here, so we enumerate the
+    /// bound directly — all ASCII strings of length ≤ 2 (complete: ~16k cases),
+    /// plus the named adversarial inputs at greater length. Sub-millisecond.
+    #[test]
+    fn vid_valid_over_all_ascii_le_2() {
+        assert!(valid_id(&vid("")), "empty");
+        for a in 0u8..128 {
+            let s1 = (a as char).to_string();
+            assert!(valid_id(&vid(&s1)), "len1 {s1:?}");
+            for b in 0u8..128 {
+                let mut s2 = String::new();
+                s2.push(a as char);
+                s2.push(b as char);
+                assert!(valid_id(&vid(&s2)), "len2 {s2:?}");
+            }
+        }
+        for s in ["999", "1a2", "...", "|||", "1|2", "a.b.c", "-x-", "   ", "9_9"] {
+            assert!(valid_id(&vid(s)), "adversarial {s:?}");
+        }
+    }
+}

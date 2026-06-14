@@ -106,8 +106,24 @@ impl PtNet {
         s.split(',').map(|x| x.parse().unwrap_or(0)).collect()
     }
     fn enabled_at(&self, m: &[u32], t: &PtTrans) -> bool {
-        t.pre.iter().zip(m).all(|(&c, &have)| c <= have)
+        marking_enabled(m, &t.pre)
     }
+}
+
+/// Enabling test as pure marking arithmetic (no `&self`, no strings): every arc
+/// weight `pre[i]` is covered by the tokens `m[i]`. Factored out of `step`/
+/// `enabled` so the kernel can be verified directly — no-underflow by Kani
+/// (V1.2) and against `Petri.lean` by Aeneas (V3).
+pub(crate) fn marking_enabled(m: &[u32], pre: &[u32]) -> bool {
+    pre.iter().zip(m).all(|(&c, &have)| c <= have)
+}
+
+/// Fire kernel: the successor marking `m − pre + post`, index-wise.
+/// PRECONDITION: `marking_enabled(m, pre)` — under it no `u32` underflow occurs,
+/// which the `fire_no_underflow` Kani harness proves. Shared by `PtNet::step`,
+/// so the proof covers production.
+pub(crate) fn fire_marking(m: &[u32], pre: &[u32], post: &[u32]) -> Vec<u32> {
+    (0..m.len()).map(|i| m[i] - pre[i] + post[i]).collect()
 }
 
 impl Model for PtNet {
@@ -131,9 +147,7 @@ impl Model for PtNet {
         if !self.enabled_at(&m, t) {
             return None;
         }
-        let next: Vec<u32> = (0..self.places.len())
-            .map(|i| m[i] - t.pre[i] + t.post[i])
-            .collect();
+        let next = fire_marking(&m, &t.pre, &t.post);
         Some(Self::encode(&next))
     }
     fn forbidden(&self, s: &State) -> Option<String> {
@@ -177,6 +191,39 @@ impl Model for Lts {
             Some(format!("state `{s}` is declared forbidden"))
         } else {
             None
+        }
+    }
+}
+
+/// Bounded model-checking harness (PLAN-verification §V1.2). Inert for normal
+/// `cargo build`/`test` — compiled only under `cargo kani`, which injects the
+/// `kani` crate. Bounds are kept small so CBMC stays light.
+#[cfg(kani)]
+mod kani_harness {
+    use super::{fire_marking, marking_enabled};
+
+    /// `PtNet::fire` never underflows: for any bounded marking and transition,
+    /// IF the transition is enabled THEN `m − pre + post` computes without a
+    /// `u32` subtraction underflow (Kani auto-checks overflow; reaching the
+    /// asserts means no panic). Drop the `assume(enabled)` and Kani finds the
+    /// underflow — i.e. the precondition is exactly what makes `step` safe.
+    #[kani::proof]
+    fn fire_no_underflow() {
+        const N: usize = 3;
+        let m: [u32; N] = kani::any();
+        let pre: [u32; N] = kani::any();
+        let post: [u32; N] = kani::any();
+        for i in 0..N {
+            kani::assume(m[i] <= 8);
+            kani::assume(pre[i] <= 8);
+            kani::assume(post[i] <= 8);
+        }
+        kani::assume(marking_enabled(&m, &pre));
+        let next = fire_marking(&m, &pre, &post);
+        for i in 0..N {
+            // non-increasing transitions cannot raise the per-place count above
+            // what pre removed + post added; and the value is exactly the spec.
+            assert!(next[i] == m[i] - pre[i] + post[i]);
         }
     }
 }
