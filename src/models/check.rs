@@ -28,6 +28,9 @@ pub struct CheckResult {
     pub violations: Vec<(State, String)>,
     /// Reachable states with no enabled action.
     pub deadlocks: Vec<State>,
+    /// Family-specific findings (e.g. the Petri safety-survives-loss split).
+    /// Filled by the caller after `check`; empty for the FSM path.
+    pub notes: Vec<String>,
 }
 
 impl CheckResult {
@@ -88,5 +91,6 @@ pub fn check(model: &dyn Model, bound: usize) -> CheckResult {
         truncated,
         violations,
         deadlocks,
+        notes: Vec::new(),
     }
 }

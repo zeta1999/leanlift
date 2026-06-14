@@ -1,0 +1,67 @@
+# dock — two distant rovers (A, B) sharing ONE charging dock over a LOSSY
+# release channel (day48 Part 2). Async / interleaving Petri-net semantics; a
+# release message in flight can be DROPPED (`lossA`/`lossB`: pre = a message,
+# post = nothing).
+#
+#   free          : the single dock token (the shared resource)
+#   csA / csB     : rover A / B is charging (in its critical section)
+#   relA / relB   : a release message from A / B is in flight on the channel
+#
+#   acq* : free -> cs*      a rover grabs the dock
+#   rel* : cs*  -> rel*     done charging -> release message in flight
+#   deliver* : rel* -> free message delivered -> dock free again
+#   loss*    : rel* -> ∅    message DROPPED (only when lossy)
+#
+# Lesson: mutual exclusion (csA + csB ≤ 1) is an UPPER BOUND — it SURVIVES loss
+# (`check` M1 + `prove` M3). The dock's availability needs a conservation
+# EQUALITY, which loss destroys → the all-tokens-lost deadlock the checker finds.
+
+kind    = "petri"
+places  = ["free", "csA", "csB", "relA", "relB"]
+initial = "free:1"
+
+[[transition]]
+name = "acqA"
+pre  = "free:1"
+post = "csA:1"
+
+[[transition]]
+name = "acqB"
+pre  = "free:1"
+post = "csB:1"
+
+[[transition]]
+name = "relA"
+pre  = "csA:1"
+post = "relA:1"
+
+[[transition]]
+name = "relB"
+pre  = "csB:1"
+post = "relB:1"
+
+[[transition]]
+name = "deliverA"
+pre  = "relA:1"
+post = "free:1"
+
+[[transition]]
+name = "deliverB"
+pre  = "relB:1"
+post = "free:1"
+
+[[transition]]
+name = "lossA"
+pre  = "relA:1"
+post = ""           # DROPPED — pure loss
+
+[[transition]]
+name = "lossB"
+pre  = "relB:1"
+post = ""
+
+# Safety property (robust to loss): at most one rover charging.
+[[bound]]
+name   = "mutex"
+places = ["csA", "csB"]
+max    = "1"

@@ -85,18 +85,25 @@ fn check_cmd(a: Vec<String>) {
     let doc = toml::parse(&src).unwrap_or_else(|e| fail(&format!("{file}: {e}")));
     let family = format::detect(&doc).unwrap_or_else(|e| fail(&format!("{file}: {e}")));
 
-    let model = match family {
-        Family::Fsm => format::parse_fsm(&src).unwrap_or_else(|e| fail(&format!("{file}: {e}"))),
+    let result = match family {
+        Family::Fsm => {
+            let m = format::parse_fsm(&src).unwrap_or_else(|e| fail(&format!("{file}: {e}")));
+            check::check(&m, bound)
+        }
+        Family::Petri => {
+            let net = format::parse_petri(&src).unwrap_or_else(|e| fail(&format!("{file}: {e}")));
+            let mut r = check::check(&net, bound);
+            r.notes = petri_notes(&net, &r);
+            r
+        }
         other => {
             eprintln!(
-                "detected `{}` model — only `fsm` is wired in this build (see docs/PLAN-models.md)",
+                "detected `{}` model — `fsm` and `petri` are wired in this build (see docs/PLAN-models.md)",
                 other.tag()
             );
             exit(2);
         }
     };
-
-    let result = check::check(&model, bound);
     report::print_human(&result, &file, &hash);
     if let Err(e) = report::write_json(&result, &file, &hash, &out) {
         eprintln!("warning: could not write {}: {e}", out.display());
@@ -135,27 +142,36 @@ fn prove_cmd(a: Vec<String>) {
     let hash = report::content_hash(&src);
 
     let doc = toml::parse(&src).unwrap_or_else(|e| fail(&format!("{file}: {e}")));
-    match format::detect(&doc).unwrap_or_else(|e| fail(&format!("{file}: {e}"))) {
-        Family::Fsm => {}
+    let family = format::detect(&doc).unwrap_or_else(|e| fail(&format!("{file}: {e}")));
+    let ns = lean_namespace(&file);
+
+    // Build the model, run M1 (the certificate reports reachable size), and emit
+    // the Lean proof — both families ride the same elaborate-and-certify path.
+    let (m1, generated) = match family {
+        Family::Fsm => {
+            let m = format::parse_fsm(&src).unwrap_or_else(|e| fail(&format!("{file}: {e}")));
+            let r = check::check(&m, check::DEFAULT_BOUND);
+            (r, lean::emit_fsm(&m, &ns))
+        }
+        Family::Petri => {
+            let net = format::parse_petri(&src).unwrap_or_else(|e| fail(&format!("{file}: {e}")));
+            let mut r = check::check(&net, check::DEFAULT_BOUND);
+            r.notes = petri_notes(&net, &r);
+            (r, lean::emit_petri(&net, &ns))
+        }
         other => {
             eprintln!(
-                "`lift model prove` supports `fsm` in this build; detected `{}` (see docs/PLAN-models.md)",
+                "`lift model prove` supports `fsm` and `petri` in this build; detected `{}`",
                 other.tag()
             );
             exit(2);
         }
-    }
-    let model = format::parse_fsm(&src).unwrap_or_else(|e| fail(&format!("{file}: {e}")));
-
-    // M1 first (so the certificate reports reachable size and any deadlock).
-    let m1 = check::check(&model, check::DEFAULT_BOUND);
+    };
 
     // Compile the Models support theory, then emit + elaborate the proof.
     if let Err(e) = ensure_models_lib(&lean_path) {
         fail(&format!("{e}"));
     }
-    let ns = lean_namespace(&file);
-    let generated = lean::emit_fsm(&model, &ns);
     let emit_path = emit.unwrap_or_else(|| PathBuf::from(format!("{}.gen.lean", file_stem(&file))));
     if let Err(e) = std::fs::write(&emit_path, &generated) {
         fail(&format!("cannot write {}: {e}", emit_path.display()));
@@ -183,7 +199,7 @@ fn prove_cmd(a: Vec<String>) {
     let axioms = stdout.lines().find(|l| l.contains("axioms")).unwrap_or("").trim();
 
     println!();
-    println!("  leanlift model certificate — fsm `{file}`");
+    println!("  leanlift model certificate — {} `{file}`", m1.family);
     println!("  ────────────────────────────────────────────────");
     if sorry_free {
         println!("  level : M3 proved  (Lean safety theorem closed, sorry-free)");
@@ -243,6 +259,33 @@ fn ensure_models_lib(lean_path: &Path) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+/// The Petri-specific findings (PLAN-models §2.2): classify the net as lossy or
+/// conservative, and surface the safety-survives-loss / liveness-doesn't split
+/// and the loss-induced deadlock as first-class report lines.
+fn petri_notes(net: &ir::PtNet, r: &check::CheckResult) -> Vec<String> {
+    let mut notes = Vec::new();
+    notes.push(format!("marking vector order: {}", net.places.join(",")));
+    let lossy = net.transitions.iter().any(|t| t.is_loss());
+    let conservative = net.transitions.iter().all(|t| t.post_sum() == t.pre_sum());
+    if lossy {
+        notes.push(
+            "net is LOSSY: declared upper-bound safety is monotone under loss (survives); \
+             the conservation equality liveness needs is broken by loss."
+                .to_string(),
+        );
+        if !r.deadlocks.is_empty() {
+            notes.push(
+                "the reachable deadlock(s) above include the loss-induced sink \
+                 (tokens dropped ⇒ no progress) — fix is retransmit/timeout (Phase 2.5)."
+                    .to_string(),
+            );
+        }
+    } else if conservative {
+        notes.push("net is CONSERVATIVE (token mass preserved): safety and liveness both intact.".to_string());
+    }
+    notes
 }
 
 fn file_stem(file: &str) -> String {

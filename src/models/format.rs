@@ -20,7 +20,7 @@
 //! state = "error"
 //! ```
 
-use super::ir::Lts;
+use super::ir::{BoundProp, Lts, PtNet, PtTrans};
 use super::toml::{self, Doc};
 use std::collections::HashMap;
 
@@ -254,6 +254,106 @@ fn build_fsm(doc: &Doc) -> Result<Lts, String> {
         .collect::<Result<_, String>>()?;
 
     Ok(Lts { family: "fsm", states, alphabet, initial, transitions, forbid })
+}
+
+/// Parse a `*.model.toml` PT-net (Phase 2). Shape:
+///
+/// ```toml
+/// kind    = "petri"
+/// places  = ["free", "csA", "csB", "relA", "relB"]
+/// initial = "free:1"          # a marking: comma-separated place:count
+/// bound   = "8"               # optional per-place cap (default 8)
+///
+/// [[transition]]
+/// name = "acqA"
+/// pre  = "free:1"
+/// post = "csA:1"
+///
+/// [[transition]]              # pure-loss: post is empty
+/// name = "lossA"
+/// pre  = "relA:1"
+/// post = ""
+///
+/// [[bound]]                   # safety: sum(places) ≤ max
+/// name   = "mutex"
+/// places = ["csA", "csB"]
+/// max    = "1"
+/// ```
+pub fn parse_petri(src: &str) -> Result<PtNet, String> {
+    let doc = toml::parse(src)?;
+    build_petri(&doc)
+}
+
+fn build_petri(doc: &Doc) -> Result<PtNet, String> {
+    let places: Vec<String> = doc
+        .scalar("places")
+        .ok_or("PT-net requires a `places` array")?
+        .as_arr("places")?
+        .to_vec();
+    if places.is_empty() {
+        return Err("PT-net `places` is empty".into());
+    }
+    let index = |p: &str| places.iter().position(|x| x == p);
+
+    let initial = parse_marking(
+        doc.scalar("initial").ok_or("PT-net requires an `initial` marking")?.as_str("initial")?,
+        &places,
+        &index,
+    )?;
+
+    let bound: u32 = match doc.scalar("bound") {
+        Some(v) => v.as_str("bound")?.parse().map_err(|_| "`bound` must be a positive integer")?,
+        None => 8,
+    };
+
+    let mut transitions = Vec::new();
+    for (i, t) in doc.table("transition").iter().enumerate() {
+        let name = field(t, "name", i)?;
+        let pre = parse_marking(t.get("pre").map(|v| v.as_str("pre")).transpose()?.unwrap_or(""), &places, &index)?;
+        let post = parse_marking(t.get("post").map(|v| v.as_str("post")).transpose()?.unwrap_or(""), &places, &index)?;
+        transitions.push(PtTrans { name, pre, post });
+    }
+    if transitions.is_empty() {
+        return Err("PT-net has no transitions".into());
+    }
+
+    let mut bounds = Vec::new();
+    for (i, b) in doc.table("bound").iter().enumerate() {
+        let name = field(b, "name", i)?;
+        let max: u32 = field(b, "max", i)?.parse().map_err(|_| format!("bound {i}: `max` must be an integer"))?;
+        let idxs: Vec<usize> = b
+            .get("places")
+            .ok_or_else(|| format!("bound {i}: missing `places`"))?
+            .as_arr("places")?
+            .iter()
+            .map(|p| index(p).ok_or_else(|| format!("bound {i}: place `{p}` not declared")))
+            .collect::<Result<_, String>>()?;
+        bounds.push(BoundProp { name, places: idxs, max });
+    }
+
+    Ok(PtNet { places, transitions, initial, bound, bounds })
+}
+
+/// Parse a marking / pre / post: `"free:1,csA:2"` → counts aligned to `places`.
+/// The empty string is the zero marking (used for pure-loss `post`).
+fn parse_marking(
+    s: &str,
+    places: &[String],
+    index: &impl Fn(&str) -> Option<usize>,
+) -> Result<Vec<u32>, String> {
+    let mut m = vec![0u32; places.len()];
+    for piece in s.split(',') {
+        let p = piece.trim();
+        if p.is_empty() {
+            continue;
+        }
+        let (place, count) = p
+            .split_once(':')
+            .ok_or_else(|| format!("marking entry `{p}` must be `place:count`"))?;
+        let i = index(place.trim()).ok_or_else(|| format!("marking: place `{place}` not declared"))?;
+        m[i] = count.trim().parse().map_err(|_| format!("marking: bad count in `{p}`"))?;
+    }
+    Ok(m)
 }
 
 fn field(t: &HashMap<String, toml::Value>, key: &str, i: usize) -> Result<String, String> {
