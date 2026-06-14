@@ -107,7 +107,6 @@ pub fn parse(src: &str) -> Result<Node, String> {
 
 /// Parse `tag attr="v" attr2='v2'` → (tag, attrs), stripping any `ns:` prefix.
 fn parse_tag(s: &str) -> (String, Vec<(String, String)>) {
-    let mut chars = s.char_indices().peekable();
     // tag name = up to first whitespace
     let mut name_end = s.len();
     for (idx, c) in s.char_indices() {
@@ -152,7 +151,6 @@ fn parse_tag(s: &str) -> (String, Vec<(String, String)>) {
         j += 1; // skip closing quote
         attrs.push((strip_ns(&key), decode(&val)));
     }
-    let _ = &mut chars;
     (tag, attrs)
 }
 

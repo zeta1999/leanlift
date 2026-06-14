@@ -67,6 +67,41 @@ impl Gspn {
         self.transitions.iter().any(|t| t.immediate && self.enabled_at(m, t))
     }
 
+    /// Detect an immediate-transition cycle among vanishing markings (a "timeless
+    /// trap"): the CTMC is then ill-defined and vanishing elimination would
+    /// silently drop probability mass. Fail loudly instead. DFS (three-colour)
+    /// over the immediate-only edge graph restricted to vanishing markings.
+    pub fn has_immediate_cycle(&self) -> bool {
+        let mut color: HashMap<String, u8> = HashMap::new(); // 0=unseen 1=on-stack 2=done
+        for n in self.all_markings() {
+            if self.is_vanishing(&dec(&n)) && color.get(&n).copied().unwrap_or(0) == 0 {
+                if self.imm_dfs(&n, &mut color) {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    fn imm_dfs(&self, node: &str, color: &mut HashMap<String, u8>) -> bool {
+        color.insert(node.to_string(), 1);
+        let m = dec(node);
+        for t in &self.transitions {
+            if t.immediate && self.enabled_at(&m, t) {
+                let to = enc(&self.fire(&m, t));
+                if self.is_vanishing(&dec(&to)) {
+                    match color.get(&to).copied().unwrap_or(0) {
+                        1 => return true, // back-edge into the current stack → cycle
+                        0 if self.imm_dfs(&to, color) => return true,
+                        _ => {}
+                    }
+                }
+            }
+        }
+        color.insert(node.to_string(), 2);
+        false
+    }
+
     /// All reachable markings (vanishing + tangible), as encoded strings.
     fn all_markings(&self) -> Vec<String> {
         let mut seen: HashMap<String, ()> = HashMap::new();
@@ -509,5 +544,92 @@ fn factor(t: &[String], p: &mut usize, vars: &HashMap<String, f64>) -> Result<f6
                 vars.get(s).copied().ok_or_else(|| format!("unknown identifier `{s}`"))
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn eval(src: &str, name: &str) -> f64 {
+        let net = parse(src).expect("parse");
+        let (tang, q) = net.ctmc();
+        let qy = net.queries.iter().find(|x| x.name == name).expect("query");
+        net.evaluate(qy, &tang, &q)
+    }
+
+    /// `K` budget tokens; `mode` lease|giveup. The day49 dock GSPN as a string.
+    fn dock(k: u32, p: f64, mode: &str) -> String {
+        let abort = if mode == "giveup" {
+            "[[transition]]\nname=\"abort\"\nkind=\"timed\"\nrate=\"mu_l\"\npre=\"inflight:1\"\ninhibit=\"budget\"\npost=\"stuck:1\"\n"
+        } else {
+            ""
+        };
+        format!(
+            "kind=\"gspn\"\nmode=\"{mode}\"\nplaces=[\"holding\",\"inflight\",\"freed\",\"budget\",\"stuck\"]\n\
+             initial=\"holding:1, budget:{k}\"\n\
+             [[param]]\nname=\"mu_d\"\nvalue=\"1.0\"\n[[param]]\nname=\"p\"\nvalue=\"{p}\"\n\
+             [[param]]\nname=\"mu_l\"\nvalue=\"mu_d * p / (1 - p)\"\n\
+             [[transition]]\nname=\"send\"\nkind=\"immediate\"\nweight=\"1.0\"\npre=\"holding:1\"\npost=\"inflight:1\"\n\
+             [[transition]]\nname=\"deliver\"\nkind=\"timed\"\nrate=\"mu_d\"\npre=\"inflight:1\"\npost=\"freed:1\"\n\
+             [[transition]]\nname=\"lose\"\nkind=\"timed\"\nrate=\"mu_l\"\npre=\"inflight:1, budget:1\"\npost=\"holding:1\"\n\
+             {abort}\
+             [[query]]\nname=\"P\"\ncompute=\"prob\"\ntarget=\"freed\"\n\
+             [[query]]\nname=\"E\"\ncompute=\"etime\"\n\
+             [[query]]\nname=\"T\"\ncompute=\"transient\"\ntarget=\"freed\"\ntime=\"5\"\n"
+        )
+    }
+
+    #[test]
+    fn lease_absorbs_with_probability_one() {
+        // Lease: delivery is forced ⇒ P(freed)=1, E[time]=1/μd=1 (indep. of K,p).
+        for &k in &[0u32, 1, 3, 5] {
+            for &p in &[0.2, 0.5, 0.8] {
+                let s = dock(k, p, "lease");
+                assert!((eval(&s, "P") - 1.0).abs() < 1e-9, "P lease K={k} p={p}");
+                assert!((eval(&s, "E") - 1.0).abs() < 1e-9, "E lease K={k} p={p}");
+            }
+        }
+    }
+
+    #[test]
+    fn lease_transient_matches_exponential() {
+        // P(freed ≤ T) = 1 − e^(−μd·T), μd=1, T=5.
+        let s = dock(3, 0.5, "lease");
+        let expected = 1.0 - (-5.0f64).exp();
+        assert!((eval(&s, "T") - expected).abs() < 1e-4);
+    }
+
+    #[test]
+    fn giveup_coverage_closed_form() {
+        // Giveup: P(freed) = 1 − p^(K+1) (the day48 coverage).
+        for &k in &[0u32, 1, 3, 5] {
+            for &p in &[0.2, 0.5, 0.8] {
+                let s = dock(k, p, "giveup");
+                let expected = 1.0 - p.powi(k as i32 + 1);
+                assert!((eval(&s, "P") - expected).abs() < 1e-9, "coverage K={k} p={p}");
+            }
+        }
+    }
+
+    #[test]
+    fn detects_immediate_cycle() {
+        // Two immediate transitions a→b, b→a form a timeless trap.
+        let looped = "kind=\"gspn\"\nplaces=[\"a\",\"b\"]\ninitial=\"a:1\"\n\
+            [[transition]]\nname=\"ab\"\nkind=\"immediate\"\nweight=\"1\"\npre=\"a:1\"\npost=\"b:1\"\n\
+            [[transition]]\nname=\"ba\"\nkind=\"immediate\"\nweight=\"1\"\npre=\"b:1\"\npost=\"a:1\"\n";
+        assert!(parse(looped).unwrap().has_immediate_cycle());
+        // The dock GSPN (one immediate `send` into a tangible marking) has none.
+        assert!(!parse(&dock(3, 0.5, "lease")).unwrap().has_immediate_cycle());
+    }
+
+    #[test]
+    fn expr_evaluator() {
+        let mut v = HashMap::new();
+        v.insert("a".to_string(), 2.0);
+        assert_eq!(eval_expr("1 + 2 * 3", &v).unwrap(), 7.0);
+        assert_eq!(eval_expr("(1 + 2) * 3", &v).unwrap(), 9.0);
+        assert_eq!(eval_expr("a * a / (1 - 0.5)", &v).unwrap(), 8.0);
+        assert!(eval_expr("nope", &v).is_err());
     }
 }

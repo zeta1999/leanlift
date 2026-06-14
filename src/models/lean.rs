@@ -15,21 +15,37 @@
 
 use super::ir::{Lts, PtNet};
 
-/// Lean lowerCamel identifier from a model name: `goal_reached` → `goalReached`,
-/// `Navigate|Delocalized` → `navigateDelocalized` (product states flatten). `|`
-/// and `-` are treated as word separators alongside `_`.
+/// A valid Lean lowerCamel identifier from a model name: `goal_reached` →
+/// `goalReached`, `Navigate|Delocalized` → `navigateDelocalized`. ANY
+/// non-alphanumeric is a word boundary (so `a.b`, `cs A`, etc. stay valid Lean,
+/// not just `|`/`-`/`_`); a digit-leading or empty name is prefixed so the
+/// result is always a legal identifier. (Distinct names that sanitize to the
+/// same identifier collide — the Lean kernel rejects that at elaboration rather
+/// than silently; the executable codegen uses the underscore-preserving `vid`.)
 fn ctor(name: &str) -> String {
-    let norm = name.replace(['|', '-'], "_");
     let mut out = String::new();
-    for (i, part) in norm.split('_').filter(|p| !p.is_empty()).enumerate() {
-        let mut chars = part.chars();
-        let head = chars.next().unwrap();
-        if i == 0 {
-            out.extend(head.to_lowercase());
+    let mut upper_next = false;
+    for c in name.chars() {
+        if c.is_ascii_alphanumeric() {
+            if out.is_empty() {
+                if c.is_ascii_digit() {
+                    out.push('s'); // identifiers cannot start with a digit
+                    out.push(c);
+                } else {
+                    out.extend(c.to_lowercase());
+                }
+            } else if upper_next {
+                out.extend(c.to_uppercase());
+            } else {
+                out.push(c);
+            }
+            upper_next = false;
         } else {
-            out.extend(head.to_uppercase());
+            upper_next = true; // a non-alphanumeric is a word boundary
         }
-        out.push_str(chars.as_str());
+    }
+    if out.is_empty() {
+        out.push('x');
     }
     out
 }
