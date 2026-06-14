@@ -1,0 +1,39 @@
+# mission — a robot-mission behaviour tree (PLAN-models §3.4). Priority fallback:
+# if at the goal, idle (done); else if lost, recover (relocalize); else navigate.
+# The BT compiles to an LTS, so `check` (M1) and `prove` (M3) reuse the Phase-1
+# FSM machinery unchanged.
+#
+# Safety property (the BT analogue of mcl's "never navigate while delocalized"):
+# the robot must NEVER be `moving` while `lost`. It holds *structurally* — the
+# recover branch sits above navigate in the fallback, and navigate is guarded by
+# `lost=false`, so the robot relocalizes before it ever moves.
+
+kind    = "bt"
+vars    = ["lost", "atGoal", "moving"]
+initial = ["lost"]                       # starts delocalized, not at goal, not moving
+
+tree = """
+fallback(
+  sequence( cond:atGoal, act:idle ),
+  sequence( cond:lost,   act:recover ),
+  act:navigate
+)
+"""
+
+[[action]]
+name   = "idle"
+# no guard, no effect — Success leaf (mission complete / quiescent)
+
+[[action]]
+name   = "recover"
+guard  = "lost=true"
+effect = "lost=false"                    # relocalize
+
+[[action]]
+name   = "navigate"
+guard  = "lost=false"                    # only move once localized
+effect = "moving=true, atGoal=true"      # head to the goal
+
+# Safety: never moving while lost.
+[[forbid]]
+true = ["lost", "moving"]
