@@ -1,0 +1,68 @@
+# dock-gspn — the dock release of `dock.model.toml`, now STOCHASTIC (day49). A
+# Generalized Stochastic Petri net: `send` is IMMEDIATE (instant retransmit, so
+# `holding` markings are vanishing and eliminated), `deliver`/`lose` are TIMED
+# (exponential races). Per-attempt loss probability p = μl/(μd+μl), realised by
+# μl = μd·p/(1−p). Budget K caps the number of losses.
+#
+# This is LEASE mode: at budget 0 `lose` is disabled, so delivery is forced — the
+# CTMC absorbs into `freed` with probability 1 (matching the day48 PROVED
+# liveness). Quantities of interest: E[time] and the transient P(freed by T).
+# Switch to giveup mode (add an `abort` transition inhibited by budget) and
+# P(freed) drops to 1 − p^(K+1) — see dock-gspn.recipe.md.
+#
+# Division of labour: the qualitative skeleton ("freed is inevitable") is proved
+# in Lean (LeanLift/Models/Ctmc.lean); `lift model prism` computes the numbers.
+
+kind    = "gspn"
+mode    = "lease"
+places  = ["holding", "inflight", "freed", "budget"]
+initial = "holding:1, budget:3"        # K = 3
+
+[[param]]
+name  = "mu_d"
+value = "1.0"                          # delivery rate
+
+[[param]]
+name  = "p"
+value = "0.5"                          # per-attempt loss probability
+
+[[param]]
+name  = "mu_l"
+value = "mu_d * p / (1 - p)"           # ⇒ p = mu_l/(mu_d+mu_l)
+
+[[transition]]
+name   = "send"
+kind   = "immediate"                   # instant retransmit ⇒ holding is vanishing
+weight = "1.0"
+pre    = "holding:1"
+post   = "inflight:1"
+
+[[transition]]
+name = "deliver"
+kind = "timed"
+rate = "mu_d"
+pre  = "inflight:1"
+post = "freed:1"
+
+[[transition]]
+name = "lose"
+kind = "timed"
+rate = "mu_l"
+pre  = "inflight:1, budget:1"          # spends a budget token
+post = "holding:1"                     # back to holding ⇒ instant resend
+
+# Quantitative queries (computed by the native CTMC solver; exported as CSL).
+[[query]]
+name    = "P(freed)"
+compute = "prob"
+target  = "freed"
+
+[[query]]
+name    = "E[time]"
+compute = "etime"
+
+[[query]]
+name    = "P(freed by T=5)"
+compute = "transient"
+target  = "freed"
+time    = "5"

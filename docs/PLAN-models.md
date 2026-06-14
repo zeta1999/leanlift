@@ -215,6 +215,22 @@ The shared substrate every later phase reuses. No new model family yet.
 
 ## Phase 5 — Stochastic / GSPN → CTMC → PRISM (day49)
 
+> **Status (landed 5.1–5.6):** GSPN IR (`src/models/gspn.rs`): timed/immediate
+> transitions, inhibitor arcs, named `[[param]]`s with an arithmetic evaluator
+> (`mu_l = mu_d·p/(1−p)`), modes. **Vanishing elimination + tangible CTMC**
+> construction, and a **numpy-free Rust** solver — absorption probabilities and
+> expected time via the embedded jump chain (Gaussian elimination), transient by
+> **uniformization**. PRISM/Storm export (`src/models/prism.rs`): the tangible
+> CTMC as an explicit-state `ctmc` module + CSL `.props`; runs `prism` if present
+> and diffs, else self-checks. `lift model prism <file>` → **M2**. Lean
+> qualitative companion ported sorry-free (`LeanLift/Models/Ctmc.lean`,
+> `inevitably_freed`). Example `dock-gspn` (`.model.toml`/`.recipe.md`): lease
+> `P(freed)=1`, `E[time]=1/μd`, `P(freed≤5)=1−e⁻⁵=0.9933` — all matching the
+> day49 closed forms; giveup teeth → `1−p^(K+1)=0.9375` and `AF freed` flips
+> false. **Deferred (5.7):** DTMC/MDP/CTMDP + RDDL policy synthesis, bursty
+> (Gilbert–Elliott) loss, reward/performability queries, auto-generated per-model
+> Lean qualitative proofs.
+
 - **5.1 Stochastic overlay IR.** Timed transitions (exponential **rate** λ),
   immediate transitions (**weight** w), budget tokens; modes (`lease`/`giveup`).
   `mu_l = mu_d·p/(1−p)` realises a target per-attempt loss `p`.
