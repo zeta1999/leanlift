@@ -173,6 +173,28 @@ pub fn coverage_traces(model: &dyn Model, alphabet: &[String], cap: usize) -> (V
     (traces, truncated)
 }
 
+/// Random action traces (seeded xorshift, reproducible) — the *supplement* to
+/// exhaustive coverage for unbounded/huge models where the BFS frontier was
+/// capped. See PLAN-verification §7 for the rule of thumb on `n`.
+pub fn random_traces(alphabet: &[String], n: usize, max_len: usize, seed: u64) -> Vec<Vec<String>> {
+    if alphabet.is_empty() || n == 0 {
+        return vec![];
+    }
+    let mut s = seed | 1; // never 0 (xorshift fixed point)
+    let mut next = || {
+        s ^= s << 13;
+        s ^= s >> 7;
+        s ^= s << 17;
+        s
+    };
+    (0..n)
+        .map(|_| {
+            let len = (next() as usize) % (max_len + 1);
+            (0..len).map(|_| alphabet[(next() as usize) % alphabet.len()].clone()).collect()
+        })
+        .collect()
+}
+
 // --- Petri executors (marking = array of counts) ----------------------------- //
 
 /// Transition names of a PT-net (its action alphabet, for `gen_traces`).
