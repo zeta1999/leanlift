@@ -57,8 +57,8 @@ pub fn parse(src: &str) -> Result<Doc, String> {
     let mut cur: Option<String> = None;
 
     for (n, raw) in src.lines().enumerate() {
-        let line = raw.trim();
-        if line.is_empty() || line.starts_with('#') {
+        let line = strip_comment(raw).trim();
+        if line.is_empty() {
             continue;
         }
         let ln = n + 1;
@@ -97,6 +97,22 @@ pub fn parse(src: &str) -> Result<Doc, String> {
         }
     }
     Ok(doc)
+}
+
+/// Drop a `#` comment, but not one inside a quoted string. Whole-line and
+/// trailing comments are both handled here.
+fn strip_comment(line: &str) -> &str {
+    let bytes = line.as_bytes();
+    let (mut in_s, mut in_d) = (false, false);
+    for (i, &b) in bytes.iter().enumerate() {
+        match b {
+            b'\'' if !in_d => in_s = !in_s,
+            b'"' if !in_s => in_d = !in_d,
+            b'#' if !in_s && !in_d => return &line[..i],
+            _ => {}
+        }
+    }
+    line
 }
 
 fn parse_value(s: &str, ln: usize) -> Result<Value, String> {

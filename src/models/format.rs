@@ -69,11 +69,136 @@ pub fn detect(doc: &Doc) -> Result<Family, String> {
     Err("cannot detect model family: no `kind`, `states`, or `places`".into())
 }
 
-/// Parse a source string into an FSM `Lts`. (Detection is the caller's job so
-/// the CLI can report the family before building.)
+/// Parse a source string into an FSM `Lts`. A document with a `machines` array
+/// is built as the **synchronous (alphabetised) product** of its components and
+/// flattened to a single `Lts` (so the checker and the Lean exporter both see
+/// one transition system); otherwise it is a single flat FSM. (Detection is the
+/// caller's job so the CLI can report the family before building.)
 pub fn parse_fsm(src: &str) -> Result<Lts, String> {
     let doc = toml::parse(src)?;
-    build_fsm(&doc)
+    if doc.scalar("machines").is_some() {
+        build_fsm_product(&doc)
+    } else {
+        build_fsm(&doc)
+    }
+}
+
+/// Synchronous alphabetised product of two FSMs, mirroring `fsm.py`'s `product`
+/// and the Lean `Fsm.prodStep`+`Fsm.lift`: a shared event fires iff BOTH accept
+/// (one blocks ⇒ blocked); a private event moves its owner and self-loops the
+/// other. Product states are encoded `"a|b"` (kept as `String` so the result is
+/// a homogeneous, exportable `Lts`). Generalises to N machines by folding.
+fn product(a: &Lts, b: &Lts) -> Lts {
+    let mut alphabet = a.alphabet.clone();
+    for e in &b.alphabet {
+        if !alphabet.contains(e) {
+            alphabet.push(e.clone());
+        }
+    }
+    let mut states = Vec::new();
+    let mut transitions = HashMap::new();
+    for sa in &a.states {
+        for sb in &b.states {
+            let s = format!("{sa}|{sb}");
+            states.push(s.clone());
+            for e in &alphabet {
+                // Private events: the non-owner self-loops (= Fsm.lift).
+                let na = if a.alphabet.contains(e) {
+                    a.transitions.get(&(sa.clone(), e.clone())).cloned()
+                } else {
+                    Some(sa.clone())
+                };
+                let nb = if b.alphabet.contains(e) {
+                    b.transitions.get(&(sb.clone(), e.clone())).cloned()
+                } else {
+                    Some(sb.clone())
+                };
+                if let (Some(na), Some(nb)) = (na, nb) {
+                    transitions.insert((s.clone(), e.clone()), format!("{na}|{nb}"));
+                }
+            }
+        }
+    }
+    Lts {
+        family: "fsm",
+        states,
+        alphabet,
+        initial: format!("{}|{}", a.initial, b.initial),
+        transitions,
+        forbid: Vec::new(), // set by the caller (forbidden product states)
+    }
+}
+
+fn build_fsm_product(doc: &Doc) -> Result<Lts, String> {
+    let machines = doc.scalar("machines").unwrap().as_arr("machines")?.to_vec();
+    if machines.len() < 2 {
+        return Err("`machines` needs at least two component names".into());
+    }
+    let inits = doc
+        .scalar("initial")
+        .ok_or("product FSM requires an `initial` array (one state per machine)")?
+        .as_arr("initial")?
+        .to_vec();
+    if inits.len() != machines.len() {
+        return Err(format!(
+            "`initial` has {} entries but `machines` has {}",
+            inits.len(),
+            machines.len()
+        ));
+    }
+
+    // Build each component from its `machine`-tagged transitions.
+    let mut comps: Vec<Lts> = Vec::new();
+    for (mi, name) in machines.iter().enumerate() {
+        let mut states: Vec<String> = vec![inits[mi].clone()];
+        let mut alphabet: Vec<String> = Vec::new();
+        let mut transitions = HashMap::new();
+        for (i, t) in doc.table("transition").iter().enumerate() {
+            if field(t, "machine", i)? != *name {
+                continue;
+            }
+            let from = field(t, "from", i)?;
+            let on = field(t, "on", i)?;
+            let to = field(t, "to", i)?;
+            for s in [&from, &to] {
+                if !states.contains(s) {
+                    states.push(s.clone());
+                }
+            }
+            if !alphabet.contains(&on) {
+                alphabet.push(on.clone());
+            }
+            if transitions.insert((from.clone(), on.clone()), to).is_some() {
+                return Err(format!("{name}: ({from}, {on}) is non-deterministic"));
+            }
+        }
+        if alphabet.is_empty() {
+            return Err(format!("machine `{name}` has no transitions"));
+        }
+        comps.push(Lts { family: "fsm", states, alphabet, initial: inits[mi].clone(), transitions, forbid: Vec::new() });
+    }
+
+    // Fold the components into one flat product.
+    let mut acc = comps.remove(0);
+    for c in &comps {
+        acc = product(&acc, c);
+    }
+
+    // Forbidden product states: each `[[forbid]]` names one state per machine.
+    let mut forbid = Vec::new();
+    for (i, f) in doc.table("forbid").iter().enumerate() {
+        let parts: Vec<String> = machines
+            .iter()
+            .map(|m| field(f, m, i))
+            .collect::<Result<_, String>>()?;
+        let joined = parts.join("|");
+        if !acc.states.contains(&joined) {
+            return Err(format!("forbid {i}: product state `{joined}` does not exist"));
+        }
+        forbid.push(joined);
+    }
+    acc.forbid = forbid;
+    Ok(acc)
 }
 
 fn build_fsm(doc: &Doc) -> Result<Lts, String> {

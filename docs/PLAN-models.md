@@ -77,6 +77,14 @@ The shared substrate every later phase reuses. No new model family yet.
 
 ## Phase 1 — FSM, end to end (the smallest family; reuses day48 Part 1 exactly)
 
+> **Status (landed 1.1–1.4):** FSM IR (`Lts`), native `*.model.toml` (flat +
+> two-machine product), synchronous alphabetised product (`format::product`),
+> Lean exporter (`src/models/lean.rs`) + `lift model prove` → **M3** sorry-free,
+> and the `mcl` example (`examples/models/mcl.model.toml`, `mcl.recipe.md`).
+> Teeth proven: a safety-breaking mutation fails *both* M1 (BFS) and M3 (Lean).
+> Regression in `tests/run.sh`. **Deferred** (further steps): 1.5 SCXML/DOT
+> interop, 1.6 code export (lands in Phase 6).
+
 - **1.1 FSM IR + native format.** `states, alphabet, transitions:(s,e)->t,
   initial`, partial step (missing entry = BLOCKED), per `fsm.py`.
 - **1.2 Native check.** Reachable set, invariant violations, and **synchronous
