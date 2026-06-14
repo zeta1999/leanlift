@@ -65,6 +65,11 @@ pub struct PtNet {
     pub bound: u32,
     /// Declared upper-bound safety properties: `sum(places[idx]) ≤ max`.
     pub bounds: Vec<BoundProp>,
+    /// The place subset whose weighted (weight-1) token sum is the inductive
+    /// invariant the Lean proof strengthens to (a *place invariant*, Jensen
+    /// §6–7). `None` = all places (the dock's global-total case); a proper
+    /// subset is what proves a coloured mutex (lock + crit) once unfolded.
+    pub conserved: Option<Vec<usize>>,
 }
 
 pub struct PtTrans {

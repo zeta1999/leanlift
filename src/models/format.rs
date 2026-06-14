@@ -59,8 +59,11 @@ pub fn detect(doc: &Doc) -> Result<Family, String> {
             other => Err(format!("unknown kind `{other}` (have: fsm, petri, cpn, bt, spn)")),
         };
     }
-    // Shape inference: a `tree` ⇒ BT, `places` ⇒ Petri-family, `states`/
-    // `machines` ⇒ FSM.
+    // Shape inference: `[[colour]]` ⇒ CPN, a `tree` ⇒ BT, `places` ⇒
+    // Petri-family, `states`/`machines` ⇒ FSM.
+    if !doc.table("colour").is_empty() {
+        return Ok(Family::Cpn);
+    }
     if doc.scalar("tree").is_some() {
         return Ok(Family::Bt);
     }
@@ -335,7 +338,21 @@ fn build_petri(doc: &Doc) -> Result<PtNet, String> {
         bounds.push(BoundProp { name, places: idxs, max });
     }
 
-    Ok(PtNet { places, transitions, initial, bound, bounds })
+    // Optional conserved subsystem for the inductive place invariant; default
+    // (omitted) = all places.
+    let conserved = match doc.scalar("conserved") {
+        Some(v) => {
+            let idxs: Vec<usize> = v
+                .as_arr("conserved")?
+                .iter()
+                .map(|p| index(p).ok_or_else(|| format!("conserved: place `{p}` not declared")))
+                .collect::<Result<_, String>>()?;
+            Some(idxs)
+        }
+        None => None,
+    };
+
+    Ok(PtNet { places, transitions, initial, bound, bounds, conserved })
 }
 
 /// Parse a marking / pre / post: `"free:1,csA:2"` → counts aligned to `places`.

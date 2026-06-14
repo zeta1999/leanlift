@@ -1,0 +1,58 @@
+# resource — a coloured resource-mutex (PLAN-models §4). N processes, coloured by
+# identity, compete for ONE shared lock. This is a coloured Petri net: a single
+# coloured transition `acquire`/`release` stands for one PT transition per
+# process (Jensen's compactness), and the safety property is a PLACE INVARIANT
+# (lock + Σ crit is conserved = 1) — exactly the structure Jensen proves for the
+# distributed database, in miniature.
+#
+# It unfolds to a PT-net, so `check` (M1) and `prove` (M3) reuse the Phase-2
+# Petri machinery unchanged; mutual exclusion is the upper-bound corollary of
+# the conserved lock-subsystem.
+
+kind = "cpn"
+
+# The conserved subsystem for the inductive place invariant (top-level: it is one
+# invariant for the whole net). lock + Σ crit is conserved = 1 ⇒ mutual exclusion.
+conserved = ["crit", "lock"]
+
+[[colour]]
+name   = "Proc"
+values = ["p1", "p2", "p3"]
+
+[[colour]]
+name   = "Lock"
+values = ["lk"]                # a one-element colour (the single resource)
+
+[[place]]
+name   = "idle"
+colour = "Proc"
+init   = "p1, p2, p3"          # every process starts idle
+
+[[place]]
+name   = "crit"
+colour = "Proc"
+init   = ""                    # nobody in the critical section
+
+[[place]]
+name   = "lock"
+colour = "Lock"
+init   = "lk"                  # the single lock token
+
+[[transition]]
+name = "acquire"
+var  = "p:Proc"                # one transition schema, |Proc| bindings
+pre  = "idle(p), lock(lk)"
+post = "crit(p)"
+
+[[transition]]
+name = "release"
+var  = "p:Proc"
+pre  = "crit(p)"
+post = "idle(p), lock(lk)"
+
+# Safety: at most one process in its critical section (mutual exclusion), via the
+# conserved {crit, lock} place invariant declared above.
+[[bound]]
+name  = "mutex"
+place = "crit"
+max   = "1"
