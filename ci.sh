@@ -9,7 +9,9 @@
 # proof). Exit code = number of failures (0 = green).
 #
 # This covers the model axis only; the broader engine suite (LLM/Aeneas/forge
-# paths) is `tests/run.sh`.
+# paths) is `tests/run.sh`. This is the FAST tier (every commit); the DEEP tier
+# (Kani bounded proofs, the Aeneas dogfood, fuzzing) is `verify.sh` — run it
+# nightly/manually (PLAN-verification §V5.2).
 
 set -uo pipefail
 cd "$(dirname "$0")"
