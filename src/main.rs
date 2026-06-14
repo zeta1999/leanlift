@@ -17,6 +17,7 @@ mod frontend;
 mod harness;
 mod lang;
 mod leanrt;
+mod models;
 mod oracle;
 mod oracle_sol;
 mod prove;
@@ -40,7 +41,9 @@ fn usage() -> ! {
         \x20 lift verify <example> [--lean <candidate.lean>] [--lean-path <dir>] [--out <report.json>]\n\
         \x20     bit-exact differential validation (L1). --lean overrides the example's candidate.\n\
         \x20 lift prove  <example> [--out <proof.json>]\n\
-        \x20     discharge the example's proof obligation on the extracted model (L3, Aeneas only).\n\n\
+        \x20     discharge the example's proof obligation on the extracted model (L3, Aeneas only).\n\
+        \x20 lift model check <file> [--bound N] [--out <model-report.json>]\n\
+        \x20     behavioural-model checker (M1); family auto-detected. See docs/PLAN-models.md.\n\n\
         \x20 examples: {}\n",
         examples::NAMES.join(", ")
     );
@@ -130,6 +133,10 @@ fn main() {
         Some("prove") => {
             argv.remove(0);
             prove_cmd(argv);
+        }
+        Some("model") => {
+            argv.remove(0);
+            models::main(argv);
         }
         _ => usage(),
     }

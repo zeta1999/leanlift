@@ -1,0 +1,20 @@
+# tiny — the Phase 0 exit-criterion model (PLAN-models §0.6).
+# A trivial two-state FSM: a switch you can turn on and off. No `kind` line —
+# the family is auto-detected from `states`. `error` is declared forbidden but
+# unreachable (nothing transitions into it), so `check` reports M1 / safe.
+
+initial = "off"
+states  = ["off", "on", "error"]
+
+[[transition]]
+from = "off"
+on   = "flip"
+to   = "on"
+
+[[transition]]
+from = "on"
+on   = "flip"
+to   = "off"
+
+[[forbid]]
+state = "error"

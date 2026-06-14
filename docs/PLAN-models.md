@@ -30,9 +30,18 @@ one-command demo.
 
 ---
 
-## Phase 0 — Foundations: the IR, the native checker, the Lean theory
+## Phase 0 — Foundations: the IR, the native checker, the Lean theory ✅ DONE
 
 The shared substrate every later phase reuses. No new model family yet.
+
+> **Status (landed):** DTS-IR `Model` trait + explicit `Lts` (`src/models/ir.rs`);
+> bounded-BFS native checker that refuses to diverge silently (`src/models/check.rs`,
+> **M1**); dependency-free `*.model.toml` parser + family auto-detection
+> (`src/models/{toml,format}.rs`); `model-report.json` + human verdict
+> (`src/models/report.rs`); `lift model check <file>` wired (`src/models/mod.rs`).
+> Lean theory ported sorry-free: `lean/LeanLift/Models/{Fsm,Petri}.lean`. Exit
+> criterion met — `lift model check examples/models/tiny.model.toml` prints a
+> verdict; regression + teeth in `tests/run.sh`.
 
 - **0.1 DTS-IR (`models/ir/`).** Rust types for `Lts`, `PtNet`, `Cpn`, `Bt`, and
   a `StochasticOverlay`; a unifying `TransitionSystem` trait (`initial`,
