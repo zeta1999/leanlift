@@ -262,6 +262,18 @@ The shared substrate every later phase reuses. No new model family yet.
 
 ## Phase 6 — Code export (C++/Rust/Go), unified — and the loop closure
 
+> **Status (landed 6.1–6.3, LTS families):** codegen backend
+> (`src/models/codegen.rs`) emits an idiomatic executor in **Rust, C++, and Go**
+> for FSM/BT (enum State/Event, `step` match, a `forbidden` runtime monitor =
+> 6.2, a driver over a shared trace protocol). **Loop closure** (`lift model
+> export --verify`): compile the executor (`rustc`/`c++`/`go build`), run it over
+> 300 deterministic action traces, difftest line-by-line against the native model
+> simulator → **L1 conformance** — the model-axis "exporter proposes, algorithm
+> disposes". All three languages conform on `mcl` (FSM) and `mission` (BT);
+> `codegen.recipe.md`. **Deferred:** Petri/CPN/GSPN executors, the networked Go
+> coordinator (§6.4/§2.7), and proving the Rust export back through Aeneas to
+> re-derive M3 on the code (§6.3 second half).
+
 - **6.1 Common codegen backend (`models/codegen/`).** model → executor/simulator
   in each language: state/marking as a struct/enum, `step` as a `match`/`switch`,
   a driver loop. One backend, three language idioms.
