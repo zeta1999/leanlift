@@ -19,6 +19,8 @@ mod ir;
 mod lean;
 mod pnml;
 mod prism;
+#[cfg(test)]
+mod proptest;
 mod report;
 mod scxml;
 mod toml;
@@ -37,8 +39,9 @@ fn usage() -> ! {
         \x20     export a Lean model + safety proof and certify it sorry-free (M3, FSM/BT/Petri/CPN).\n\
         \x20 lift model prism <file> [--emit <prefix>] [--out ...]\n\
         \x20     GSPN → tangible CTMC: solve quantitative queries + export PRISM (M2).\n\
-        \x20 lift model export <file> [--lang rust|c++|go] [--emit <out>] [--verify]\n\
-        \x20     generate a runnable executor (FSM/BT); --verify difftests it vs the model (L1).\n"
+        \x20 lift model export <file> [--lang rust|c++|go|dot] [--emit <out>] [--verify] [--samples N [--seed S]]\n\
+        \x20     generate a runnable executor (FSM/BT/Petri); --verify difftests it vs the model (L1,\n\
+        \x20     exhaustive reachable-edge coverage; --samples adds random traces for unbounded nets).\n"
     );
     exit(2);
 }
@@ -310,6 +313,8 @@ fn export_cmd(a: Vec<String>) {
     let mut lang = Lang::Rust;
     let mut emit: Option<PathBuf> = None;
     let mut verify = false;
+    let mut samples: usize = 0; // 0 ⇒ exhaustive only; >0 adds random traces (scale)
+    let mut seed: u64 = crate::vectors::SEED;
 
     let mut i = 0;
     while i < a.len() {
@@ -317,6 +322,8 @@ fn export_cmd(a: Vec<String>) {
             "--lang" => lang = Lang::parse(&take(&a, &mut i)).unwrap_or_else(|| fail("--lang must be rust/c++/go")),
             "--emit" => emit = Some(PathBuf::from(take(&a, &mut i))),
             "--verify" => verify = true,
+            "--samples" => samples = take(&a, &mut i).parse().unwrap_or_else(|_| fail("--samples expects an integer")),
+            "--seed" => seed = take(&a, &mut i).parse().unwrap_or_else(|_| fail("--seed expects an integer")),
             s if s.starts_with("--") => fail(&format!("unknown flag: {s}")),
             _ => {
                 if file.is_some() {
@@ -372,10 +379,12 @@ fn export_cmd(a: Vec<String>) {
         exit(0);
     }
     if verify {
-        // Difftest against the native model over EXHAUSTIVE edge coverage.
+        // Difftest against the native model over EXHAUSTIVE edge coverage, plus
+        // `--samples` random traces (the supplement for unbounded/huge models).
+        let extra = if samples > 0 { Some((samples, seed)) } else { None };
         let result = match &model {
-            Cg::Lts(l) => conformance(l, &l.alphabet, lang, &out),
-            Cg::Petri(n) => conformance(n, &codegen::petri_alphabet(n), lang, &out),
+            Cg::Lts(l) => conformance(l, &l.alphabet, lang, &out, extra),
+            Cg::Petri(n) => conformance(n, &codegen::petri_alphabet(n), lang, &out, extra),
         };
         match result {
             Ok((n, truncated)) => {
@@ -403,6 +412,7 @@ fn conformance(
     alphabet: &[String],
     lang: codegen::Lang,
     src: &Path,
+    samples: Option<(usize, u64)>,
 ) -> Result<(usize, bool), String> {
     use codegen::Lang;
     let work = std::env::temp_dir().join("leanlift-models-work");
@@ -429,7 +439,12 @@ fn conformance(
     // Exhaustive (state, action)-edge coverage. Compute the native reference over
     // EXACTLY the lines the executor will read (so trailing-empty-line handling
     // matches bit for bit — `str::lines()` drops a final empty line, both sides).
-    let (traces, truncated) = codegen::coverage_traces(model, alphabet, check::DEFAULT_BOUND);
+    let (mut traces, truncated) = codegen::coverage_traces(model, alphabet, check::DEFAULT_BOUND);
+    if let Some((n, seed)) = samples {
+        // Supplement with random traces of length ~3× the explored frontier.
+        let max_len = (3 * traces.len().max(2)).min(64);
+        traces.extend(codegen::random_traces(alphabet, n, max_len, seed));
+    }
     let stdin_data = traces.iter().map(|t| t.join(" ")).collect::<Vec<_>>().join("\n");
     let lines: Vec<String> = stdin_data.lines().map(str::to_string).collect();
     let native: Vec<String> = lines
