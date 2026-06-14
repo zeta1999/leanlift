@@ -213,6 +213,34 @@ else
 fi
 rm -f /tmp/dock-giveup-test.model.toml
 
+echo "== models (code export + loop closure — Phase 6) =="
+# Rust is always available (this is a cargo project). C++/Go best-effort.
+for me in mcl mission; do
+  if "$LIFT" model export "examples/models/$me.model.toml" --lang rust --emit "$TMP/$me.rs" --verify >"$TMP/$me.cg.out" 2>&1; then
+    pass "$me → rust + loop closure ($(grep -o 'L1 conformant — [0-9]*/[0-9]* traces' "$TMP/$me.cg.out"))"
+  else
+    bad "$me rust export did not conform"; tail -8 "$TMP/$me.cg.out"
+  fi
+done
+if command -v c++ >/dev/null 2>&1; then
+  if "$LIFT" model export examples/models/mcl.model.toml --lang c++ --emit "$TMP/mcl.cpp" --verify >"$TMP/mcl.cpp.out" 2>&1; then
+    pass "mcl → c++ + loop closure ($(grep -o 'L1 conformant — [0-9]*/[0-9]* traces' "$TMP/mcl.cpp.out"))"
+  else
+    bad "mcl c++ export did not conform"; tail -8 "$TMP/mcl.cpp.out"
+  fi
+else
+  printf '  \033[33mSKIP\033[0m  mcl c++ export (c++ not on PATH)\n'
+fi
+if command -v go >/dev/null 2>&1; then
+  if "$LIFT" model export examples/models/mcl.model.toml --lang go --emit "$TMP/mcl.go" --verify >"$TMP/mcl.go.out" 2>&1; then
+    pass "mcl → go + loop closure ($(grep -o 'L1 conformant — [0-9]*/[0-9]* traces' "$TMP/mcl.go.out"))"
+  else
+    bad "mcl go export did not conform"; tail -8 "$TMP/mcl.go.out"
+  fi
+else
+  printf '  \033[33mSKIP\033[0m  mcl go export (go not on PATH)\n'
+fi
+
 echo "== models (M3 Lean proof — Phases 1–4, needs lean on PATH) =="
 if command -v lean >/dev/null 2>&1; then
   for me in mcl dock mission resource; do

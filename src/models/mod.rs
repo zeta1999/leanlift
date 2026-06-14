@@ -11,6 +11,7 @@
 
 mod bt;
 mod check;
+mod codegen;
 mod cpn;
 mod format;
 mod gspn;
@@ -32,8 +33,9 @@ fn usage() -> ! {
         \x20 lift model prove <file> [--emit <Model.lean>] [--lean-path <dir>] [--out ...]\n\
         \x20     export a Lean model + safety proof and certify it sorry-free (M3, FSM/BT/Petri/CPN).\n\
         \x20 lift model prism <file> [--emit <prefix>] [--out ...]\n\
-        \x20     GSPN → tangible CTMC: solve quantitative queries + export PRISM (M2).\n\n\
-        \x20 (further phases: export → code)\n"
+        \x20     GSPN → tangible CTMC: solve quantitative queries + export PRISM (M2).\n\
+        \x20 lift model export <file> [--lang rust|c++|go] [--emit <out>] [--verify]\n\
+        \x20     generate a runnable executor (FSM/BT); --verify difftests it vs the model (L1).\n"
     );
     exit(2);
 }
@@ -54,7 +56,11 @@ pub fn main(mut argv: Vec<String>) {
             argv.remove(0);
             prism_cmd(argv);
         }
-        Some(verb @ ("export" | "simulate" | "import")) => {
+        Some("export") => {
+            argv.remove(0);
+            export_cmd(argv);
+        }
+        Some(verb @ ("simulate" | "import")) => {
             eprintln!("`lift model {verb}` is planned (see docs/PLAN-models.md) — not in this build");
             exit(2);
         }
@@ -258,6 +264,120 @@ fn prove_cmd(a: Vec<String>) {
         eprintln!("  model-report.json -> {}", out.display());
     }
     exit(if sorry_free { 0 } else { 1 });
+}
+
+fn export_cmd(a: Vec<String>) {
+    use codegen::Lang;
+    let mut file: Option<String> = None;
+    let mut lang = Lang::Rust;
+    let mut emit: Option<PathBuf> = None;
+    let mut verify = false;
+
+    let mut i = 0;
+    while i < a.len() {
+        match a[i].as_str() {
+            "--lang" => lang = Lang::parse(&take(&a, &mut i)).unwrap_or_else(|| fail("--lang must be rust/c++/go")),
+            "--emit" => emit = Some(PathBuf::from(take(&a, &mut i))),
+            "--verify" => verify = true,
+            s if s.starts_with("--") => fail(&format!("unknown flag: {s}")),
+            _ => {
+                if file.is_some() {
+                    usage();
+                }
+                file = Some(a[i].clone());
+            }
+        }
+        i += 1;
+    }
+    let file = file.unwrap_or_else(|| usage());
+    let src = std::fs::read_to_string(&file).unwrap_or_else(|e| fail(&format!("cannot read {file}: {e}")));
+
+    let doc = toml::parse(&src).unwrap_or_else(|e| fail(&format!("{file}: {e}")));
+    let lts = match format::detect(&doc).unwrap_or_else(|e| fail(&format!("{file}: {e}"))) {
+        Family::Fsm => format::parse_fsm(&src).unwrap_or_else(|e| fail(&format!("{file}: {e}"))),
+        Family::Bt => bt::parse_bt(&src).unwrap_or_else(|e| fail(&format!("{file}: {e}"))),
+        other => {
+            eprintln!("code export is LTS-only (fsm/bt) in this build; detected `{}`", other.tag());
+            exit(2);
+        }
+    };
+
+    let code = codegen::emit(&lts, lang);
+    let out = emit.unwrap_or_else(|| PathBuf::from(format!("{}.{}", file_stem(&file), lang.ext())));
+    std::fs::write(&out, &code).unwrap_or_else(|e| fail(&format!("cannot write {}: {e}", out.display())));
+
+    println!();
+    println!("  leanlift code export — {} `{file}` → {}", lts.family, lang.tag());
+    println!("  ────────────────────────────────────────────────");
+    println!("  source : {}", out.display());
+
+    if verify {
+        match conformance(&lts, lang, &out) {
+            Ok((n, _)) => {
+                println!("  loop closure : L1 conformant — {n}/{n} traces match the native model");
+                println!("  (generated code ≡ model semantics — the two halves of leanlift meet)");
+                exit(0);
+            }
+            Err(e) => {
+                println!("  loop closure : FAILED — {e}");
+                exit(1);
+            }
+        }
+    } else {
+        println!("  (re-run with --verify to difftest the generated code against the model)");
+        exit(0);
+    }
+}
+
+/// The loop closure (§6.3): compile the generated executor, run it over
+/// deterministic action traces, and difftest its output against the native model
+/// simulator. Returns the number of matching traces or the first mismatch.
+fn conformance(lts: &ir::Lts, lang: codegen::Lang, src: &Path) -> Result<(usize, usize), String> {
+    use codegen::Lang;
+    let work = std::env::temp_dir().join("leanlift-models-work");
+    let _ = std::fs::create_dir_all(&work);
+    let bin = work.join("model_exec");
+
+    // Compile.
+    let status = match lang {
+        Lang::Rust => Command::new("rustc").args(["-O", "-o"]).arg(&bin).arg(src).status(),
+        Lang::Cpp => Command::new("c++").args(["-O2", "-std=c++17", "-o"]).arg(&bin).arg(src).status(),
+        Lang::Go => Command::new("go").arg("build").arg("-o").arg(&bin).arg(src).status(),
+    }
+    .map_err(|e| format!("could not invoke the {} compiler: {e}", lang.tag()))?;
+    if !status.success() {
+        return Err(format!("generated {} did not compile", lang.tag()));
+    }
+
+    // Deterministic traces; native reference output.
+    let traces = codegen::gen_traces(lts, 300, 2 * lts.states.len().max(2), crate::vectors::SEED);
+    let native: Vec<String> = traces.iter().map(|t| codegen::native_trace(lts, t)).collect();
+    let stdin_data = traces.iter().map(|t| t.join(" ")).collect::<Vec<_>>().join("\n");
+
+    // Run the generated executor over the same traces.
+    use std::io::Write;
+    use std::process::Stdio;
+    let mut child = Command::new(&bin)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("could not run generated binary: {e}"))?;
+    child.stdin.take().unwrap().write_all(stdin_data.as_bytes()).map_err(|e| format!("stdin: {e}"))?;
+    let output = child.wait_with_output().map_err(|e| format!("wait: {e}"))?;
+    let got: Vec<String> = String::from_utf8_lossy(&output.stdout).lines().map(|l| l.to_string()).collect();
+
+    if got.len() != native.len() {
+        return Err(format!("trace count mismatch: generated {} vs native {}", got.len(), native.len()));
+    }
+    for (i, (g, n)) in got.iter().zip(&native).enumerate() {
+        if g != n {
+            return Err(format!(
+                "trace {i} diverges:\n      trace   : {}\n      native  : {n}\n      codegen : {g}",
+                traces[i].join(" ")
+            ));
+        }
+    }
+    Ok((native.len(), native.len()))
 }
 
 fn prism_cmd(a: Vec<String>) {
