@@ -170,9 +170,22 @@ else
   pass "broken mission caught at M1 ($(grep -o 'lost_atGoal_moving' "$TMP/misb.out" | head -1))"
 fi
 
-echo "== models (M3 Lean proof — Phases 1–3, needs lean on PATH) =="
+# resource: a coloured Petri net unfolded to a PT-net (Phase 4). M1 + teeth.
+if "$LIFT" model check examples/models/resource.model.toml --out "$TMP/res.json" >"$TMP/res.out" 2>&1; then
+  pass "resource CPN check  ($(grep -o 'reachable : [0-9]* state' "$TMP/res.out"); $(grep -o 'unfolded [0-9]* PT place' "$TMP/res.out"))"
+else
+  bad "resource did not check"; cat "$TMP/res.out"
+fi
+sed 's/init   = "lk"/init   = "lk, lk"/' examples/models/resource.model.toml > /tmp/res-broken-test.model.toml
+if "$LIFT" model check /tmp/res-broken-test.model.toml --out "$TMP/resb.json" >"$TMP/resb.out" 2>&1; then
+  bad "broken resource (two locks) NOT caught at M1 (exit 0)"
+else
+  pass "broken resource caught at M1 ($(grep -o 'crit_p1+crit_p2+crit_p3 = 2 > 1' "$TMP/resb.out" | head -1))"
+fi
+
+echo "== models (M3 Lean proof — Phases 1–4, needs lean on PATH) =="
 if command -v lean >/dev/null 2>&1; then
-  for me in mcl dock mission; do
+  for me in mcl dock mission resource; do
     if "$LIFT" model prove "examples/models/$me.model.toml" --emit "$TMP/$me.gen.lean" --out "$TMP/${me}p.json" >"$TMP/${me}p.out" 2>&1; then
       pass "$me prove  ($(grep -o 'M3 proved' "$TMP/${me}p.out"), sorry-free)"
     else
@@ -195,9 +208,14 @@ if command -v lean >/dev/null 2>&1; then
   else
     pass "broken mission proof fails to elaborate ($(grep -o 'did NOT elaborate' "$TMP/misbp.out" | head -1))"
   fi
-  rm -f /tmp/mcl-broken-test.model.toml /tmp/dock-broken-test.model.toml /tmp/mission-broken-test.model.toml
+  if "$LIFT" model prove /tmp/res-broken-test.model.toml --emit "$TMP/ResBad.gen.lean" --out "$TMP/resbp.json" >"$TMP/resbp.out" 2>&1; then
+    bad "broken resource proof did NOT fail (exit 0)"
+  else
+    pass "broken resource proof fails to elaborate ($(grep -o 'did NOT elaborate' "$TMP/resbp.out" | head -1))"
+  fi
+  rm -f /tmp/mcl-broken-test.model.toml /tmp/dock-broken-test.model.toml /tmp/mission-broken-test.model.toml /tmp/res-broken-test.model.toml
 else
-  printf '  \033[33mSKIP\033[0m  mcl/dock/mission prove (lean not on PATH)\n'
+  printf '  \033[33mSKIP\033[0m  mcl/dock/mission/resource prove (lean not on PATH)\n'
 fi
 
 echo

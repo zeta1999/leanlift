@@ -175,6 +175,20 @@ The shared substrate every later phase reuses. No new model family yet.
 
 ## Phase 4 — Coloured Petri nets (CPN) (Jensen, LNCS 803)
 
+> **Status (landed 4.1–4.5, miniature):** CPN module (`src/models/cpn.rs`):
+> finite colour sets, typed places with coloured initial markings, one bound
+> variable per transition, single-token arcs; **unfold CPN → PT-net** (each
+> (place,value) → a PT place, each (transition,binding) → a PT transition) so
+> the unfolded reachability graph *is* the occurrence graph and the Phase-2
+> checker + `emit_petri` apply unchanged → M1/M3. `emit_petri` generalised to a
+> **place invariant** over a declared `conserved` subsystem (the dock = the
+> all-places special case). Example `resource` (coloured resource-mutex,
+> `resource.model.toml`/`.recipe.md`): mutual exclusion via the `lock+Σcrit`
+> place invariant; compactness note (3/2 coloured → 7/6 unfolded). Teeth: two
+> lock tokens break both gates. **Deferred:** the full Jensen DB needs broadcast
+> multiset arcs + guards + tuple/product colours (4.1); PNML high-level (4.6);
+> code export (4.7).
+
 - **4.1 Colour IR (`models/color/`).** Finite colour sets (enum, bounded int,
   product, **subset-by-predicate** — Jensen's `MES = {(s,r) | s≠r}`); arc
   expressions as **total functions** of bound variables; boolean **guards**;

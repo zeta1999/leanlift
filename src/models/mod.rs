@@ -11,6 +11,7 @@
 
 mod bt;
 mod check;
+mod cpn;
 mod format;
 mod ir;
 mod lean;
@@ -102,11 +103,17 @@ fn check_cmd(a: Vec<String>) {
             r.notes = petri_notes(&net, &r);
             r
         }
-        other => {
-            eprintln!(
-                "detected `{}` model — fsm/bt/petri are wired in this build (see docs/PLAN-models.md)",
-                other.tag()
-            );
+        Family::Cpn => {
+            // A CPN unfolds to a PT-net, so the Petri checker applies unchanged.
+            let (net, mut notes) = cpn::unfold(&src).unwrap_or_else(|e| fail(&format!("{file}: {e}")));
+            let r = check::check(&net, bound);
+            notes.extend(petri_notes(&net, &r));
+            let mut r = r;
+            r.notes = notes;
+            r
+        }
+        Family::Spn => {
+            eprintln!("detected `spn` model — stochastic is Phase 5 (not in this build); see docs/PLAN-models.md");
             exit(2);
         }
     };
@@ -171,6 +178,14 @@ fn prove_cmd(a: Vec<String>) {
             r.notes = petri_notes(&net, &r);
             (r, lean::emit_petri(&net, &ns))
         }
+        Family::Cpn => {
+            // CPN → unfold → the Petri exporter (the §4.3/§4.4 reuse payoff).
+            let (net, mut notes) = cpn::unfold(&src).unwrap_or_else(|e| fail(&format!("{file}: {e}")));
+            let mut r = check::check(&net, check::DEFAULT_BOUND);
+            notes.extend(petri_notes(&net, &r));
+            r.notes = notes;
+            (r, lean::emit_petri(&net, &ns))
+        }
         other => {
             eprintln!(
                 "`lift model prove` supports fsm/bt/petri in this build; detected `{}`",
@@ -220,6 +235,9 @@ fn prove_cmd(a: Vec<String>) {
     }
     println!();
     println!("  reachable : {} state(s)", m1.reachable);
+    for note in &m1.notes {
+        println!("  note      : {note}");
+    }
     println!("  theorem   : {ns}.safety  (every reachable state satisfies safeB)");
     println!("  axioms    : {}", if axioms.is_empty() { "(none)" } else { axioms });
     println!("  Lean      : {}", emit_path.display());

@@ -117,7 +117,10 @@ pub fn emit_fsm(lts: &Lts, namespace: &str) -> String {
 pub fn emit_petri(net: &PtNet, namespace: &str) -> String {
     let field = |i: usize| ctor(&net.places[i]);
     let np = net.places.len();
-    let b: u32 = net.initial.iter().sum();
+    // The invariant is over the conserved subsystem (a place invariant); the
+    // default is all places (the dock's global token total).
+    let conserved: Vec<usize> = net.conserved.clone().unwrap_or_else(|| (0..np).collect());
+    let b: u32 = conserved.iter().map(|&i| net.initial[i]).sum();
 
     let mut o = String::new();
     o.push_str(&format!(
@@ -176,12 +179,13 @@ pub fn emit_petri(net: &PtNet, namespace: &str) -> String {
     let inits: Vec<String> = (0..np).map(|i| format!("{} := {}", field(i), net.initial[i])).collect();
     o.push_str(&format!("def init : M := {{ {} }}\n\n", inits.join(", ")));
 
-    // total + the inductive upper-bound invariant.
-    let total_expr: Vec<String> = (0..np).map(|i| format!("m.{}", field(i))).collect();
+    // total + the inductive upper-bound invariant, over the conserved subsystem.
+    let total_expr: Vec<String> = conserved.iter().map(|&i| format!("m.{}", field(i))).collect();
     o.push_str(&format!(
-        "/-- Total live tokens — every transition conserves this or (loss) decreases it. -/\n\
+        "/-- Conserved token mass (a place invariant): every transition keeps this\n\
+        \x20   equal or (loss) decreases it — never grows. -/\n\
         def total (m : M) : Nat := {}\n\n\
-        /-- The loss-robust UPPER-BOUND invariant: `total` starts at {b} and never grows. -/\n\
+        /-- The UPPER-BOUND invariant: the conserved mass starts at {b} and never grows. -/\n\
         def Inv (m : M) : Prop := total m ≤ {b}\n\n",
         total_expr.join(" + ")
     ));
