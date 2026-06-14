@@ -276,12 +276,12 @@ The shared substrate every later phase reuses. No new model family yet.
 > for FSM/BT (enum State/Event, `step` match, a `forbidden` runtime monitor =
 > 6.2, a driver over a shared trace protocol). **Loop closure** (`lift model
 > export --verify`): compile the executor (`rustc`/`c++`/`go build`), run it over
-> 300 deterministic action traces, difftest line-by-line against the native model
+> exhaustive reachable-edge coverage, difftest line-by-line against the native model
 > simulator → **L1 conformance** — the model-axis "exporter proposes, algorithm
 > disposes". All three languages conform on `mcl` (FSM) and `mission` (BT).
 > **Petri/CPN executors also landed:** a PT-net (or unfolded CPN) → a
 > marking-array executor; the loop closure difftests marking traces
-> (`dock`/`resource` conform 299/299 in all three langs). DOT export for both LTS
+> (`dock`/`resource` conform on every reachable edge in all three langs). DOT export for both LTS
 > and Petri. `codegen.recipe.md`. **Deferred:** GSPN executors, the networked Go
 > coordinator (§6.4/§2.7), and proving the Rust export back through Aeneas to
 > re-derive M3 on the code (§6.3 second half).

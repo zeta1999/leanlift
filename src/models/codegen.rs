@@ -134,28 +134,43 @@ pub fn native_trace(model: &dyn Model, trace: &[String]) -> String {
     out.join(" ")
 }
 
-/// Deterministic action traces from `alphabet` (fixed seed ⇒ reproducible).
-/// Generates `n` traces of length up to `max_len`; an empty alphabet ⇒ just the
-/// single empty trace (a quiescent model).
-pub fn gen_traces(alphabet: &[String], n: usize, max_len: usize, seed: u64) -> Vec<Vec<String>> {
-    if alphabet.is_empty() {
-        return vec![vec![]];
+/// **Exhaustive** coverage traces: a witness path to every reachable state, each
+/// extended by every action — so every reachable `(state, action)` edge is
+/// exercised exactly once (plus the empty trace, which checks the initial
+/// state). For a *deterministic* model this makes the loop closure a complete
+/// equivalence check, not a random sample: any divergence between the generated
+/// step table and the model — a wrong target, a missing/extra edge, a wrong
+/// forbidden label — shows up in some edge trace's last token. Bounded by `cap`
+/// reachable states (returns `truncated = true` if the bound is hit, so an
+/// unbounded net reports partial coverage rather than silently claiming total).
+pub fn coverage_traces(model: &dyn Model, alphabet: &[String], cap: usize) -> (Vec<Vec<String>>, bool) {
+    use std::collections::{HashMap, VecDeque};
+    let init = model.initial();
+    let mut witness: HashMap<String, Vec<String>> = HashMap::new();
+    witness.insert(init.clone(), vec![]);
+    let mut traces: Vec<Vec<String>> = vec![vec![]]; // empty trace ⇒ check the initial state
+    let mut queue: VecDeque<String> = VecDeque::new();
+    queue.push_back(init);
+    let mut truncated = false;
+    while let Some(s) = queue.pop_front() {
+        let w = witness[&s].clone();
+        for a in alphabet {
+            let mut t = w.clone();
+            t.push(a.clone());
+            traces.push(t.clone()); // an edge trace: reach s, then try a
+            if let Some(s2) = model.step(&s, a) {
+                if !witness.contains_key(&s2) {
+                    if witness.len() >= cap {
+                        truncated = true;
+                        continue;
+                    }
+                    witness.insert(s2.clone(), t);
+                    queue.push_back(s2);
+                }
+            }
+        }
     }
-    let mut state = seed;
-    let mut next = || {
-        // xorshift64
-        state ^= state << 13;
-        state ^= state >> 7;
-        state ^= state << 17;
-        state
-    };
-    let mut traces = Vec::with_capacity(n);
-    for _ in 0..n {
-        let len = (next() as usize) % (max_len + 1);
-        let trace: Vec<String> = (0..len).map(|_| alphabet[(next() as usize) % alphabet.len()].clone()).collect();
-        traces.push(trace);
-    }
-    traces
+    (traces, truncated)
 }
 
 // --- Petri executors (marking = array of counts) ----------------------------- //

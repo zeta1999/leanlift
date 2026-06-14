@@ -372,17 +372,15 @@ fn export_cmd(a: Vec<String>) {
         exit(0);
     }
     if verify {
-        // Difftest against the native model over deterministic action traces.
+        // Difftest against the native model over EXHAUSTIVE edge coverage.
         let result = match &model {
-            Cg::Lts(l) => conformance(l, &l.alphabet, 2 * l.states.len().max(2), lang, &out),
-            Cg::Petri(n) => {
-                let alpha = codegen::petri_alphabet(n);
-                conformance(n, &alpha, 24, lang, &out)
-            }
+            Cg::Lts(l) => conformance(l, &l.alphabet, lang, &out),
+            Cg::Petri(n) => conformance(n, &codegen::petri_alphabet(n), lang, &out),
         };
         match result {
-            Ok((n, _)) => {
-                println!("  loop closure : L1 conformant — {n}/{n} traces match the native model");
+            Ok((n, truncated)) => {
+                let note = if truncated { " (bounded — coverage partial, net is unbounded)" } else { "" };
+                println!("  loop closure : L1 conformant — {n}/{n} reachable edges match the native model{note}");
                 println!("  (generated code ≡ model semantics — the two halves of leanlift meet)");
                 exit(0);
             }
@@ -403,10 +401,9 @@ fn export_cmd(a: Vec<String>) {
 fn conformance(
     model: &dyn ir::Model,
     alphabet: &[String],
-    max_len: usize,
     lang: codegen::Lang,
     src: &Path,
-) -> Result<(usize, usize), String> {
+) -> Result<(usize, bool), String> {
     use codegen::Lang;
     let work = std::env::temp_dir().join("leanlift-models-work");
     let _ = std::fs::create_dir_all(&work);
@@ -429,10 +426,10 @@ fn conformance(
         return Err(format!("generated {} did not compile", lang.tag()));
     }
 
-    // Deterministic traces. Compute the native reference over EXACTLY the lines
-    // the executor will read (so trailing-empty-line handling matches bit for
-    // bit — `str::lines()` drops a final empty line, on both sides).
-    let traces = codegen::gen_traces(alphabet, 300, max_len, crate::vectors::SEED);
+    // Exhaustive (state, action)-edge coverage. Compute the native reference over
+    // EXACTLY the lines the executor will read (so trailing-empty-line handling
+    // matches bit for bit — `str::lines()` drops a final empty line, both sides).
+    let (traces, truncated) = codegen::coverage_traces(model, alphabet, check::DEFAULT_BOUND);
     let stdin_data = traces.iter().map(|t| t.join(" ")).collect::<Vec<_>>().join("\n");
     let lines: Vec<String> = stdin_data.lines().map(str::to_string).collect();
     let native: Vec<String> = lines
@@ -461,12 +458,12 @@ fn conformance(
     for (i, (g, n)) in got.iter().zip(&native).enumerate() {
         if g != n {
             return Err(format!(
-                "trace {i} diverges:\n      trace   : {}\n      native  : {n}\n      codegen : {g}",
+                "edge trace {i} diverges:\n      trace   : {}\n      native  : {n}\n      codegen : {g}",
                 lines[i]
             ));
         }
     }
-    Ok((native.len(), native.len()))
+    Ok((native.len(), truncated))
 }
 
 fn prism_cmd(a: Vec<String>) {
