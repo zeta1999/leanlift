@@ -337,12 +337,17 @@ fn conformance(lts: &ir::Lts, lang: codegen::Lang, src: &Path) -> Result<(usize,
     let work = std::env::temp_dir().join("leanlift-models-work");
     let _ = std::fs::create_dir_all(&work);
     let bin = work.join("model_exec");
+    // Copy to a canonically-suffixed source (go build requires a `.go` name; c++
+    // infers the language from the extension) so --verify works regardless of
+    // the user's --emit filename.
+    let csrc = work.join(format!("model_exec.{}", lang.ext()));
+    std::fs::copy(src, &csrc).map_err(|e| format!("staging source: {e}"))?;
 
     // Compile.
     let status = match lang {
-        Lang::Rust => Command::new("rustc").args(["-O", "-o"]).arg(&bin).arg(src).status(),
-        Lang::Cpp => Command::new("c++").args(["-O2", "-std=c++17", "-o"]).arg(&bin).arg(src).status(),
-        Lang::Go => Command::new("go").arg("build").arg("-o").arg(&bin).arg(src).status(),
+        Lang::Rust => Command::new("rustc").args(["-O", "-o"]).arg(&bin).arg(&csrc).status(),
+        Lang::Cpp => Command::new("c++").args(["-O2", "-std=c++17", "-o"]).arg(&bin).arg(&csrc).status(),
+        Lang::Go => Command::new("go").arg("build").arg("-o").arg(&bin).arg(&csrc).status(),
     }
     .map_err(|e| format!("could not invoke the {} compiler: {e}", lang.tag()))?;
     if !status.success() {
