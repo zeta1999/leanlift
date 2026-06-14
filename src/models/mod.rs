@@ -19,7 +19,9 @@ mod ir;
 mod lean;
 mod prism;
 mod report;
+mod scxml;
 mod toml;
+mod xml;
 
 use format::Family;
 use std::path::{Path, PathBuf};
@@ -98,6 +100,19 @@ fn check_cmd(a: Vec<String>) {
         .unwrap_or_else(|e| fail(&format!("cannot read {file}: {e}")));
     let hash = report::content_hash(&src);
 
+    // Standard XML input (SCXML) → an LTS, checked exactly like a native FSM.
+    if is_xml(&src) {
+        let lts = load_xml_lts(&file, &src);
+        let result = check::check(&lts, bound);
+        report::print_human(&result, &file, &hash);
+        if let Err(e) = report::write_json(&result, &file, &hash, &out) {
+            eprintln!("warning: could not write {}: {e}", out.display());
+        } else {
+            eprintln!("  model-report.json -> {}", out.display());
+        }
+        exit(if result.safe() { 0 } else { 1 });
+    }
+
     let doc = toml::parse(&src).unwrap_or_else(|e| fail(&format!("{file}: {e}")));
     let family = format::detect(&doc).unwrap_or_else(|e| fail(&format!("{file}: {e}")));
 
@@ -168,13 +183,20 @@ fn prove_cmd(a: Vec<String>) {
         .unwrap_or_else(|e| fail(&format!("cannot read {file}: {e}")));
     let hash = report::content_hash(&src);
 
+    let ns = lean_namespace(&file);
+
+    // Standard XML input (SCXML) → an LTS → the FSM exporter.
+    let (m1, generated) = if is_xml(&src) {
+        let lts = load_xml_lts(&file, &src);
+        let r = check::check(&lts, check::DEFAULT_BOUND);
+        (r, lean::emit_fsm(&lts, &ns))
+    } else {
     let doc = toml::parse(&src).unwrap_or_else(|e| fail(&format!("{file}: {e}")));
     let family = format::detect(&doc).unwrap_or_else(|e| fail(&format!("{file}: {e}")));
-    let ns = lean_namespace(&file);
 
     // Build the model, run M1 (the certificate reports reachable size), and emit
     // the Lean proof — both families ride the same elaborate-and-certify path.
-    let (m1, generated) = match family {
+    match family {
         Family::Fsm => {
             let m = format::parse_fsm(&src).unwrap_or_else(|e| fail(&format!("{file}: {e}")));
             let r = check::check(&m, check::DEFAULT_BOUND);
@@ -207,6 +229,7 @@ fn prove_cmd(a: Vec<String>) {
             );
             exit(2);
         }
+    }
     };
 
     // Compile the Models support theory, then emit + elaborate the proof.
@@ -292,13 +315,17 @@ fn export_cmd(a: Vec<String>) {
     let file = file.unwrap_or_else(|| usage());
     let src = std::fs::read_to_string(&file).unwrap_or_else(|e| fail(&format!("cannot read {file}: {e}")));
 
-    let doc = toml::parse(&src).unwrap_or_else(|e| fail(&format!("{file}: {e}")));
-    let lts = match format::detect(&doc).unwrap_or_else(|e| fail(&format!("{file}: {e}"))) {
-        Family::Fsm => format::parse_fsm(&src).unwrap_or_else(|e| fail(&format!("{file}: {e}"))),
-        Family::Bt => bt::parse_bt(&src).unwrap_or_else(|e| fail(&format!("{file}: {e}"))),
-        other => {
-            eprintln!("code export is LTS-only (fsm/bt) in this build; detected `{}`", other.tag());
-            exit(2);
+    let lts = if is_xml(&src) {
+        load_xml_lts(&file, &src)
+    } else {
+        let doc = toml::parse(&src).unwrap_or_else(|e| fail(&format!("{file}: {e}")));
+        match format::detect(&doc).unwrap_or_else(|e| fail(&format!("{file}: {e}"))) {
+            Family::Fsm => format::parse_fsm(&src).unwrap_or_else(|e| fail(&format!("{file}: {e}"))),
+            Family::Bt => bt::parse_bt(&src).unwrap_or_else(|e| fail(&format!("{file}: {e}"))),
+            other => {
+                eprintln!("code export is LTS-only (fsm/bt) in this build; detected `{}`", other.tag());
+                exit(2);
+            }
         }
     };
 
@@ -311,6 +338,10 @@ fn export_cmd(a: Vec<String>) {
     println!("  ────────────────────────────────────────────────");
     println!("  source : {}", out.display());
 
+    if verify && !lang.executable() {
+        println!("  (dot is a visualization, not an executor — nothing to --verify)");
+        exit(0);
+    }
     if verify {
         match conformance(&lts, lang, &out) {
             Ok((n, _)) => {
@@ -348,6 +379,7 @@ fn conformance(lts: &ir::Lts, lang: codegen::Lang, src: &Path) -> Result<(usize,
         Lang::Rust => Command::new("rustc").args(["-O", "-o"]).arg(&bin).arg(&csrc).status(),
         Lang::Cpp => Command::new("c++").args(["-O2", "-std=c++17", "-o"]).arg(&bin).arg(&csrc).status(),
         Lang::Go => Command::new("go").arg("build").arg("-o").arg(&bin).arg(&csrc).status(),
+        Lang::Dot => return Err("dot is not executable".into()),
     }
     .map_err(|e| format!("could not invoke the {} compiler: {e}", lang.tag()))?;
     if !status.success() {
@@ -585,4 +617,19 @@ fn take(a: &[String], i: &mut usize) -> String {
 fn fail(msg: &str) -> ! {
     eprintln!("error: {msg}");
     exit(2);
+}
+
+/// A standard XML input (SCXML now; PNML/BT-XML later) rather than `*.model.toml`.
+fn is_xml(src: &str) -> bool {
+    src.trim_start().starts_with('<')
+}
+
+/// Build an `Lts` from a standard XML format (the "standard formats just work as
+/// input" UX bar). SCXML → FSM today.
+fn load_xml_lts(file: &str, src: &str) -> ir::Lts {
+    let root = xml::parse(src).unwrap_or_else(|e| fail(&format!("{file}: XML: {e}")));
+    match root.tag.as_str() {
+        "scxml" => scxml::to_lts(&root).unwrap_or_else(|e| fail(&format!("{file}: SCXML: {e}"))),
+        other => fail(&format!("{file}: unsupported XML root <{other}> (SCXML supported in this build)")),
+    }
 }

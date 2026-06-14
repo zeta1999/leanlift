@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- turnstile.scxml — a coin-operated turnstile, in standard W3C SCXML.
+     `lift model check/prove/export turnstile.scxml` works directly (no
+     conversion): the family is auto-detected from the <scxml> root. The safety
+     property is authored in-file with leanlift's `forbid="true"` convention —
+     here, the turnstile must never reach a `broken` state. -->
+<scxml xmlns="http://www.w3.org/2005/07/scxml" version="1.0" initial="locked">
+
+  <state id="locked">
+    <transition event="coin" target="unlocked"/>
+    <transition event="push" target="locked"/>
+  </state>
+
+  <state id="unlocked">
+    <transition event="push" target="locked"/>
+    <transition event="coin" target="unlocked"/>
+  </state>
+
+  <!-- An (unreachable) fault state, declared forbidden for the safety proof. -->
+  <state id="broken" forbid="true"/>
+
+</scxml>

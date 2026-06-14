@@ -197,6 +197,30 @@ deterministic traces → L1 conformance. The trace protocol: stdin traces (one p
 line, space-separated events) → visited state names, `!` after a forbidden
 state, `BLOCKED` on a refused event.
 
+## Interop — standard formats as input
+
+Standard formats are detected from content and handled with no conversion step
+(the UX bar: "standard formats just work as input").
+
+- **SCXML** (W3C statecharts) → FSM. `lift model check mission.scxml`,
+  `lift model prove mission.scxml`, `lift model export mission.scxml` all work
+  directly — the `<scxml>` root is auto-detected. Subset: `<state id>`/`<final
+  id>` (flattened) and `<transition event= target=>`; the safety property is
+  authored in-file as `forbid="true"` on a `<state>`. (PNML for Petri and
+  BehaviorTree.CPP/Groot XML for BTs are further steps.)
+
+```xml
+<scxml initial="locked">
+  <state id="locked"><transition event="coin" target="unlocked"/></state>
+  <state id="unlocked"><transition event="push" target="locked"/></state>
+  <state id="broken" forbid="true"/>   <!-- safety: must be unreachable -->
+</scxml>
+```
+
+- **DOT** (Graphviz) export for visualization: `lift model export <file> --lang
+  dot` emits a digraph (initial double-circled, forbidden states filled red,
+  edges labelled by event). Render with `dot -Tpng model.dot -o model.png`.
+
 ## The worked examples
 
 `examples/models/`: `tiny` (FSM), `mcl` (FSM product), `dock` (Petri + loss),
