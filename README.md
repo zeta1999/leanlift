@@ -119,6 +119,39 @@ goals is the generalization).
 `deposit*(t-start) ≤ U64.max` — the exact side-condition the differential test
 discovered empirically. Same boundary, now a proof premise.
 
+## Behavioural models (`lift model`)
+
+A **dual axis** to the code→Lean path above: author one **behavioural model** in
+an easy text format and generate, from a single source of truth, a Lean proof
+(qualitative), a PRISM model (quantitative), and runnable code. Five families,
+one auto-detected one-command path (no `--kind`). See
+[`docs/SPEC-models.md`](docs/SPEC-models.md) /
+[`docs/PLAN-models.md`](docs/PLAN-models.md) and the authoring reference
+[`docs/FORMATS-models.md`](docs/FORMATS-models.md).
+
+```
+lift model check  examples/models/dock.model.toml      # M1 BFS: reachability + safety
+lift model prove  examples/models/mcl.model.toml       # M3 Lean: safety theorem, sorry-free
+lift model prism  examples/models/dock-gspn.model.toml # M2 CTMC: P(freed), E[time], P(≤T) + PRISM
+lift model export examples/models/mission.model.toml --lang rust --verify   # L1 loop closure
+```
+
+| Family | Example | Lesson |
+|--------|---------|--------|
+| FSM | `mcl` | supervisor × belief product; "never navigate while delocalized" |
+| Petri + loss | `dock` | mutex *survives* token loss; the loss-induced deadlock |
+| Behaviour tree | `mission` | reactive tree → LTS; "never moving while lost" |
+| Coloured PN | `resource` | mutex via a place invariant; CPN→PT unfolding |
+| Stochastic GSPN | `dock-gspn` | lease `P=1`, `E=1/μd`; giveup `1−p^(K+1)` |
+
+The **M-ladder** mirrors the code ladder: M1 checked (native BFS), M2
+model-checked (PRISM/native CTMC), M3 proved (Lean, sorry-free). The same trust
+model applies — the exporter is mechanical and the kernel/checker disposes: a
+wrong model goes red in *both* the BFS checker and the Lean proof. `export
+--verify` closes the loop by difftesting generated code against the model (the
+model-axis L1), joining the two halves of leanlift. Each example ships a
+`*.recipe.md`; all are exercised by `tests/run.sh`.
+
 ## Next
 
 The proof procedure and the path toward a numerical algorithm (isqrt → bisection

@@ -290,7 +290,18 @@ The shared substrate every later phase reuses. No new model family yet.
 
 ---
 
-## Phase 7 — Integration, docs, regression, and the UX bar
+## Phase 7 — Integration, docs, regression, and the UX bar ✅ DONE
+
+> **Status (landed):** all `lift model {check,prove,prism,export}` verbs wired
+> with content auto-detection (7.1); a `*.recipe.md` per example (7.2); full
+> regression + teeth/cross-checks for every family in `tests/run.sh` (7.3); docs
+> kept current — `SPEC-models.md`, this plan, and a new authoring reference
+> `docs/FORMATS-models.md`, plus a `lift model` section in the README (7.4). UX
+> audit (7.5): the bare verb on the bare file works with no flags and
+> auto-detects the family for check/prism/export anywhere; `prove` additionally
+> needs the Lean support library (run from repo root or `--lean-path`, as the
+> existing `lift prove` does). Flags only refine; every run writes a default
+> report; `export --verify` compiles regardless of the `--emit` name.
 
 - **7.1 CLI wired.** All `lift model …` subcommands; `model-report.json` with the
   M-ladder; **family auto-detection** so the one-command path needs no `--kind`.
