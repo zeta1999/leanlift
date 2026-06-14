@@ -50,9 +50,15 @@ relations true for *every* model, and cross-check independent computations.
   + ≤3 initial tokens ⇒ finite/small reachable set, memory-safe). Asserts all 399
   unfold and that the differential is non-vacuous (>40 nets reach >1 marking).
   Broadens the prime-suspect unfolder far past the `resource` + 2 synthetic nets.
-- **V0.5 M1 ↔ M3 agreement** over random FSMs: `check` says safe **iff** the
-  generated Lean proof elaborates (systematizes the teeth; gated on `lean`).
-- **V0.6 native CTMC vs PRISM** as a CI gate where the `prism` binary is present.
+- **V0.5 M1 ↔ M3 agreement** over random FSMs ✅ (`verify-m1m3.sh`, deep tier):
+  for random FSMs in two construction-guaranteed classes (safe = no edge into
+  `bad`; unsafe = `s0 → bad`), `check` (M1) and the generated Lean proof (M3)
+  must reach the SAME verdict, matching ground truth. Systematizes the teeth;
+  gated on `lake`/`lean`, SKIPs otherwise. Bounded N (Lean is seconds/model).
+- **V0.6 native CTMC vs PRISM** ✅ — the diff already lives in `lift model prism`
+  (`run_prism_and_diff`, ≤1e-4); `verify.sh` wires it as a deep-tier GATE on
+  `examples/models/dock-gspn.model.toml` that FAILs on any `mismatch` and SKIPs
+  where the `prism` binary is absent.
 
 ---
 
@@ -185,7 +191,7 @@ that produces proofs is itself proved by the same tool. ✅ **DONE** (2026-06-14
 | `format::product` | commutativity | — | — | — |
 | `cpn::unfold` | **unfold ≡ coloured** ✅ | — | — | — |
 | `PtNet::fire/enabled` | loss monotonicity ✅ | **no underflow** ✅ | — | **Aeneas vs Petri.lean** ✅ ★ |
-| `gspn` CTMC solver | vs PRISM + closed forms | finite/in-range | — | — (floats) |
+| `gspn` CTMC solver | vs PRISM (gate ✅) + closed forms ✅ | finite/in-range | — | — (floats) |
 | `lean`/`codegen` emit | M1↔M3, loop closure ✅; `vid`/`ctor` exhaustive ASCII≤2 ✅ | (string-decode intractable) | — | — |
 
 ## Ordered next steps
@@ -199,6 +205,7 @@ that produces proofs is itself proved by the same tool. ✅ **DONE** (2026-06-14
 3. ✅ **V3.1–V3.4 Aeneas dogfood** — `fire_place` extracted via Charon+Aeneas
    and proved sorry-free against `Petri.lean`'s `fire_le`/`le_preserved`
    (`lift prove models-fire`). Leanlift verifies its own substrate.
-4. V0.4–V0.6 (random CPNs, M1↔M3, CTMC-vs-PRISM gate); V2 parser fuzzing.
+4. ✅ V0.4–V0.6 (random CPNs, M1↔M3, CTMC-vs-PRISM gate). **TODO:** V2 parser
+   fuzzing; V1.4/V1.5 (CTMC-range / parser no-panic Kani); V3.5 Creusot.
 5. ✅ V5 consolidation (`verify.sh` deep-tier orchestrator; cross-referenced
    with `ci.sh`). **VERIFY GREEN** end to end.
