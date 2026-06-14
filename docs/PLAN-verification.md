@@ -38,10 +38,13 @@ relations true for *every* model, and cross-check independent computations.
 - **V0.2 unfold ≡ coloured differential.** ✅ `cpn` tests: the unfolded PT-net's
   reachable graph must equal the coloured occurrence graph (the prime-suspect
   unfolder). Verified non-vacuous: an injected multiplicity bug fails it.
-- **V0.3 metamorphic FSM properties.** ✅ (`proptest.rs`) determinism,
-  rename-invariance, reachable-count vs independent BFS. **TODO:** product
-  commutativity, dead-state-addition invariance, Petri loss monotonicity (the
-  Rust analogue of `Petri.le_preserved`).
+- **V0.3 metamorphic properties.** ✅ (`proptest.rs`) determinism,
+  rename-invariance, reachable-count vs independent BFS, **product
+  commutativity** (A∥B ≡ B∥A up to `a|b`↔`b|a`), **dead-state-addition
+  invariance** (an unreachable forbidden state perturbs neither count nor
+  verdict), and **Petri loss monotonicity** (the Rust analogue of
+  `Petri.le_preserved`: non-increasing transitions keep every reachable marking
+  ≤ the initial total; non-vacuity guarded).
 - **V0.4 random CPN generator** feeding V0.2 (today the differential runs on the
   `resource` example + two synthetic nets; randomize for breadth).
 - **V0.5 M1 ↔ M3 agreement** over random FSMs: `check` says safe **iff** the
@@ -154,8 +157,9 @@ that produces proofs is itself proved by the same tool.
 
 ## Ordered next steps
 
-1. ✅ V0.1–V0.3 (coloured sim, unfold≡coloured differential, FSM proptests) +
-   V4 coverage policy + `--samples`.
+1. ✅ V0.1–V0.3 (coloured sim, unfold≡coloured differential, FSM proptests:
+   determinism, rename, BFS-count, product commutativity, dead-state-addition,
+   loss monotonicity) + V4 coverage policy + `--samples`.
 2. **V1.2/V1.3 Kani** — `fire` no-underflow and `vid`/`ctor` validity (the
    fixed-bug regression guards), behind `verify-kani.sh`.
 3. **V3.1–V3.4 Aeneas dogfood** — extract the Petri core and prove it against

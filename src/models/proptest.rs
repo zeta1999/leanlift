@@ -7,8 +7,8 @@
 
 #![cfg(test)]
 
-use super::check;
-use super::ir::{Lts, Model};
+use super::ir::{Lts, Model, PtNet, PtTrans};
+use super::{check, format};
 use std::collections::{HashMap, HashSet, VecDeque};
 
 /// A tiny seeded xorshift PRNG (no dependency).
@@ -134,4 +134,116 @@ fn reachable_subset_of_declared_states() {
         let r = check::check(&m, check::DEFAULT_BOUND);
         assert!(r.reachable >= 1 && r.reachable <= m.states.len(), "seed {seed}");
     }
+}
+
+// --- V0.3 metamorphic properties (PLAN-verification §V0.3) ------------------ //
+
+#[test]
+fn product_commutativity() {
+    // The synchronous product is commutative up to the `a|b` ↔ `b|a` state
+    // renaming: A∥B and B∥A explore the same number of (reachable) states and
+    // the same number of deadlocks. A bug in the sync/self-loop logic that
+    // treated the two operands asymmetrically would break this.
+    for seed in 1..300u64 {
+        let a = random_lts(seed.wrapping_mul(0x9E3779B97F4A7C15));
+        let b = random_lts(seed.wrapping_mul(0x2545F4914F6CDD1D) ^ 0xBEEF);
+        let ab = check::check(&format::product(&a, &b), check::DEFAULT_BOUND);
+        let ba = check::check(&format::product(&b, &a), check::DEFAULT_BOUND);
+        assert_eq!(ab.reachable, ba.reachable, "seed {seed}: reachable");
+        assert_eq!(ab.deadlocks.len(), ba.deadlocks.len(), "seed {seed}: deadlocks");
+    }
+}
+
+#[test]
+fn dead_state_addition_invariance() {
+    // Adding an UNREACHABLE state — even a forbidden one, with outgoing edges —
+    // changes neither the reachable count nor the verdict: the checker explores
+    // forward from the initial state and must never be perturbed by garbage it
+    // can't reach. (Catches an accidental "scan all declared states" regression.)
+    for seed in 1..300u64 {
+        let m = random_lts(seed.wrapping_mul(0x9E3779B97F4A7C15) ^ 0x5151);
+        let base = check::check(&m, check::DEFAULT_BOUND);
+
+        let dead = "zzz_unreachable".to_string();
+        let mut states = m.states.clone();
+        states.push(dead.clone());
+        // Give the dead state OUTGOING edges (to s0) but no INCOMING edge, so it
+        // stays unreachable; declare it forbidden to make the test bite harder.
+        let mut transitions = m.transitions.clone();
+        for e in &m.alphabet {
+            transitions.insert((dead.clone(), e.clone()), m.initial.clone());
+        }
+        let mut forbid = m.forbid.clone();
+        forbid.push(dead.clone());
+        let m2 = Lts { family: m.family, states, alphabet: m.alphabet.clone(), initial: m.initial.clone(), transitions, forbid };
+
+        let aug = check::check(&m2, check::DEFAULT_BOUND);
+        assert_eq!(base.reachable, aug.reachable, "seed {seed}: reachable");
+        assert_eq!(base.safe(), aug.safe(), "seed {seed}: verdict");
+        assert_eq!(base.deadlocks.len(), aug.deadlocks.len(), "seed {seed}: deadlocks");
+    }
+}
+
+/// A random PT-net whose every transition is NON-INCREASING in total token mass
+/// (`post_sum ≤ pre_sum`) — the loss / conservative regime. 2–4 places, 1–4
+/// transitions, small initial marking.
+fn random_nonincreasing_ptnet(seed: u64) -> PtNet {
+    let mut r = Rng(seed | 1);
+    let np = 2 + r.upto(3);
+    let nt = 1 + r.upto(4);
+    let places: Vec<String> = (0..np).map(|i| format!("p{i}")).collect();
+    let mut initial: Vec<u32> = (0..np).map(|_| r.upto(3) as u32).collect();
+    if initial.iter().all(|&c| c == 0) {
+        initial[0] = 1; // ensure a non-empty initial marking
+    }
+    let mut transitions = Vec::new();
+    for ti in 0..nt {
+        let pre: Vec<u32> = (0..np).map(|_| r.upto(3) as u32).collect();
+        let pre_sum: u32 = pre.iter().sum();
+        // Distribute k ≤ pre_sum produced tokens across the places at random.
+        let mut post = vec![0u32; np];
+        let k = r.upto((pre_sum + 1) as usize) as u32;
+        for _ in 0..k {
+            post[r.upto(np)] += 1;
+        }
+        transitions.push(PtTrans { name: format!("t{ti}"), pre, post });
+    }
+    PtNet { places, transitions, initial, bound: 8, bounds: Vec::new(), conserved: None }
+}
+
+#[test]
+fn petri_loss_monotonicity() {
+    // The Rust analogue of `Petri.le_preserved`: if every transition is
+    // non-increasing, firing can only keep or shrink the total token mass, so
+    // EVERY reachable marking has total ≤ the initial total. This is exactly the
+    // upper bound the Lean export inducts on; a sign error in `PtNet::step`
+    // (e.g. `+ pre` instead of `- pre`) would let the total grow and trip it.
+    let mut nontrivial = 0usize; // non-vacuity: count nets that actually move
+    for seed in 1..400u64 {
+        let net = random_nonincreasing_ptnet(seed.wrapping_mul(0x9E3779B97F4A7C15));
+        let cap: u32 = net.initial.iter().sum();
+
+        // Independent BFS collecting markings (check only returns a count).
+        let mut seen: HashSet<String> = HashSet::new();
+        let mut q: VecDeque<String> = VecDeque::new();
+        let init = net.initial();
+        seen.insert(init.clone());
+        q.push_back(init);
+        while let Some(s) = q.pop_front() {
+            let total: u32 = PtNet::decode(&s).iter().sum();
+            assert!(total <= cap, "seed {seed}: marking {s} total {total} > cap {cap}");
+            for a in net.enabled(&s) {
+                if let Some(t) = net.step(&s, &a) {
+                    if seen.insert(t.clone()) {
+                        assert!(seen.len() < 200_000, "seed {seed}: net failed to stay finite");
+                        q.push_back(t);
+                    }
+                }
+            }
+        }
+        if seen.len() > 1 {
+            nontrivial += 1;
+        }
+    }
+    assert!(nontrivial > 50, "loss-monotonicity test was near-vacuous: only {nontrivial} nets moved");
 }
