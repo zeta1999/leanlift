@@ -45,8 +45,11 @@ relations true for *every* model, and cross-check independent computations.
   verdict), and **Petri loss monotonicity** (the Rust analogue of
   `Petri.le_preserved`: non-increasing transitions keep every reachable marking
   ≤ the initial total; non-vacuity guarded).
-- **V0.4 random CPN generator** feeding V0.2 (today the differential runs on the
-  `resource` example + two synthetic nets; randomize for breadth).
+- **V0.4 random CPN generator** ✅ (`cpn` tests, `random_unfold_equiv`) — feeds
+  V0.2 over 399 random, bounded, valid coloured nets (non-increasing transitions
+  + ≤3 initial tokens ⇒ finite/small reachable set, memory-safe). Asserts all 399
+  unfold and that the differential is non-vacuous (>40 nets reach >1 marking).
+  Broadens the prime-suspect unfolder far past the `resource` + 2 synthetic nets.
 - **V0.5 M1 ↔ M3 agreement** over random FSMs: `check` says safe **iff** the
   generated Lean proof elaborates (systematizes the teeth; gated on `lean`).
 - **V0.6 native CTMC vs PRISM** as a CI gate where the `prism` binary is present.
