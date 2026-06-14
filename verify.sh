@@ -75,6 +75,36 @@ else
 fi
 
 # ---------------------------------------------------------------------------- #
+sect "M1 ↔ M3 agreement over random FSMs (V0.5)"
+if command -v lake >/dev/null 2>&1; then
+  if ./verify-m1m3.sh 5 >"$TMP/m1m3.out" 2>&1; then
+    pass "verify-m1m3.sh  ($(grep -oE '[0-9]+ random FSMs' "$TMP/m1m3.out" | head -1), M1↔M3 agree)"
+  else
+    bad "verify-m1m3.sh"; sed 's/^/      /' "$TMP/m1m3.out" | tail -30
+  fi
+else
+  skip "lake/lean not on PATH — M3 unavailable, V0.5 skipped"
+fi
+
+# ---------------------------------------------------------------------------- #
+sect "native CTMC vs PRISM cross-check (V0.6)"
+if command -v prism >/dev/null 2>&1; then
+  if "$LIFT" model prism examples/models/dock-gspn.model.toml --emit "$TMP/dg" \
+       --out "$TMP/prism.json" >"$TMP/prism.out" 2>&1; then
+    if grep -qi 'mismatch' "$TMP/prism.out"; then
+      bad "model prism dock-gspn — native CTMC disagrees with PRISM"
+      grep -i 'mismatch' "$TMP/prism.out" | sed 's/^/      /'
+    else
+      pass "model prism dock-gspn — native CTMC agrees with PRISM (≤1e-4)"
+    fi
+  else
+    bad "model prism dock-gspn failed"; tail -15 "$TMP/prism.out"
+  fi
+else
+  skip "prism not installed — V0.6 native-CTMC-vs-PRISM cross-check skipped"
+fi
+
+# ---------------------------------------------------------------------------- #
 sect "parser fuzzing (V2)"
 if have cargo-fuzz && [ -d fuzz ]; then
   # V2 not yet implemented; when it is, run a short time-budget here.
