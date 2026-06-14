@@ -330,26 +330,40 @@ fn export_cmd(a: Vec<String>) {
     let file = file.unwrap_or_else(|| usage());
     let src = std::fs::read_to_string(&file).unwrap_or_else(|e| fail(&format!("cannot read {file}: {e}")));
 
-    let lts = if is_xml(&src) {
-        load_xml_lts(&file, &src)
+    // Build the model — FSM/BT → an LTS, Petri/CPN/PNML → a PT-net. Both export
+    // (and difftest) through the same codegen + loop-closure path.
+    enum Cg {
+        Lts(ir::Lts),
+        Petri(ir::PtNet),
+    }
+    let model = if is_xml(&src) {
+        match load_xml(&file, &src) {
+            XmlModel::Lts(l) => Cg::Lts(l),
+            XmlModel::Petri(n) => Cg::Petri(n),
+        }
     } else {
         let doc = toml::parse(&src).unwrap_or_else(|e| fail(&format!("{file}: {e}")));
         match format::detect(&doc).unwrap_or_else(|e| fail(&format!("{file}: {e}"))) {
-            Family::Fsm => format::parse_fsm(&src).unwrap_or_else(|e| fail(&format!("{file}: {e}"))),
-            Family::Bt => bt::parse_bt(&src).unwrap_or_else(|e| fail(&format!("{file}: {e}"))),
+            Family::Fsm => Cg::Lts(format::parse_fsm(&src).unwrap_or_else(|e| fail(&format!("{file}: {e}")))),
+            Family::Bt => Cg::Lts(bt::parse_bt(&src).unwrap_or_else(|e| fail(&format!("{file}: {e}")))),
+            Family::Petri => Cg::Petri(format::parse_petri(&src).unwrap_or_else(|e| fail(&format!("{file}: {e}")))),
+            Family::Cpn => Cg::Petri(cpn::unfold(&src).unwrap_or_else(|e| fail(&format!("{file}: {e}"))).0),
             other => {
-                eprintln!("code export is LTS-only (fsm/bt) in this build; detected `{}`", other.tag());
+                eprintln!("code export covers fsm/bt/petri/cpn in this build; detected `{}`", other.tag());
                 exit(2);
             }
         }
     };
 
-    let code = codegen::emit(&lts, lang);
+    let (code, family) = match &model {
+        Cg::Lts(l) => (codegen::emit(l, lang), l.family),
+        Cg::Petri(n) => (codegen::emit_petri(n, lang), "petri"),
+    };
     let out = emit.unwrap_or_else(|| PathBuf::from(format!("{}.{}", file_stem(&file), lang.ext())));
     std::fs::write(&out, &code).unwrap_or_else(|e| fail(&format!("cannot write {}: {e}", out.display())));
 
     println!();
-    println!("  leanlift code export — {} `{file}` → {}", lts.family, lang.tag());
+    println!("  leanlift code export — {family} `{file}` → {}", lang.tag());
     println!("  ────────────────────────────────────────────────");
     println!("  source : {}", out.display());
 
@@ -358,7 +372,15 @@ fn export_cmd(a: Vec<String>) {
         exit(0);
     }
     if verify {
-        match conformance(&lts, lang, &out) {
+        // Difftest against the native model over deterministic action traces.
+        let result = match &model {
+            Cg::Lts(l) => conformance(l, &l.alphabet, 2 * l.states.len().max(2), lang, &out),
+            Cg::Petri(n) => {
+                let alpha = codegen::petri_alphabet(n);
+                conformance(n, &alpha, 24, lang, &out)
+            }
+        };
+        match result {
             Ok((n, _)) => {
                 println!("  loop closure : L1 conformant — {n}/{n} traces match the native model");
                 println!("  (generated code ≡ model semantics — the two halves of leanlift meet)");
@@ -378,7 +400,13 @@ fn export_cmd(a: Vec<String>) {
 /// The loop closure (§6.3): compile the generated executor, run it over
 /// deterministic action traces, and difftest its output against the native model
 /// simulator. Returns the number of matching traces or the first mismatch.
-fn conformance(lts: &ir::Lts, lang: codegen::Lang, src: &Path) -> Result<(usize, usize), String> {
+fn conformance(
+    model: &dyn ir::Model,
+    alphabet: &[String],
+    max_len: usize,
+    lang: codegen::Lang,
+    src: &Path,
+) -> Result<(usize, usize), String> {
     use codegen::Lang;
     let work = std::env::temp_dir().join("leanlift-models-work");
     let _ = std::fs::create_dir_all(&work);
@@ -401,10 +429,19 @@ fn conformance(lts: &ir::Lts, lang: codegen::Lang, src: &Path) -> Result<(usize,
         return Err(format!("generated {} did not compile", lang.tag()));
     }
 
-    // Deterministic traces; native reference output.
-    let traces = codegen::gen_traces(lts, 300, 2 * lts.states.len().max(2), crate::vectors::SEED);
-    let native: Vec<String> = traces.iter().map(|t| codegen::native_trace(lts, t)).collect();
+    // Deterministic traces. Compute the native reference over EXACTLY the lines
+    // the executor will read (so trailing-empty-line handling matches bit for
+    // bit — `str::lines()` drops a final empty line, on both sides).
+    let traces = codegen::gen_traces(alphabet, 300, max_len, crate::vectors::SEED);
     let stdin_data = traces.iter().map(|t| t.join(" ")).collect::<Vec<_>>().join("\n");
+    let lines: Vec<String> = stdin_data.lines().map(str::to_string).collect();
+    let native: Vec<String> = lines
+        .iter()
+        .map(|l| {
+            let toks: Vec<String> = l.split_whitespace().map(str::to_string).collect();
+            codegen::native_trace(model, &toks)
+        })
+        .collect();
 
     // Run the generated executor over the same traces.
     use std::io::Write;
@@ -425,7 +462,7 @@ fn conformance(lts: &ir::Lts, lang: codegen::Lang, src: &Path) -> Result<(usize,
         if g != n {
             return Err(format!(
                 "trace {i} diverges:\n      trace   : {}\n      native  : {n}\n      codegen : {g}",
-                traces[i].join(" ")
+                lines[i]
             ));
         }
     }
@@ -656,10 +693,3 @@ fn load_xml(file: &str, src: &str) -> XmlModel {
     }
 }
 
-/// Like `load_xml` but require an LTS (for the LTS-only `export` path).
-fn load_xml_lts(file: &str, src: &str) -> ir::Lts {
-    match load_xml(file, src) {
-        XmlModel::Lts(lts) => lts,
-        XmlModel::Petri(_) => fail(&format!("{file}: code export is LTS-only (a PNML net is not an FSM/BT)")),
-    }
-}
