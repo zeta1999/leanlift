@@ -63,9 +63,27 @@ The native model is the oracle; any drift in the generated code shows up
 immediately. (This is the same difftest discipline as the engine's bit-exact L1,
 applied to state traces instead of numeric vectors.)
 
+## Petri / CPN executors
+
+Code export also covers the Petri families: a PT-net (or an unfolded CPN)
+becomes a marking-array executor (`enabled`/`fire`/`forbidden` over `[u32; N]`),
+and the loop closure difftests **marking** traces instead of state names.
+
+```
+$ lift model export examples/models/dock.model.toml --lang go --verify
+  loop closure : L1 conformant — 299/299 traces match the native model
+$ lift model export examples/models/resource.model.toml --lang rust --verify
+  loop closure : L1 conformant — 299/299 traces match the native model
+```
+
+(299 vs 300: a trailing empty trace is dropped identically on both sides — the
+native reference is computed over exactly the input lines the executor reads.)
+`--lang dot` emits a place/transition Petri diagram (places as circles with
+token counts, transitions as boxes).
+
 ## Scope note
 
-Code export covers the LTS families (FSM, BT). Petri/CPN/GSPN executors, the
-networked Go coordinator (the dock's signed/sequence-numbered lease protocol,
-§6.4/§2.7), and proving the Rust export back through Aeneas to re-derive M3 on
-the code (§6.3) are deferred further steps.
+Code export covers FSM, BT, Petri, and CPN (the last via unfolding). GSPN
+executors, the networked Go coordinator (the dock's signed/sequence-numbered
+lease protocol, §6.4/§2.7), and proving the Rust export back through Aeneas to
+re-derive M3 on the code (§6.3) are deferred further steps.

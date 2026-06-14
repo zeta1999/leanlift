@@ -215,7 +215,8 @@ rm -f /tmp/dock-giveup-test.model.toml
 
 echo "== models (code export + loop closure — Phase 6) =="
 # Rust is always available (this is a cargo project). C++/Go best-effort.
-for me in mcl mission; do
+# LTS families (mcl/mission) and Petri families (dock/resource) all export.
+for me in mcl mission dock resource; do
   if "$LIFT" model export "examples/models/$me.model.toml" --lang rust --emit "$TMP/$me.rs" --verify >"$TMP/$me.cg.out" 2>&1; then
     pass "$me → rust + loop closure ($(grep -o 'L1 conformant — [0-9]*/[0-9]* traces' "$TMP/$me.cg.out"))"
   else
