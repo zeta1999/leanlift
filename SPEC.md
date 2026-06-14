@@ -258,6 +258,16 @@ to extract against:
 - No claim of equivalence beyond the tested domain unless an L2/L3 artifact backs
   it.
 
+## 15. Addendum — behavioural models (FSM · BT · CPN · SPN)
+
+A dual axis to the code→Lean path above: author one **behavioural model** (FSM,
+behaviour tree, coloured Petri net, or stochastic PN with token loss) in an easy
+text format and generate, from that single source of truth, a **Lean proof**
+(qualitative), a **PRISM model** (quantitative), and **runnable code**. Same
+trust model (mechanical exporter, kernel/checker as anchor), same simple one-
+command UX (`lift model check <file>`). See [`docs/SPEC-models.md`](docs/SPEC-models.md)
+(spec) and [`docs/PLAN-models.md`](docs/PLAN-models.md) (phased plan).
+
 ---
 
 ### Appendix A — why differential testing is the right anchor (from the spike)
