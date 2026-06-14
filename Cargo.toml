@@ -11,6 +11,12 @@ path = "src/main.rs"
 [profile.release]
 opt-level = 2
 
+# `kani` is a custom cfg set only under `cargo kani` (Phase V1 of
+# PLAN-verification). Declare it so plain `cargo build` with `-D warnings` does
+# not flag the `#[cfg(kani)]` harnesses as an unexpected cfg.
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)'] }
+
 # Intentionally dependency-free for the M0 slice: the dlopen oracle uses raw
 # libdl FFI (linked from the system loader), report.json is hand-serialized,
 # and vector generation uses a fixed-seed PRNG. Keeps the build offline-safe.
