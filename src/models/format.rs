@@ -95,7 +95,7 @@ pub fn parse_fsm(src: &str) -> Result<Lts, String> {
 /// (one blocks ⇒ blocked); a private event moves its owner and self-loops the
 /// other. Product states are encoded `"a|b"` (kept as `String` so the result is
 /// a homogeneous, exportable `Lts`). Generalises to N machines by folding.
-fn product(a: &Lts, b: &Lts) -> Lts {
+pub(super) fn product(a: &Lts, b: &Lts) -> Lts {
     let mut alphabet = a.alphabet.clone();
     for e in &b.alphabet {
         if !alphabet.contains(e) {
