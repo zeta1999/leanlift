@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- dock.pnml — the lossy dock net (cf. dock.model.toml) in standard PNML
+     (ISO/IEC 15909-2). `lift model check dock.pnml` is detected from the <pnml>
+     root and reuses the Phase-2 Petri checker: reachability, the loss-induced
+     deadlock, and the safety-survives-loss classification. (PNML carries no
+     safety bound, so the M3 mutex proof is authored in dock.model.toml.) -->
+<pnml xmlns="http://www.pnml.org/version-2009/grammar/pnml">
+  <net id="dock" type="http://www.pnml.org/version-2009/grammar/ptnet">
+    <page id="p0">
+      <place id="free"><initialMarking><text>1</text></initialMarking></place>
+      <place id="csA"><initialMarking><text>0</text></initialMarking></place>
+      <place id="csB"><initialMarking><text>0</text></initialMarking></place>
+      <place id="relA"><initialMarking><text>0</text></initialMarking></place>
+      <place id="relB"><initialMarking><text>0</text></initialMarking></place>
+
+      <transition id="acqA"/>
+      <transition id="acqB"/>
+      <transition id="relA_t"/>
+      <transition id="relB_t"/>
+      <transition id="deliverA"/>
+      <transition id="deliverB"/>
+      <transition id="lossA"/>
+      <transition id="lossB"/>
+
+      <arc id="a1" source="free" target="acqA"/>
+      <arc id="a2" source="acqA" target="csA"/>
+      <arc id="a3" source="free" target="acqB"/>
+      <arc id="a4" source="acqB" target="csB"/>
+      <arc id="a5" source="csA" target="relA_t"/>
+      <arc id="a6" source="relA_t" target="relA"/>
+      <arc id="a7" source="csB" target="relB_t"/>
+      <arc id="a8" source="relB_t" target="relB"/>
+      <arc id="a9" source="relA" target="deliverA"/>
+      <arc id="a10" source="deliverA" target="free"/>
+      <arc id="a11" source="relB" target="deliverB"/>
+      <arc id="a12" source="deliverB" target="free"/>
+      <arc id="a13" source="relA" target="lossA"/>   <!-- pure loss: no output arc -->
+      <arc id="a14" source="relB" target="lossB"/>
+    </page>
+  </net>
+</pnml>

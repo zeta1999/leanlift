@@ -140,6 +140,11 @@ The shared substrate every later phase reuses. No new model family yet.
   (retry budget); prove the **variant** (a measure decreases ⇒ the dock is
   eventually reacquired) — `EXPLAINER_PETRI.md` §9 / day13 retry-budget. **→ M3.**
 - **2.6 Standard format.** PNML (P/T) import/export.
+  > **DONE (import):** PNML → PT-net (`src/models/pnml.rs`, reusing the XML
+  > reader): `<place>`/`<initialMarking>`, `<transition>`, `<arc>`+`<inscription>`.
+  > `lift model check dock.pnml` auto-detects `<pnml>` and reuses the Petri
+  > checker (same 6 reachable + loss sink as `dock.model.toml`). Example
+  > `examples/models/dock.pnml`. PNML export deferred.
 - **2.7 Code export (further).** The signed, sequence-numbered, UDP **coordinator
   + rover-client lease protocol** of `EXPLAINER_PETRI.md` §7 — where the safety
   invariant *becomes* the runtime guard `verify-signature ∧ check-seq`. Feeds

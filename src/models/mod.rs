@@ -17,6 +17,7 @@ mod format;
 mod gspn;
 mod ir;
 mod lean;
+mod pnml;
 mod prism;
 mod report;
 mod scxml;
@@ -100,10 +101,16 @@ fn check_cmd(a: Vec<String>) {
         .unwrap_or_else(|e| fail(&format!("cannot read {file}: {e}")));
     let hash = report::content_hash(&src);
 
-    // Standard XML input (SCXML) → an LTS, checked exactly like a native FSM.
+    // Standard XML input (SCXML → FSM, PNML → PT-net), checked like a native model.
     if is_xml(&src) {
-        let lts = load_xml_lts(&file, &src);
-        let result = check::check(&lts, bound);
+        let result = match load_xml(&file, &src) {
+            XmlModel::Lts(lts) => check::check(&lts, bound),
+            XmlModel::Petri(net) => {
+                let mut r = check::check(&net, bound);
+                r.notes = petri_notes(&net, &r);
+                r
+            }
+        };
         report::print_human(&result, &file, &hash);
         if let Err(e) = report::write_json(&result, &file, &hash, &out) {
             eprintln!("warning: could not write {}: {e}", out.display());
@@ -185,11 +192,19 @@ fn prove_cmd(a: Vec<String>) {
 
     let ns = lean_namespace(&file);
 
-    // Standard XML input (SCXML) → an LTS → the FSM exporter.
+    // Standard XML input (SCXML → FSM, PNML → PT-net) → the matching exporter.
     let (m1, generated) = if is_xml(&src) {
-        let lts = load_xml_lts(&file, &src);
-        let r = check::check(&lts, check::DEFAULT_BOUND);
-        (r, lean::emit_fsm(&lts, &ns))
+        match load_xml(&file, &src) {
+            XmlModel::Lts(lts) => {
+                let r = check::check(&lts, check::DEFAULT_BOUND);
+                (r, lean::emit_fsm(&lts, &ns))
+            }
+            XmlModel::Petri(net) => {
+                let mut r = check::check(&net, check::DEFAULT_BOUND);
+                r.notes = petri_notes(&net, &r);
+                (r, lean::emit_petri(&net, &ns))
+            }
+        }
     } else {
     let doc = toml::parse(&src).unwrap_or_else(|e| fail(&format!("{file}: {e}")));
     let family = format::detect(&doc).unwrap_or_else(|e| fail(&format!("{file}: {e}")));
@@ -624,12 +639,27 @@ fn is_xml(src: &str) -> bool {
     src.trim_start().starts_with('<')
 }
 
-/// Build an `Lts` from a standard XML format (the "standard formats just work as
-/// input" UX bar). SCXML → FSM today.
-fn load_xml_lts(file: &str, src: &str) -> ir::Lts {
+/// A model loaded from a standard XML format.
+enum XmlModel {
+    Lts(ir::Lts),
+    Petri(ir::PtNet),
+}
+
+/// Parse a standard XML input (the "standard formats just work as input" UX
+/// bar): SCXML → FSM, PNML → PT-net.
+fn load_xml(file: &str, src: &str) -> XmlModel {
     let root = xml::parse(src).unwrap_or_else(|e| fail(&format!("{file}: XML: {e}")));
     match root.tag.as_str() {
-        "scxml" => scxml::to_lts(&root).unwrap_or_else(|e| fail(&format!("{file}: SCXML: {e}"))),
-        other => fail(&format!("{file}: unsupported XML root <{other}> (SCXML supported in this build)")),
+        "scxml" => XmlModel::Lts(scxml::to_lts(&root).unwrap_or_else(|e| fail(&format!("{file}: SCXML: {e}")))),
+        "pnml" => XmlModel::Petri(pnml::to_net(&root).unwrap_or_else(|e| fail(&format!("{file}: PNML: {e}")))),
+        other => fail(&format!("{file}: unsupported XML root <{other}> (SCXML/PNML supported in this build)")),
+    }
+}
+
+/// Like `load_xml` but require an LTS (for the LTS-only `export` path).
+fn load_xml_lts(file: &str, src: &str) -> ir::Lts {
+    match load_xml(file, src) {
+        XmlModel::Lts(lts) => lts,
+        XmlModel::Petri(_) => fail(&format!("{file}: code export is LTS-only (a PNML net is not an FSM/BT)")),
     }
 }
