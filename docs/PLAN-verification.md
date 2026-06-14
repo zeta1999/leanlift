@@ -162,12 +162,17 @@ that produces proofs is itself proved by the same tool. ✅ **DONE** (2026-06-14
 
 ---
 
-## Phase V5 — consolidation
+## Phase V5 — consolidation ✅ done
 
-- **V5.1 `verify.sh`** orchestrator: property tests always; Kani / Aeneas /
-  cargo-fuzz when their tools are present; one pass/fail summary.
-- **V5.2 CI tiers**: `ci.sh` = fast (build, test, integration, teeth, exhaustive
-  loop closure); `verify.sh` = deep (Kani + Aeneas + fuzz), nightly.
+- **V5.1 `verify.sh`** ✅ orchestrator: build + property/differential/exhaustive
+  tests (always), then Kani (`verify-kani.sh`), the Aeneas dogfood
+  (`lift prove models-fire`, asserts sorry-free), and parser fuzzing — each
+  SKIPping cleanly when its tool is absent. Tools run **sequentially**, so peak
+  memory is the single heaviest checker (~250 MB observed), never parallel
+  builds. One pass/fail summary; exit code = failure count.
+- **V5.2 CI tiers** ✅: `ci.sh` = fast (build, test, integration, teeth,
+  exhaustive loop closure), every commit; `verify.sh` = deep (Kani + Aeneas +
+  fuzz), nightly/manual. Each header cross-references the other.
 
 ---
 
@@ -195,4 +200,5 @@ that produces proofs is itself proved by the same tool. ✅ **DONE** (2026-06-14
    and proved sorry-free against `Petri.lean`'s `fire_le`/`le_preserved`
    (`lift prove models-fire`). Leanlift verifies its own substrate.
 4. V0.4–V0.6 (random CPNs, M1↔M3, CTMC-vs-PRISM gate); V2 parser fuzzing.
-5. V5 consolidation (`verify.sh`, nightly deep tier).
+5. ✅ V5 consolidation (`verify.sh` deep-tier orchestrator; cross-referenced
+   with `ci.sh`). **VERIFY GREEN** end to end.
