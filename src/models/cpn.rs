@@ -39,7 +39,7 @@
 //! end to end.
 
 use super::ir::{BoundProp, PtNet, PtTrans};
-use super::toml;
+use super::toml::{self, Doc};
 use std::collections::HashMap;
 
 struct Place {
@@ -60,12 +60,32 @@ struct Arc {
     expr: String, // a variable name or a constant colour value
 }
 
+/// A parsed coloured net (the intermediate structure shared by the unfolder and
+/// the independent occurrence-graph simulator that cross-checks it).
+struct Cpn {
+    colours: HashMap<String, Vec<String>>,
+    places: Vec<Place>,
+    transitions: Vec<CTrans>,
+}
+
 /// Parse + unfold a CPN source string to a PT-net, returning the net and the
 /// compactness note (coloured size → unfolded size).
 pub fn unfold(src: &str) -> Result<(PtNet, Vec<String>), String> {
     let doc = toml::parse(src)?;
+    let cpn = parse_cpn(&doc)?;
+    let (net, _origin) = unfold_cpn(&cpn, &doc)?;
+    let note = format!(
+        "CPN compactness: {} coloured place(s) / {} transition(s) → unfolded {} PT place(s) / {} PT transition(s)",
+        cpn.places.len(),
+        cpn.transitions.len(),
+        net.places.len(),
+        net.transitions.len()
+    );
+    Ok((net, vec![note]))
+}
 
-    // Colour sets.
+/// Parse the coloured structure (colours, typed places, transitions/arcs).
+fn parse_cpn(doc: &Doc) -> Result<Cpn, String> {
     let mut colours: HashMap<String, Vec<String>> = HashMap::new();
     for (i, c) in doc.table("colour").iter().enumerate() {
         let name = cfield(c, "name", i)?;
@@ -83,7 +103,6 @@ pub fn unfold(src: &str) -> Result<(PtNet, Vec<String>), String> {
         return Err("CPN requires at least one [[colour]]".into());
     }
 
-    // Places.
     let mut places: Vec<Place> = Vec::new();
     for (i, p) in doc.table("place").iter().enumerate() {
         let name = cfield(p, "name", i)?;
@@ -111,8 +130,7 @@ pub fn unfold(src: &str) -> Result<(PtNet, Vec<String>), String> {
         return Err("CPN requires at least one [[place]]".into());
     }
 
-    // Transitions.
-    let mut ctrans: Vec<CTrans> = Vec::new();
+    let mut transitions: Vec<CTrans> = Vec::new();
     for (i, t) in doc.table("transition").iter().enumerate() {
         let name = cfield(t, "name", i)?;
         let var = match t.get("var") {
@@ -130,39 +148,44 @@ pub fn unfold(src: &str) -> Result<(PtNet, Vec<String>), String> {
         };
         let pre = parse_arcs(t.get("pre").map(|v| v.as_str("pre")).transpose()?.unwrap_or(""), &name)?;
         let post = parse_arcs(t.get("post").map(|v| v.as_str("post")).transpose()?.unwrap_or(""), &name)?;
-        ctrans.push(CTrans { name, var, pre, post });
+        transitions.push(CTrans { name, var, pre, post });
     }
 
-    // --- unfold ------------------------------------------------------------- //
+    Ok(Cpn { colours, places, transitions })
+}
+
+/// Unfold a parsed CPN to a PT-net. Also returns the `(place, value)` ORIGIN of
+/// each PT place (parallel to `net.places`), so a PT marking can be read back as
+/// a coloured marking — the bridge the differential test uses.
+fn unfold_cpn(cpn: &Cpn, doc: &Doc) -> Result<(PtNet, Vec<(String, String)>), String> {
+    let Cpn { colours, places, transitions: ctrans } = cpn;
+
     // PT places: one per (coloured place, colour value), in declaration order.
     let mut pt_places: Vec<String> = Vec::new();
+    let mut origin: Vec<(String, String)> = Vec::new();
     let mut pindex: HashMap<(String, String), usize> = HashMap::new();
-    for p in &places {
+    for p in places {
         for v in &colours[&p.colour] {
             pindex.insert((p.name.clone(), v.clone()), pt_places.len());
             pt_places.push(format!("{}_{}", p.name, v));
+            origin.push((p.name.clone(), v.clone()));
         }
     }
     let place_colour: HashMap<&str, &str> = places.iter().map(|p| (p.name.as_str(), p.colour.as_str())).collect();
 
-    // initial marking.
     let mut initial = vec![0u32; pt_places.len()];
-    for p in &places {
+    for p in places {
         for v in &p.init {
             initial[pindex[&(p.name.clone(), v.clone())]] += 1;
         }
     }
 
-    // Resolve an arc expression under a binding to a (place-index) for a 1-token
-    // arc. `expr` is the bound variable (→ its value) or a constant colour value.
     let resolve = |arc: &Arc, binding: &Option<(String, String)>| -> Result<usize, String> {
         let colour = *place_colour
             .get(arc.place.as_str())
             .ok_or_else(|| format!("arc references unknown place `{}`", arc.place))?;
         let value = match binding {
-            // the bound variable resolves to its value under this binding
             Some((var, val)) if *var == arc.expr => val.clone(),
-            // otherwise it must be a constant value of this place's colour
             _ => {
                 if !colours[colour].contains(&arc.expr) {
                     return Err(format!(
@@ -179,14 +202,10 @@ pub fn unfold(src: &str) -> Result<(PtNet, Vec<String>), String> {
             .ok_or_else(|| format!("arc `{}({})`: no such place/colour", arc.place, value))
     };
 
-    // PT transitions: one per (transition, binding of its variable).
     let mut pt_trans: Vec<PtTrans> = Vec::new();
-    for t in &ctrans {
+    for t in ctrans {
         let bindings: Vec<Option<(String, String)>> = match &t.var {
-            Some((var, col)) => colours[col]
-                .iter()
-                .map(|v| Some((var.clone(), v.clone())))
-                .collect(),
+            Some((var, col)) => colours[col].iter().map(|v| Some((var.clone(), v.clone()))).collect(),
             None => vec![None],
         };
         for binding in &bindings {
@@ -203,7 +222,6 @@ pub fn unfold(src: &str) -> Result<(PtNet, Vec<String>), String> {
         }
     }
 
-    // bounds + conserved (coloured place names → all their unfolded indices).
     let expand = |pname: &str| -> Result<Vec<usize>, String> {
         let colour = *place_colour
             .get(pname)
@@ -230,23 +248,8 @@ pub fn unfold(src: &str) -> Result<(PtNet, Vec<String>), String> {
         None => None,
     };
 
-    let note = format!(
-        "CPN compactness: {} coloured place(s) / {} transition(s) → unfolded {} PT place(s) / {} PT transition(s)",
-        places.len(),
-        ctrans.len(),
-        pt_places.len(),
-        pt_trans.len()
-    );
-
-    let net = PtNet {
-        places: pt_places,
-        transitions: pt_trans,
-        initial,
-        bound: 8,
-        bounds,
-        conserved,
-    };
-    Ok((net, vec![note]))
+    let net = PtNet { places: pt_places, transitions: pt_trans, initial, bound: 8, bounds, conserved };
+    Ok((net, origin))
 }
 
 fn parse_arcs(s: &str, tname: &str) -> Result<Vec<Arc>, String> {
@@ -272,4 +275,194 @@ fn cfield(t: &HashMap<String, toml::Value>, key: &str, i: usize) -> Result<Strin
         .ok_or_else(|| format!("[[…]] entry {i}: missing `{key}`"))?
         .as_str(key)?
         .to_string())
+}
+
+/// The coloured occurrence graph — an INDEPENDENT simulator (PLAN-verification
+/// §2): it computes enabling/firing directly over coloured markings (multisets
+/// of `(place, value)` tokens), *without* going through the unfolder's
+/// `PtTrans`/`pindex`. Returns the set of reachable coloured markings in a
+/// canonical encoding that the unfolded PT-net's reachable markings can be
+/// compared against. A bug in the unfolding logic ⇒ the two sets differ.
+#[cfg(test)]
+fn occurrence_graph(cpn: &Cpn) -> Result<std::collections::HashSet<String>, String> {
+    use std::collections::{BTreeMap, HashSet};
+    type Marking = BTreeMap<(String, String), u32>;
+
+    let place_colour: HashMap<&str, &str> =
+        cpn.places.iter().map(|p| (p.name.as_str(), p.colour.as_str())).collect();
+
+    // Resolve an arc+binding to a (place, value) token — reimplemented here,
+    // sharing nothing with the unfolder beyond the parsed structure.
+    let resolve = |arc: &Arc, b: &Option<(String, String)>| -> Result<(String, String), String> {
+        let colour = *place_colour
+            .get(arc.place.as_str())
+            .ok_or_else(|| format!("unknown place `{}`", arc.place))?;
+        let value = match b {
+            Some((var, val)) if *var == arc.expr => val.clone(),
+            _ => {
+                if !cpn.colours[colour].contains(&arc.expr) {
+                    return Err(format!("arc `{}({})`: not a variable or colour value", arc.place, arc.expr));
+                }
+                arc.expr.clone()
+            }
+        };
+        Ok((arc.place.clone(), value))
+    };
+    let canon = |m: &Marking| {
+        m.iter().filter(|(_, &c)| c > 0).map(|((p, v), c)| format!("{p}|{v}={c}")).collect::<Vec<_>>().join(",")
+    };
+
+    let mut init: Marking = BTreeMap::new();
+    for p in &cpn.places {
+        for v in &p.init {
+            *init.entry((p.name.clone(), v.clone())).or_insert(0) += 1;
+        }
+    }
+
+    let mut seen: HashSet<String> = HashSet::new();
+    let mut stack = vec![init.clone()];
+    seen.insert(canon(&init));
+    while let Some(m) = stack.pop() {
+        for t in &cpn.transitions {
+            let bindings: Vec<Option<(String, String)>> = match &t.var {
+                Some((var, col)) => cpn.colours[col].iter().map(|v| Some((var.clone(), v.clone()))).collect(),
+                None => vec![None],
+            };
+            for b in &bindings {
+                // pre/post as multisets of (place, value) tokens.
+                let mut pre: Marking = BTreeMap::new();
+                for a in &t.pre {
+                    *pre.entry(resolve(a, b)?).or_insert(0) += 1;
+                }
+                let enabled = pre.iter().all(|(pv, &c)| *m.get(pv).unwrap_or(&0) >= c);
+                if !enabled {
+                    continue;
+                }
+                let mut m2 = m.clone();
+                for (pv, &c) in &pre {
+                    *m2.get_mut(pv).unwrap() -= c;
+                }
+                for a in &t.post {
+                    *m2.entry(resolve(a, b)?).or_insert(0) += 1;
+                }
+                let key = canon(&m2);
+                if seen.insert(key) {
+                    stack.push(m2);
+                }
+            }
+        }
+    }
+    Ok(seen)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::ir::Model;
+    use super::*;
+    use std::collections::HashSet;
+
+    /// The unfolded PT-net's reachable markings, encoded in the SAME canonical
+    /// `(place, value)` form as `occurrence_graph` (via the unfold origin).
+    fn unfolded_reachable(net: &PtNet, origin: &[(String, String)]) -> HashSet<String> {
+        let canon = |s: &String| {
+            let counts = PtNet::decode(s);
+            let mut pairs: Vec<String> = (0..origin.len())
+                .filter(|&i| counts[i] > 0)
+                .map(|i| format!("{}|{}={}", origin[i].0, origin[i].1, counts[i]))
+                .collect();
+            pairs.sort();
+            pairs.join(",")
+        };
+        // Independent BFS over the unfolded net (PtNet's Model impl).
+        let mut seen = HashSet::new();
+        let mut stack = vec![net.initial()];
+        seen.insert(net.initial());
+        while let Some(s) = stack.pop() {
+            for a in net.enabled(&s) {
+                if let Some(t) = net.step(&s, &a) {
+                    if seen.insert(t.clone()) {
+                        stack.push(t);
+                    }
+                }
+            }
+        }
+        seen.iter().map(|s| canon(s)).collect()
+    }
+
+    /// THE differential (PLAN-verification §2, the unfolder is the prime suspect):
+    /// the coloured occurrence graph must equal the unfolded PT-net's reachable
+    /// graph. Re-parses from a TOML source so parsing is shared but the unfolding
+    /// logic and the coloured simulator are independent.
+    fn assert_unfold_equiv(src: &str) {
+        let doc = toml::parse(src).expect("parse");
+        let cpn = parse_cpn(&doc).expect("cpn");
+        let (net, origin) = unfold_cpn(&cpn, &doc).expect("unfold");
+        let coloured = occurrence_graph(&cpn).expect("occurrence graph");
+        let unfolded = unfolded_reachable(&net, &origin);
+        assert_eq!(coloured, unfolded, "unfold ≢ coloured for:\n{src}");
+        assert!(!coloured.is_empty());
+    }
+
+    #[test]
+    fn resource_unfold_equiv() {
+        assert_unfold_equiv(&std::fs::read_to_string("examples/models/resource.model.toml").unwrap());
+    }
+
+    #[test]
+    fn synthetic_unfold_equiv() {
+        // A two-colour producer/consumer with a constant-valued lock arc.
+        let prodcons = r#"
+kind = "cpn"
+[[colour]]
+name = "Job"
+values = ["x", "y"]
+[[colour]]
+name = "Slot"
+values = ["s"]
+[[place]]
+name = "queue"
+colour = "Job"
+init = "x, y"
+[[place]]
+name = "done"
+colour = "Job"
+init = ""
+[[place]]
+name = "slot"
+colour = "Slot"
+init = "s"
+[[transition]]
+name = "process"
+var = "j:Job"
+pre = "queue(j), slot(s)"
+post = "done(j), slot(s)"
+"#;
+        assert_unfold_equiv(prodcons);
+
+        // A ring: each job advances to the "next" — exercises constant arcs and
+        // multiple reachable markings.
+        let ring = r#"
+kind = "cpn"
+[[colour]]
+name = "P"
+values = ["a", "b", "c"]
+[[place]]
+name = "at"
+colour = "P"
+init = "a"
+[[transition]]
+name = "ab"
+pre = "at(a)"
+post = "at(b)"
+[[transition]]
+name = "bc"
+pre = "at(b)"
+post = "at(c)"
+[[transition]]
+name = "ca"
+pre = "at(c)"
+post = "at(a)"
+"#;
+        assert_unfold_equiv(ring);
+    }
 }
