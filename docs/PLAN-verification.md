@@ -102,21 +102,30 @@ exhaustive enumeration in `cargo test` (complete for the bound, sub-millisecond)
 
 ---
 
-## Phase V2 — fuzzing the parsers (cargo-fuzz / libFuzzer)
+## Phase V2 — fuzzing the parsers ✅ (hand-rolled, in-crate)
 
 The hand-rolled `toml`/`xml`/`pnml`/`scxml` parsers index and `unwrap`;
-adversarial bytes are the likeliest panic. One libFuzzer target per parser
-asserting **no panic, no hang**:
+adversarial bytes are the likeliest panic. Asserted: **no panic** on any input.
 
-```rust
-fuzz_target!(|data: &[u8]| {
-    if let Ok(s) = std::str::from_utf8(data) { let _ = toml::parse(s); } // never panics
-});
-```
+**Tool-fit (2026-06-15):** cargo-fuzz/libFuzzer is the textbook tool, but it
+needs a *library* API to call — this crate is a **binary** with private parser
+modules (no `[lib]`; `cargo test --lib` has no target), and exposing a lib just
+to fuzz is a crate-wide refactor that would destabilize the green build. So, in
+the project's "hand-rolled, seeded, offline-safe" ethos (cf. V0/proptest.rs), V2
+is an **in-crate fuzzer** (`src/models/fuzz.rs`, `parsers_never_panic`) with
+direct access to the private parsers:
 
-- **V2.1** four `fuzz/` targets; **V2.2** seed the corpus with
-  `examples/models/*`; **V2.3** a nightly CI time budget. External tool, not a
-  shipped dep.
+- **V2.1** ✅ one fuzz loop covering all four parsers (`toml::parse`,
+  `xml::parse`, and `scxml::to_lts`/`pnml::to_net` over the parsed node),
+  each wrapped in `catch_unwind` ⇒ a panic fails the test.
+- **V2.2** ✅ seeds from the example corpus (`examples/models/*.model.toml`,
+  `dock.pnml`, `turnstile.scxml`) + random bytes, then mutates (bit flip /
+  replace / insert / delete / truncate / duplicate-run / metachar splice).
+- **V2.3** ✅ a fixed 20 000-iteration budget (seeded, deterministic, ~1.4 s) —
+  rides fast `cargo test`/`ci.sh`, no nightly, no external dep. Non-vacuity
+  asserted: inputs reach both accept and reject paths (toml ok+err, valid xml).
+- Result: **0 panics** across 20 000 mutated inputs (the brutal-review parser
+  fixes hold). *Deferred:* coverage-guided libFuzzer (would need the lib API).
 
 ---
 
@@ -186,7 +195,7 @@ that produces proofs is itself proved by the same tool. ✅ **DONE** (2026-06-14
 
 | component | V0 prop/diff | V1 Kani | V2 fuzz | V3 Aeneas/Creusot |
 |---|---|---|---|---|
-| `toml`/`xml`/`scxml`/`pnml` parse | round-trip | no-panic (bounded) | **yes** | — |
+| `toml`/`xml`/`scxml`/`pnml` parse | round-trip | no-panic (bounded) | **in-crate fuzz ✅** | — |
 | `check` BFS | reach soundness, det. | no-panic | — | Creusot loop-invariant |
 | `format::product` | commutativity | — | — | — |
 | `cpn::unfold` | **unfold ≡ coloured** ✅ | — | — | — |
@@ -205,7 +214,9 @@ that produces proofs is itself proved by the same tool. ✅ **DONE** (2026-06-14
 3. ✅ **V3.1–V3.4 Aeneas dogfood** — `fire_place` extracted via Charon+Aeneas
    and proved sorry-free against `Petri.lean`'s `fire_le`/`le_preserved`
    (`lift prove models-fire`). Leanlift verifies its own substrate.
-4. ✅ V0.4–V0.6 (random CPNs, M1↔M3, CTMC-vs-PRISM gate). **TODO:** V2 parser
-   fuzzing; V1.4/V1.5 (CTMC-range / parser no-panic Kani); V3.5 Creusot.
+4. ✅ V0.4–V0.6 (random CPNs, M1↔M3, CTMC-vs-PRISM gate) + ✅ V2 parser fuzzing
+   (in-crate, `parsers_never_panic`). **TODO:** V1.4/V1.5 (CTMC-range / parser
+   no-panic Kani — likely float/string-intractable, may go property-test route);
+   V3.5 Creusot (tool not installed).
 5. ✅ V5 consolidation (`verify.sh` deep-tier orchestrator; cross-referenced
    with `ci.sh`). **VERIFY GREEN** end to end.
