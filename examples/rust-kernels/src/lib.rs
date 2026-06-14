@@ -1,5 +1,19 @@
 //! Numerical kernels for leanlift proof examples.
 
+/// Per-place Petri firing: the successor token count `m - pre + post` at one
+/// place. This is leanlift's OWN substrate — a verbatim mirror of
+/// `src/models/ir.rs::fire_place`, the scalar body every marking update reduces
+/// to. The dogfood (PLAN-verification §V3): Charon+Aeneas extracts THIS to Lean
+/// and `examples/models/FireProofs.lean` proves it sorry-free against the
+/// abstract theory in `lean/LeanLift/Models/Petri.lean` (`fire_le`,
+/// `le_preserved`) — leanlift certifying its own kernel with its own pipeline.
+///
+/// PRECONDITION (enabled): `pre <= m`, so the `u32` subtraction never underflows;
+/// with `post <= pre` the `+ post` never overflows (result <= m).
+pub fn fire_place(m: u32, pre: u32, post: u32) -> u32 {
+    m - pre + post
+}
+
 /// Clamped floor-division vesting ramp (the streaming-vesting kernel).
 ///
 ///   streamed(deposit, start, stop, t) =

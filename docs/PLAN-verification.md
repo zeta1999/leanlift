@@ -115,19 +115,28 @@ fuzz_target!(|data: &[u8]| {
 
 The on-brand capstone: the engine already extracts Rust → Lean via Charon+Aeneas
 and proves theorems (L3). **Point it at the models substrate** — then the tool
-that produces proofs is itself proved by the same tool.
+that produces proofs is itself proved by the same tool. ✅ **DONE** (2026-06-14):
+`lift prove models-fire` → L3, sorry-free, 2 obligations.
 
-- **V3.1 carve a pure core.** Factor the marking arithmetic (`fire`, `enabled`,
-  the conserved-sum step) into a small, panic-free, `HashMap`-free crate
-  (`examples/models-core/`, arrays/slices only) Charon+Aeneas can ingest — the
-  same shape as `examples/rust-kernels`.
-- **V3.2 extract to Lean** via `scripts/build_aeneas.sh` (already built for the
-  engine): `fire`/`enabled` → a `Result` model.
-- **V3.3 prove against `Petri.lean`.** Discharge that the extracted `fire`
-  satisfies the theory the export relies on — `fire_le` / `le_preserved` (firing
-  a non-increasing transition preserves an upper bound), sorry-free.
-- **V3.4 wire as `lift prove models-core`** (a `proof_frag` in `examples.rs`):
-  leanlift certifies its own Petri kernel L3, in the same CI as the user models.
+- **V3.1 carve a pure core.** ✅ The marking arithmetic reduces to one scalar
+  body, `fire_place(m,pre,post) = m − pre + post` — production `ir::fire_marking`
+  now calls `ir::fire_place`, and a VERBATIM mirror lives in the already-ingested
+  `examples/rust-kernels` (`fire_place`). (No separate `models-core/` crate
+  needed: per-place is the right granularity — `Petri.lean`'s lemmas are
+  per-place — and reusing the proven kernels crate is simpler than slices, which
+  stress Aeneas with closures/iterators.)
+- **V3.2 extract to Lean.** ✅ Charon+Aeneas extract `fire_place` to
+  `def fire_place (m pre post : Std.U32) : Result Std.U32 := do let i ← m - pre; i + post`.
+- **V3.3 prove against `Petri.lean`.** ✅ `examples/models/FireProofs.lean`:
+  `fire_place_le` (= concrete u32 `fire_le`) and `fire_place_le_k` (= concrete
+  `le_preserved`), proved about the EXTRACTED def, sorry-free (axioms: just
+  `propext, Classical.choice, Quot.sound`). The `Result` premises `pre ≤ m`
+  (enabled ⇒ no underflow) and `post ≤ pre` (non-increasing ⇒ no overflow) are
+  exactly the theory's hypotheses.
+- **V3.4 wire as `lift prove models-fire`.** ✅ `proof_frag` in `examples.rs`;
+  added to the L3 prove sweep in `tests/run.sh` (runs when Aeneas is built,
+  SKIPs otherwise) — leanlift certifies its own Petri kernel L3 alongside the
+  user models.
 - **V3.5 Creusot alternative** for SMT-friendly integer code: contract
   `check::check`'s loop invariant ("the reachable set is closed under `step`").
   *Not* for the float CTMC solver — that stays at V0.6 differential-vs-PRISM
@@ -167,7 +176,7 @@ that produces proofs is itself proved by the same tool.
 | `check` BFS | reach soundness, det. | no-panic | — | Creusot loop-invariant |
 | `format::product` | commutativity | — | — | — |
 | `cpn::unfold` | **unfold ≡ coloured** ✅ | — | — | — |
-| `PtNet::fire/enabled` | loss monotonicity ✅ | **no underflow** ✅ | — | **Aeneas vs Petri.lean** ★ |
+| `PtNet::fire/enabled` | loss monotonicity ✅ | **no underflow** ✅ | — | **Aeneas vs Petri.lean** ✅ ★ |
 | `gspn` CTMC solver | vs PRISM + closed forms | finite/in-range | — | — (floats) |
 | `lean`/`codegen` emit | M1↔M3, loop closure ✅; `vid`/`ctor` exhaustive ASCII≤2 ✅ | (string-decode intractable) | — | — |
 
@@ -179,7 +188,8 @@ that produces proofs is itself proved by the same tool.
 2. ✅ **V1.2 Kani** `fire` no-underflow (`verify-kani.sh`, deep tier) + **V1.3**
    `vid`/`ctor` validity via exhaustive ASCII≤2 enumeration in `cargo test`
    (Kani string-decode proved intractable — see V1 tool-fit note).
-3. **V3.1–V3.4 Aeneas dogfood** — extract the Petri core and prove it against
-   `Petri.lean` (the headline: leanlift verifies its own substrate).
+3. ✅ **V3.1–V3.4 Aeneas dogfood** — `fire_place` extracted via Charon+Aeneas
+   and proved sorry-free against `Petri.lean`'s `fire_le`/`le_preserved`
+   (`lift prove models-fire`). Leanlift verifies its own substrate.
 4. V0.4–V0.6 (random CPNs, M1↔M3, CTMC-vs-PRISM gate); V2 parser fuzzing.
 5. V5 consolidation (`verify.sh`, nightly deep tier).
