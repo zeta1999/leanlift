@@ -82,8 +82,12 @@ The shared substrate every later phase reuses. No new model family yet.
 > Lean exporter (`src/models/lean.rs`) + `lift model prove` → **M3** sorry-free,
 > and the `mcl` example (`examples/models/mcl.model.toml`, `mcl.recipe.md`).
 > Teeth proven: a safety-breaking mutation fails *both* M1 (BFS) and M3 (Lean).
-> Regression in `tests/run.sh`. **Deferred** (further steps): 1.5 SCXML/DOT
-> interop, 1.6 code export (lands in Phase 6).
+> Regression in `tests/run.sh`. **1.5 interop DONE:** SCXML import
+> (`src/models/{xml,scxml}.rs`, dependency-free XML reader) — `lift model
+> check/prove/export turnstile.scxml` auto-detects the `<scxml>` root and reuses
+> the FSM path; `forbid="true"` authors the safety property in-file. DOT export
+> (`--lang dot`) for visualization. **Deferred:** 1.6 code export (Phase 6, done);
+> PNML/BehaviorTree.CPP XML import; compound/parallel SCXML hierarchy.
 
 - **1.1 FSM IR + native format.** `states, alphabet, transitions:(s,e)->t,
   initial`, partial step (missing entry = BLOCKED), per `fsm.py`.

@@ -241,8 +241,27 @@ else
   printf '  \033[33mSKIP\033[0m  mcl go export (go not on PATH)\n'
 fi
 
+# turnstile.scxml: standard SCXML import, auto-detected (Phase 1.5 interop).
+if "$LIFT" model check examples/models/turnstile.scxml --out "$TMP/ts.json" >"$TMP/ts.out" 2>&1; then
+  pass "turnstile.scxml import (FSM auto-detected, $(grep -o 'reachable : [0-9]* state' "$TMP/ts.out"))"
+else
+  bad "turnstile.scxml did not check"; cat "$TMP/ts.out"
+fi
+if "$LIFT" model export examples/models/turnstile.scxml --lang rust --emit "$TMP/ts.rs" --verify >"$TMP/ts.cg.out" 2>&1; then
+  pass "turnstile.scxml → rust loop closure ($(grep -o 'L1 conformant — [0-9]*/[0-9]* traces' "$TMP/ts.cg.out"))"
+else
+  bad "turnstile.scxml rust export did not conform"; tail -6 "$TMP/ts.cg.out"
+fi
+"$LIFT" model export examples/models/mcl.model.toml --lang dot --emit "$TMP/mcl.dot" >/dev/null 2>&1 \
+  && grep -q "digraph" "$TMP/mcl.dot" && pass "dot export (graphviz)" || bad "dot export failed"
+
 echo "== models (M3 Lean proof — Phases 1–4, needs lean on PATH) =="
 if command -v lean >/dev/null 2>&1; then
+  if "$LIFT" model prove examples/models/turnstile.scxml --emit "$TMP/Turnstile.gen.lean" --out "$TMP/tsp.json" >"$TMP/tsp.out" 2>&1; then
+    pass "turnstile.scxml prove ($(grep -o 'M3 proved' "$TMP/tsp.out"))"
+  else
+    bad "turnstile.scxml did not certify M3"; tail -10 "$TMP/tsp.out"
+  fi
   for me in mcl dock mission resource; do
     if "$LIFT" model prove "examples/models/$me.model.toml" --emit "$TMP/$me.gen.lean" --out "$TMP/${me}p.json" >"$TMP/${me}p.out" 2>&1; then
       pass "$me prove  ($(grep -o 'M3 proved' "$TMP/${me}p.out"), sorry-free)"
