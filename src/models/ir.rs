@@ -78,6 +78,7 @@ pub struct PtTrans {
     pub post: Vec<u32>,
 }
 
+#[derive(Clone)]
 pub struct BoundProp {
     pub name: String,
     pub places: Vec<usize>,

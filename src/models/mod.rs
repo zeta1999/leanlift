@@ -248,12 +248,15 @@ fn prove_cmd(a: Vec<String>) {
             r.notes = notes;
             (r, lean::emit_petri(&net, &ns))
         }
-        other => {
-            eprintln!(
-                "`lift model prove` supports fsm/bt/petri in this build; detected `{}`",
-                other.tag()
-            );
-            exit(2);
+        Family::Spn => {
+            // GSPN → underlying P/T-net view → the Petri exporter. Qualitative
+            // safety (an upper-bound place invariant) is sound on this view; the
+            // quantitative side is `lift model prism` (PLAN-perf-demo).
+            let gspn = gspn::parse(&src).unwrap_or_else(|e| fail(&format!("{file}: {e}")));
+            let net = gspn.to_ptnet();
+            let mut r = check::check(&net, check::DEFAULT_BOUND);
+            r.notes = petri_notes(&net, &r);
+            (r, lean::emit_petri(&net, &ns))
         }
     }
     };

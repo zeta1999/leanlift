@@ -13,6 +13,7 @@
 //! tagged `immediate`(weight) or `timed`(rate-expression) with optional
 //! `inhibit` places, and `[[query]]`s (`prob` / `etime` / `transient`).
 
+use super::ir::{BoundProp, PtNet, PtTrans};
 use super::toml::{self, Doc};
 use std::collections::HashMap;
 
@@ -54,6 +55,35 @@ pub struct Gspn {
     pub initial: Vec<u32>,
     pub mode: String,
     pub queries: Vec<Query>,
+    /// Conserved place subset for the qualitative place-invariant proof (the
+    /// underlying P/T-net view); declared `conserved = [...]`, default all places.
+    pub conserved: Option<Vec<usize>>,
+    /// Declared upper-bound safety properties (`sum(places) ≤ max`), proved in
+    /// Lean as a corollary of the conserved-mass invariant (`lift model prove`).
+    pub bounds: Vec<BoundProp>,
+}
+
+impl Gspn {
+    /// The underlying P/T-net view (qualitative): drop rates / immediate-vs-timed
+    /// / inhibitor arcs, keep pre/post. SOUND for an UPPER-BOUND place invariant —
+    /// ignoring inhibitors only ADMITS more firings, so a bound proved on this
+    /// (larger) reachable set holds on the real, inhibited net too. Feeds
+    /// `lean::emit_petri` for the model→Lean qualitative proof (PLAN-perf-demo).
+    pub fn to_ptnet(&self) -> PtNet {
+        let transitions = self
+            .transitions
+            .iter()
+            .map(|t| PtTrans { name: t.name.clone(), pre: t.pre.clone(), post: t.post.clone() })
+            .collect();
+        PtNet {
+            places: self.places.clone(),
+            transitions,
+            initial: self.initial.clone(),
+            bound: 64,
+            bounds: self.bounds.clone(),
+            conserved: self.conserved.clone(),
+        }
+    }
 }
 
 fn enc(m: &[u32]) -> String {
@@ -682,7 +712,37 @@ fn build_with(doc: &Doc, overrides: &HashMap<String, f64>) -> Result<Gspn, Strin
         queries.push(Query { name, compute, target, trans, time });
     }
 
-    Ok(Gspn { places, transitions, initial, mode, queries })
+    // Qualitative-proof declarations (the underlying P/T-net view): an optional
+    // conserved subsystem and declared upper-bound safety properties.
+    let conserved = match doc.scalar("conserved") {
+        Some(v) => Some(
+            v.as_arr("conserved")?
+                .iter()
+                .map(|p| index(p).ok_or_else(|| format!("conserved: place `{p}` not declared")))
+                .collect::<Result<_, String>>()?,
+        ),
+        None => None,
+    };
+    let mut bounds = Vec::new();
+    for (i, b) in doc.table("bound").iter().enumerate() {
+        let name = b.get("name").map(|v| v.as_str("name")).transpose()?.unwrap_or("bound").to_string();
+        let max: u32 = b
+            .get("max")
+            .ok_or_else(|| format!("bound {i}: missing `max`"))?
+            .as_str("max")?
+            .parse()
+            .map_err(|_| format!("bound {i}: `max` must be an integer"))?;
+        let idxs: Vec<usize> = b
+            .get("places")
+            .ok_or_else(|| format!("bound {i}: missing `places`"))?
+            .as_arr("places")?
+            .iter()
+            .map(|p| index(p).ok_or_else(|| format!("bound {i}: place `{p}` not declared")))
+            .collect::<Result<_, String>>()?;
+        bounds.push(BoundProp { name, places: idxs, max });
+    }
+
+    Ok(Gspn { places, transitions, initial, mode, queries, conserved, bounds })
 }
 
 fn parse_marking(s: &str, places: &[String], index: &impl Fn(&str) -> Option<usize>) -> Result<Vec<u32>, String> {
