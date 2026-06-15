@@ -87,6 +87,7 @@ fn check_cmd(a: Vec<String>) {
     let mut file: Option<String> = None;
     let mut out = PathBuf::from("model-report.json");
     let mut bound = check::DEFAULT_BOUND;
+    let mut scale = 1.0f64; // load knob for the `tasks` family (R4 sweep)
 
     let mut i = 0;
     while i < a.len() {
@@ -96,6 +97,9 @@ fn check_cmd(a: Vec<String>) {
                 bound = take(&a, &mut i)
                     .parse()
                     .unwrap_or_else(|_| fail("--bound expects a positive integer"))
+            }
+            "--scale" => {
+                scale = take(&a, &mut i).parse().unwrap_or_else(|_| fail("--scale expects a number"))
             }
             s if s.starts_with("--") => fail(&format!("unknown flag: {s}")),
             _ => {
@@ -167,7 +171,11 @@ fn check_cmd(a: Vec<String>) {
         Family::Tasks => {
             // Real-time schedulability (PLAN-perf-demo §8): not a transition
             // system — utilization bound + exact response-time analysis (RTA).
-            let ts = rt::parse(&src).unwrap_or_else(|e| fail(&format!("{file}: {e}")));
+            // `--scale` multiplies every C (the R4 load knob).
+            let mut ts = rt::parse(&src).unwrap_or_else(|e| fail(&format!("{file}: {e}")));
+            if scale != 1.0 {
+                ts = rt::scaled(&ts, scale);
+            }
             let rep = rt::analyze(&ts);
             rt::print_report(&rep, &ts, &file);
             exit(if rep.schedulable { 0 } else { 1 });
@@ -341,6 +349,7 @@ fn simulate_cmd(a: Vec<String>) {
     let mut overrides: std::collections::HashMap<String, f64> = std::collections::HashMap::new();
     let mut time = 100_000.0f64;
     let mut seed = 1u64;
+    let mut scale = 1.0f64; // load knob for the `tasks` family (R4 soft sweep)
     let mut i = 0;
     while i < a.len() {
         match a[i].as_str() {
@@ -352,6 +361,7 @@ fn simulate_cmd(a: Vec<String>) {
             }
             "--time" => time = take(&a, &mut i).parse().unwrap_or_else(|_| fail("--time expects a number")),
             "--seed" => seed = take(&a, &mut i).parse().unwrap_or_else(|_| fail("--seed expects an integer")),
+            "--scale" => scale = take(&a, &mut i).parse().unwrap_or_else(|_| fail("--scale expects a number")),
             s if s.starts_with("--") => fail(&format!("unknown flag: {s}")),
             _ => {
                 if file.is_some() {
@@ -367,8 +377,25 @@ fn simulate_cmd(a: Vec<String>) {
     let doc = toml::parse(&src).unwrap_or_else(|e| fail(&format!("{file}: {e}")));
     match format::detect(&doc).unwrap_or_else(|e| fail(&format!("{file}: {e}"))) {
         Family::Spn => {}
+        Family::Tasks => {
+            // SOFT side (R4): Monte-Carlo deadline-miss probability under
+            // stochastic execution, next to the HARD RTA verdict — the
+            // intersection on one model (graceful degradation vs a hard step).
+            let mut ts = rt::parse(&src).unwrap_or_else(|e| fail(&format!("{file}: {e}")));
+            if scale != 1.0 {
+                ts = rt::scaled(&ts, scale);
+            }
+            let hard = rt::analyze(&ts).schedulable;
+            let miss = rt::simulate_miss(&ts, 0.5, 200, seed);
+            println!();
+            println!("  simulating `{file}` — RM scheduler, stochastic exec ∈ [0.5C, C], scale={scale}");
+            println!("  hard (RTA on worst-case C) : {}", if hard { "SCHEDULABLE" } else { "NOT SCHEDULABLE" });
+            println!("  soft (P deadline miss)     : {miss:.4}");
+            println!();
+            exit(0);
+        }
         other => {
-            eprintln!("`lift model simulate` needs a `kind = \"gspn\"` model; detected `{}`", other.tag());
+            eprintln!("`lift model simulate` needs a `kind = \"gspn\"` or `\"tasks\"` model; detected `{}`", other.tag());
             exit(2);
         }
     }
