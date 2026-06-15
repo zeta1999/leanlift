@@ -32,6 +32,8 @@ fi
 # where bounded model checking is genuinely unbounded-over-the-domain and fast.
 HARNESSES=(
   "fire_no_underflow"             # V1.2 — PtNet fire kernel never u32-underflows
+  "div_ceil_safe"                 # R2  — RTA ⌈a/b⌉ overflow-free, ⌈a/b⌉ ≤ a
+  "term_monotone"                 # R2  — RTA interference term monotone in r (LFP soundness)
 )
 
 fails=0
