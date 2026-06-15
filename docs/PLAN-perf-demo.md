@@ -109,7 +109,10 @@ the highest-value `gspn.rs` upgrade independent of this demo.
 3. ✅ **D3 sweep** — `--set name=value` param override + `scripts/link-sweep.sh`:
    ASCII curve of L/X/Pblock vs `p`, closed-form `p* = R/(1+R)`, empirical knee,
    self-check (`--check`) wired into `ci.sh`. Knee p≈0.88 ≈ p*=0.882.
-4. **D4 sim cross-check**, **D5 narrative**, **Aeneas kernel** — in any order (next).
+4. ✅ **D4 sim cross-check** — SSA (Gillespie) simulator in `gspn.rs` +
+   `lift model simulate` (empirical vs analytic vs Δ); `simulation_matches_
+   analytic_link` test (sim ≈ CTMC, stable & congested). Δ ≈ 0.1–3%.
+5. **D5 narrative**, **Aeneas kernel** (code→Lean), **model→Lean qualitative** — next.
 
 ## 8. Real-time / schedulability — the natural deterministic intersection
 

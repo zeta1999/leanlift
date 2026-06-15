@@ -263,6 +263,115 @@ impl Gspn {
             }
         }
     }
+
+    /// Stochastic-simulation (SSA / Gillespie) estimate of the steady-state query
+    /// values — the EMPIRICAL cross-check of the analytic CTMC (PLAN-perf-demo
+    /// §D4). Timed transitions race (exponential with their rate); immediate
+    /// transitions fire in zero time (vanishing). `mean`/`full` are time-averaged
+    /// over tangible sojourns; `throughput` is firings ÷ simulated time.
+    pub(crate) fn simulate(&self, queries: &[Query], horizon: f64, seed: u64) -> Vec<f64> {
+        let mut rng = SsaRng(seed | 1);
+        let mut m = self.initial.clone();
+        self.settle_immediate(&mut m, &mut rng);
+        let mut t = 0.0f64;
+        let mut acc = vec![0.0f64; queries.len()];
+        let mut fires = vec![0u64; self.transitions.len()];
+        while t < horizon {
+            let timed: Vec<(usize, f64)> = self
+                .transitions
+                .iter()
+                .enumerate()
+                .filter(|(_, tr)| !tr.immediate && self.enabled_at(&m, tr))
+                .map(|(i, tr)| (i, tr.rate_or_weight))
+                .collect();
+            let rtot: f64 = timed.iter().map(|&(_, r)| r).sum();
+            if rtot <= 0.0 {
+                break; // absorbing / deadlock
+            }
+            let dt = -(1.0 - rng.f()).ln() / rtot; // exponential sojourn
+            for (qi, q) in queries.iter().enumerate() {
+                acc[qi] += dt * self.sample_metric(q, &m);
+            }
+            let mut x = rng.f() * rtot;
+            let mut chosen = timed[0].0;
+            for &(i, r) in &timed {
+                if x < r {
+                    chosen = i;
+                    break;
+                }
+                x -= r;
+            }
+            fires[chosen] += 1;
+            m = self.fire(&m, &self.transitions[chosen]);
+            self.settle_immediate(&mut m, &mut rng);
+            t += dt;
+        }
+        queries
+            .iter()
+            .enumerate()
+            .map(|(qi, q)| match q.compute {
+                Compute::Throughput => fires[q.trans.expect("throughput needs a transition")] as f64 / t,
+                _ => acc[qi] / t,
+            })
+            .collect()
+    }
+
+    /// Fire enabled immediate transitions (weighted choice) until none remain —
+    /// the simulation's vanishing-marking resolution. Bounded to break timeless
+    /// traps.
+    fn settle_immediate(&self, m: &mut Vec<u32>, rng: &mut SsaRng) {
+        for _ in 0..10_000 {
+            let imm: Vec<(usize, f64)> = self
+                .transitions
+                .iter()
+                .enumerate()
+                .filter(|(_, tr)| tr.immediate && self.enabled_at(m, tr))
+                .map(|(i, tr)| (i, tr.rate_or_weight))
+                .collect();
+            if imm.is_empty() {
+                return;
+            }
+            let wtot: f64 = imm.iter().map(|&(_, w)| w).sum();
+            let mut x = rng.f() * wtot;
+            let mut chosen = imm[0].0;
+            for &(i, w) in &imm {
+                if x < w {
+                    chosen = i;
+                    break;
+                }
+                x -= w;
+            }
+            *m = self.fire(m, &self.transitions[chosen]);
+        }
+    }
+
+    /// The instantaneous contribution of `q` at marking `m` (for time-averaging).
+    fn sample_metric(&self, q: &Query, m: &[u32]) -> f64 {
+        match q.compute {
+            Compute::Mean => m[q.target.expect("mean target")] as f64,
+            Compute::Full => {
+                let lvl = q.time.expect("full level") as u32;
+                if m[q.target.expect("full target")] >= lvl {
+                    1.0
+                } else {
+                    0.0
+                }
+            }
+            _ => 0.0, // throughput is firing-count based, not time-averaged
+        }
+    }
+}
+
+/// A tiny xorshift PRNG for the SSA simulator (uniform [0,1)); deterministic per
+/// seed so simulation cross-checks are reproducible.
+struct SsaRng(u64);
+impl SsaRng {
+    fn f(&mut self) -> f64 {
+        self.0 ^= self.0 << 13;
+        self.0 ^= self.0 >> 7;
+        self.0 ^= self.0 << 17;
+        (self.0 >> 11) as f64 / (1u64 << 53) as f64
+    }
 }
 
 // --- CTMC solvers (pure Rust f64) -------------------------------------------- //
@@ -961,6 +1070,27 @@ mod tests {
                 assert!((val("Pfull") - pi(k)).abs() < 1e-6, "Pfull = π_K");
                 let w = val("L") / val("X"); // Little
                 assert!(w > 0.0 && w.is_finite(), "Little W finite");
+            }
+        }
+    }
+
+    #[test]
+    fn simulation_matches_analytic_link() {
+        // D4 empirical cross-check: SSA simulation of the link model must agree
+        // with the analytic CTMC steady-state metrics — in BOTH the stable
+        // (p=0.3) and congested (p=0.9) regimes. (Monte-Carlo tolerance.)
+        let src = std::fs::read_to_string("examples/models/link.model.toml").expect("read link model");
+        for &p in &[0.3f64, 0.9] {
+            let mut ov = HashMap::new();
+            ov.insert("p".to_string(), p);
+            let net = parse_with(&src, &ov).expect("parse");
+            let (tang, gen) = net.ctmc();
+            let analytic: Vec<f64> = net.queries.iter().map(|q| net.evaluate(q, &tang, &gen)).collect();
+            let sim = net.simulate(&net.queries, 300_000.0, 0xC0FFEE ^ (p * 1000.0) as u64);
+            for (i, q) in net.queries.iter().enumerate() {
+                let (a, s) = (analytic[i], sim[i]);
+                let tol = (0.08 * a.abs()).max(0.03); // 8% relative, abs floor
+                assert!((a - s).abs() <= tol, "{} (p={p}): analytic {a:.4} vs sim {s:.4} (tol {tol:.4})", q.name);
             }
         }
     }

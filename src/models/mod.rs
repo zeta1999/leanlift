@@ -39,8 +39,10 @@ fn usage() -> ! {
         \x20     bounded reachability + safety (M1). Family auto-detected from <file>.\n\
         \x20 lift model prove <file> [--emit <Model.lean>] [--lean-path <dir>] [--out ...]\n\
         \x20     export a Lean model + safety proof and certify it sorry-free (M3, FSM/BT/Petri/CPN).\n\
-        \x20 lift model prism <file> [--emit <prefix>] [--out ...]\n\
-        \x20     GSPN → tangible CTMC: solve quantitative queries + export PRISM (M2).\n\
+        \x20 lift model prism <file> [--emit <prefix>] [--set name=value] [--out ...]\n\
+        \x20     GSPN → tangible CTMC: solve quantitative queries + export PRISM (M2). --set overrides a [[param]].\n\
+        \x20 lift model simulate <file> [--set name=value] [--time T] [--seed S]\n\
+        \x20     SSA simulation of a GSPN: empirical query values vs the analytic CTMC (the empirical cross-check).\n\
         \x20 lift model export <file> [--lang rust|c++|go|dot] [--emit <out>] [--verify] [--samples N [--seed S]]\n\
         \x20     generate a runnable executor (FSM/BT/Petri); --verify difftests it vs the model (L1,\n\
         \x20     exhaustive reachable-edge coverage; --samples adds random traces for unbounded nets).\n"
@@ -68,8 +70,12 @@ pub fn main(mut argv: Vec<String>) {
             argv.remove(0);
             export_cmd(argv);
         }
-        Some(verb @ ("simulate" | "import")) => {
-            eprintln!("`lift model {verb}` is planned (see docs/PLAN-models.md) — not in this build");
+        Some("simulate") => {
+            argv.remove(0);
+            simulate_cmd(argv);
+        }
+        Some("import") => {
+            eprintln!("`lift model import` is planned (see docs/PLAN-models.md) — not in this build");
             exit(2);
         }
         _ => usage(),
@@ -307,6 +313,62 @@ fn prove_cmd(a: Vec<String>) {
         eprintln!("  model-report.json -> {}", out.display());
     }
     exit(if sorry_free { 0 } else { 1 });
+}
+
+/// `lift model simulate <file>` — SSA (Gillespie) simulation of a GSPN, printing
+/// each query's EMPIRICAL value next to the analytic CTMC value and the gap
+/// (PLAN-perf-demo §D4: the designer's empirical check, self-validating).
+fn simulate_cmd(a: Vec<String>) {
+    let mut file: Option<String> = None;
+    let mut overrides: std::collections::HashMap<String, f64> = std::collections::HashMap::new();
+    let mut time = 100_000.0f64;
+    let mut seed = 1u64;
+    let mut i = 0;
+    while i < a.len() {
+        match a[i].as_str() {
+            "--set" => {
+                let kv = take(&a, &mut i);
+                let (k, v) = kv.split_once('=').unwrap_or_else(|| fail("--set expects name=value"));
+                let val: f64 = v.parse().unwrap_or_else(|_| fail(&format!("--set {k}: `{v}` is not a number")));
+                overrides.insert(k.to_string(), val);
+            }
+            "--time" => time = take(&a, &mut i).parse().unwrap_or_else(|_| fail("--time expects a number")),
+            "--seed" => seed = take(&a, &mut i).parse().unwrap_or_else(|_| fail("--seed expects an integer")),
+            s if s.starts_with("--") => fail(&format!("unknown flag: {s}")),
+            _ => {
+                if file.is_some() {
+                    usage();
+                }
+                file = Some(a[i].clone());
+            }
+        }
+        i += 1;
+    }
+    let file = file.unwrap_or_else(|| usage());
+    let src = std::fs::read_to_string(&file).unwrap_or_else(|e| fail(&format!("cannot read {file}: {e}")));
+    let doc = toml::parse(&src).unwrap_or_else(|e| fail(&format!("{file}: {e}")));
+    match format::detect(&doc).unwrap_or_else(|e| fail(&format!("{file}: {e}"))) {
+        Family::Spn => {}
+        other => {
+            eprintln!("`lift model simulate` needs a `kind = \"gspn\"` model; detected `{}`", other.tag());
+            exit(2);
+        }
+    }
+    let net = gspn::parse_with(&src, &overrides).unwrap_or_else(|e| fail(&format!("{file}: {e}")));
+    let (tang, gen) = net.ctmc();
+    let emp = net.simulate(&net.queries, time, seed);
+
+    println!();
+    println!("  simulating `{file}` — SSA over the GSPN (T={time}, seed={seed})");
+    println!("  ────────────────────────────────────────────────");
+    println!("  tangible states : {}", tang.len());
+    println!("  {:<20} {:>12} {:>12} {:>10}", "metric", "empirical", "analytic", "|Δ|");
+    for (qi, q) in net.queries.iter().enumerate() {
+        let an = net.evaluate(q, &tang, &gen);
+        let d = if an.is_finite() { (emp[qi] - an).abs() } else { f64::NAN };
+        println!("  {:<20} {:>12.6} {:>12.6} {:>10.6}", q.name, emp[qi], an, d);
+    }
+    println!();
 }
 
 fn export_cmd(a: Vec<String>) {
