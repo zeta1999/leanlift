@@ -102,8 +102,11 @@ the highest-value `gspn.rs` upgrade independent of this demo.
 ## 7. Ordered start
 
 1. ✅ **D1 steady-state (GTH)** in `gspn.rs` — enabler + standalone win.
-2. **D2 `link.model.toml`** + the queued CSL queries (reuses the most).
-3. **D3 sweep** — fastest path to *seeing* the phase change.
+2. ✅ **D2** `link.model.toml` (ergodic stop-and-wait + buffer) + steady-state
+   metrics `mean`/`throughput`/`full` in the evaluator, validated vs M/M/1/K
+   closed form + Little; `prism link` in `ci.sh`. Manual `p`-sweep already shows
+   the collapse (X: 0.40→0.21, Pblock: 0.0003→0.48 as p: 0.3→0.95).
+3. **D3 sweep** — fastest path to *seeing* the phase change (next).
 4. **D4 sim cross-check**, **D5 narrative**, **Aeneas kernel** — in any order.
 
 ## 8. Real-time / schedulability — the natural deterministic intersection

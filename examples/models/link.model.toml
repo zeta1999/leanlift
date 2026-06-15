@@ -1,0 +1,89 @@
+# link — a 1→1 reliable stop-and-wait link with arrivals and a bounded sender
+# buffer, modelled as an ERGODIC GSPN so steady-state performance is defined
+# (PLAN-perf-demo §D2). Designer knobs:
+#   lam   offered load (arrival rate)
+#   p     per-attempt loss probability   (mu_l set so P(loss)=p)
+#   mu_r  retransmit rate ≈ 1/timeout    (the latency knob)
+# Invariants: buf+slot = K (waiting buffer), idle+tx+wait = 1 (one in flight,
+# stop-and-wait). The waiting-queue length L=mean(buf), the delivery throughput
+# X=throughput(deliver), and the blocking probability P(buf=K) exhibit a PHASE
+# TRANSITION as p (or lam) crosses the stability threshold p* = 1 - lam/mu_eff:
+# below it the queue is short and X≈lam; above it the buffer saturates and X
+# collapses. The sweep that draws that curve is D3.
+kind = "gspn"
+places = ["buf", "slot", "tx", "wait", "idle"]
+initial = "slot:8, idle:1"          # K=8 free buffer slots; link idle; nothing in flight
+
+[[param]]
+name = "lam"
+value = "0.4"
+[[param]]
+name = "mu_d"
+value = "1.0"
+[[param]]
+name = "p"
+value = "0.3"
+[[param]]
+name = "mu_l"
+value = "mu_d * p / (1 - p)"          # loss rate ⇒ per-attempt P(loss) = p
+[[param]]
+name = "mu_r"
+value = "5.0"
+
+# arrival: take a free buffer slot, enqueue a message (blocked when buffer full)
+[[transition]]
+name = "arrive"
+kind = "timed"
+rate = "lam"
+pre = "slot:1"
+post = "buf:1"
+
+# start transmission when the link is idle (stop-and-wait: one in flight); the
+# message leaves the waiting buffer, freeing its slot
+[[transition]]
+name = "start"
+kind = "immediate"
+weight = "1.0"
+pre = "buf:1, idle:1"
+post = "tx:1, slot:1"
+
+# successful delivery: the link goes idle again
+[[transition]]
+name = "deliver"
+kind = "timed"
+rate = "mu_d"
+pre = "tx:1"
+post = "idle:1"
+
+# loss → awaiting retransmit
+[[transition]]
+name = "lose"
+kind = "timed"
+rate = "mu_l"
+pre = "tx:1"
+post = "wait:1"
+
+# retransmit after timeout
+[[transition]]
+name = "resend"
+kind = "timed"
+rate = "mu_r"
+pre = "wait:1"
+post = "tx:1"
+
+# --- steady-state performance metrics (D2) --------------------------------- #
+[[query]]
+name = "L"
+compute = "mean"
+target = "buf"           # mean waiting-queue length
+
+[[query]]
+name = "X"
+compute = "throughput"
+transition = "deliver"   # delivery throughput
+
+[[query]]
+name = "Pblock"
+compute = "full"
+target = "buf"
+time = "8"               # P(buf = K): arrivals blocked

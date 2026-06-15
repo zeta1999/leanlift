@@ -32,13 +32,20 @@ pub struct Query {
     pub name: String,
     pub compute: Compute,
     pub target: Option<usize>, // place index
-    pub time: Option<f64>,
+    pub trans: Option<usize>,  // transition index (throughput)
+    pub time: Option<f64>,     // transient horizon, or the level for `Full`
 }
 
 pub enum Compute {
+    // Transient / absorption (the original GSPN queries).
     Prob,
     Etime,
     Transient,
+    // Steady-state queued-performance metrics (PLAN-perf-demo §D2). Defined on an
+    // ERGODIC tangible CTMC (no absorbing state); evaluate to NaN otherwise.
+    Mean,       // E[tokens in `target` place]  (queue length L)
+    Throughput, // steady firing rate of `trans` (departures X); W = L/X via Little
+    Full,       // P(tokens in `target` ≥ `time`)  (overflow / blocking)
 }
 
 pub struct Gspn {
@@ -224,6 +231,36 @@ impl Gspn {
                     })
                     .sum()
             }
+            // --- steady-state metrics (ergodic chain only) ------------------ //
+            Compute::Mean | Compute::Throughput | Compute::Full => {
+                // Steady state is start-independent, but it requires ergodicity:
+                // an absorbing tangible state means no stationary law over it.
+                if absorbing(gen).iter().any(|&a| a) {
+                    return f64::NAN;
+                }
+                let pi = steady_state(gen);
+                match q.compute {
+                    Compute::Mean => {
+                        let tgt = q.target.expect("mean query needs a target place");
+                        tang.iter().enumerate().map(|(j, m)| pi[j] * dec(m)[tgt] as f64).sum()
+                    }
+                    Compute::Full => {
+                        let tgt = q.target.expect("full query needs a target place");
+                        let level = q.time.expect("full query needs a `time` level") as u32;
+                        tang.iter().enumerate().filter(|(_, m)| dec(m)[tgt] >= level).map(|(j, _)| pi[j]).sum()
+                    }
+                    Compute::Throughput => {
+                        let ti = q.trans.expect("throughput query needs a transition");
+                        let t = &self.transitions[ti];
+                        tang.iter()
+                            .enumerate()
+                            .filter(|(_, m)| self.enabled_at(&dec(m), t))
+                            .map(|(j, _)| pi[j] * t.rate_or_weight)
+                            .sum()
+                    }
+                    _ => unreachable!(),
+                }
+            }
         }
     }
 }
@@ -272,10 +309,8 @@ fn solve(mut a: Vec<Vec<f64>>, mut b: Vec<f64>) -> Vec<f64> {
 /// non-negative quantities — so it is numerically stable even for stiff
 /// generators (PLAN-perf-demo §D1, the steady-state mode the queued performance
 /// metrics need). `q` must be conservative: `q[i][j] ≥ 0` off-diagonal, each row
-/// summing to 0; the diagonal is never read.
-// Wired into the queued-performance query (throughput / W / overflow) in
-// PLAN-perf-demo §D2; until then it is exercised only by the D1 tests.
-#[allow(dead_code)]
+/// summing to 0; the diagonal is never read. Drives the queued-performance
+/// metrics (`mean`/`throughput`/`full`) in `evaluate` (PLAN-perf-demo §D2).
 pub(crate) fn steady_state(q: &[Vec<f64>]) -> Vec<f64> {
     let n = q.len();
     if n == 0 {
@@ -498,11 +533,29 @@ fn build(doc: &Doc) -> Result<Gspn, String> {
             "prob" => Compute::Prob,
             "etime" => Compute::Etime,
             "transient" => Compute::Transient,
-            other => return Err(format!("query {i}: compute must be prob/etime/transient, found `{other}`")),
+            "mean" => Compute::Mean,
+            "throughput" => Compute::Throughput,
+            "full" => Compute::Full,
+            other => {
+                return Err(format!(
+                    "query {i}: compute must be prob/etime/transient/mean/throughput/full, found `{other}`"
+                ))
+            }
         };
         let target = qd.get("target").map(|v| v.as_str("target")).transpose()?.map(|p| index(p).ok_or_else(|| format!("query {i}: target place `{p}` not declared"))).transpose()?;
+        let trans = qd
+            .get("transition")
+            .map(|v| v.as_str("transition"))
+            .transpose()?
+            .map(|tn| {
+                transitions
+                    .iter()
+                    .position(|t| t.name == tn)
+                    .ok_or_else(|| format!("query {i}: transition `{tn}` not declared"))
+            })
+            .transpose()?;
         let time = qd.get("time").map(|v| v.as_str("time")).transpose()?.map(|s| s.parse::<f64>().map_err(|_| format!("query {i}: bad `time`"))).transpose()?;
-        queries.push(Query { name, compute, target, time });
+        queries.push(Query { name, compute, target, trans, time });
     }
 
     Ok(Gspn { places, transitions, initial, mode, queries })
@@ -856,6 +909,55 @@ mod tests {
             }
         }
         q
+    }
+
+    #[test]
+    fn queued_metrics_match_mm1k() {
+        // M/M/1/K as an ergodic GSPN: jobs `q` + free slots `s` (q+s=K), arrive
+        // (λ, needs a slot) / serve (μ). Validate the D2 steady-state metrics —
+        // mean (L), throughput (X), P(full) — vs the M/M/1/K closed form, plus
+        // flow balance (X = admitted arrivals) and Little's law.
+        let src = |lam: f64, mu: f64, k: u32| {
+            format!(
+                "kind=\"gspn\"\nplaces=[\"q\",\"s\"]\ninitial=\"s:{k}\"\n\
+                 [[param]]\nname=\"lam\"\nvalue=\"{lam}\"\n[[param]]\nname=\"mu\"\nvalue=\"{mu}\"\n\
+                 [[transition]]\nname=\"arrive\"\nkind=\"timed\"\nrate=\"lam\"\npre=\"s:1\"\npost=\"q:1\"\n\
+                 [[transition]]\nname=\"serve\"\nkind=\"timed\"\nrate=\"mu\"\npre=\"q:1\"\npost=\"s:1\"\n\
+                 [[query]]\nname=\"L\"\ncompute=\"mean\"\ntarget=\"q\"\n\
+                 [[query]]\nname=\"X\"\ncompute=\"throughput\"\ntransition=\"serve\"\n\
+                 [[query]]\nname=\"Pfull\"\ncompute=\"full\"\ntarget=\"q\"\ntime=\"{k}\"\n"
+            )
+        };
+        for &(lam, mu) in &[(0.5, 1.0), (0.9, 1.0), (0.3, 1.5)] {
+            for &k in &[1u32, 3, 6] {
+                let net = parse(&src(lam, mu, k)).expect("parse");
+                let (tang, gen) = net.ctmc();
+                let val = |name: &str| {
+                    let qq = net.queries.iter().find(|x| x.name == name).unwrap();
+                    net.evaluate(qq, &tang, &gen)
+                };
+                let rho = lam / mu;
+                let pi0 = (1.0 - rho) / (1.0 - rho.powi(k as i32 + 1));
+                let pi = |i: u32| rho.powi(i as i32) * pi0;
+                let l_cf: f64 = (0..=k).map(|i| i as f64 * pi(i)).sum();
+                assert!((val("L") - l_cf).abs() < 1e-6, "L λ={lam} μ={mu} K={k}: {} vs {l_cf}", val("L"));
+                assert!((val("X") - mu * (1.0 - pi(0))).abs() < 1e-6, "X (=μ·P(q≥1))");
+                assert!((val("X") - lam * (1.0 - pi(k))).abs() < 1e-6, "flow balance X=λ(1−π_K)");
+                assert!((val("Pfull") - pi(k)).abs() < 1e-6, "Pfull = π_K");
+                let w = val("L") / val("X"); // Little
+                assert!(w > 0.0 && w.is_finite(), "Little W finite");
+            }
+        }
+    }
+
+    #[test]
+    fn steady_metric_on_absorbing_chain_is_nan() {
+        // A steady-state metric is undefined on a non-ergodic chain (absorbing
+        // state) ⇒ NaN, never a bogus number. The dock-gspn `freed` is absorbing.
+        let net = parse(&dock(3, 0.5, "lease")).unwrap();
+        let (tang, gen) = net.ctmc();
+        let qq = Query { name: "L".into(), compute: Compute::Mean, target: Some(0), trans: None, time: None };
+        assert!(net.evaluate(&qq, &tang, &gen).is_nan());
     }
 
     #[test]
