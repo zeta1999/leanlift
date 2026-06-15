@@ -97,14 +97,47 @@ the highest-value `gspn.rs` upgrade independent of this demo.
 - "Phase transition" = finite-size scaling toward the `K→∞` singularity — framed
   as such, never sold as a singular finite chain.
 - Real-time / deadline / **schedulability** is the deterministic worst-case
-  sibling of this average-case story (utilization bound, response-time analysis)
-  — a natural follow-on family (see Cheng, *Real-Time Systems*): same designer
-  question ("what's my safe operating region?"), a sharp boundary, but worst-case
-  rather than stochastic. Deferred to its own plan.
+  sibling of this average-case story — a natural follow-on family, planned in §8.
 
 ## 7. Ordered start
 
-1. **D1 steady-state (GTH + sparse GS)** in `gspn.rs` — enabler + standalone win.
+1. ✅ **D1 steady-state (GTH)** in `gspn.rs` — enabler + standalone win.
 2. **D2 `link.model.toml`** + the queued CSL queries (reuses the most).
 3. **D3 sweep** — fastest path to *seeing* the phase change.
 4. **D4 sim cross-check**, **D5 narrative**, **Aeneas kernel** — in any order.
+
+## 8. Real-time / schedulability — the natural deterministic intersection
+
+The perf demo is the **average-case, stochastic** side ("how *likely* / how *fast*").
+Real-time schedulability (Cheng, *Real-Time Systems*) is the **worst-case,
+deterministic** side ("does it *ever* miss"). They are the **same designer
+question — "what is my safe operating region?" — on the same model**, one a soft
+sigmoid, the other a hard step. leanlift can host both and, crucially, **draw
+both boundaries on one task/load model**:
+
+- queueing stability `ρ < 1`  ↔  RM bound `U ≤ n(2^{1/n}−1)` / EDF `U ≤ 1`
+- soft: `P(miss deadline)` rising sigmoid (CTMC, §1–5)  ↔  hard: schedulable yes/no (a step)
+
+Same `useful > perfect` rules (§0): cheapest test that bites; the ladder travels
+with the feature. Methods are *cheaper* than the CTMC (deterministic, no state
+space) — the efficient complement.
+
+| Phase | Deliverable | Reuse / New | Ladder rung |
+|---|---|---|---|
+| **R0 Spec** | task-set model family `kind="tasks"` (`*.model.toml`): per task `C,T,D`, policy `RM`/`EDF`; properties = schedulable?, per-task WCRT, utilization headroom | reuse the TOML parser/family auto-detect | — |
+| **R1 Native analysis (M1-analog)** | utilization-bound test `O(n)` (sufficient) + **response-time analysis** fixed point `Rᵢ = Cᵢ + Σⱼ∈hp ⌈Rᵢ/Tⱼ⌉Cⱼ` (exact, pseudo-poly) + EDF demand-bound; `lift model check` → schedulable + WCRT table | new `rt.rs`; reuse report/CLI | unit tests vs textbook task sets; property test (util-pass ⇒ RTA-pass) |
+| **R2 Kernel proof (L3/Kani-analog)** | carve the **RTA iteration** (the `⌈·⌉`/sum step) as a Rust kernel → prove **monotone & overflow-free fixed point** (Kani no-overflow; Aeneas/Lean: the step is monotone ⇒ least fixed point exists & RTA is sound) | reuse `models-fire` dogfood + `fire_no_underflow` Kani pattern | L3/Kani proof of the analysis kernel |
+| **R3 Empirical cross-check** | discrete-event **RM/EDF scheduler** over the hyperperiod; assert observed max response `≤` RTA WCRT; small sets vs exhaustive schedule | reuse codegen executor + V0.6 diff pattern | sim-vs-RTA teeth (a missed bound goes red) |
+| **R4 The intersection demo ★** | one task/load model → **hard** schedulability boundary (RTA/util, step) **and** **soft** deadline-miss probability (CTMC, sigmoid), both plotted vs load → the unified "safe operating region" | reuse D1–D5 CTMC path + R1 RTA | hard-⊆-soft consistency check (deterministic boundary is conservative) |
+| **R5 Narrative** | `*.recipe.md`: "here's where it's *provably* safe (hard), and here's where it's *probably* safe (soft) — pick your margin" | reuse recipe writer | — |
+
+**Cross-checks (teeth):** util-bound (sufficient) ⇒ RTA (exact) must agree;
+RTA WCRT ≥ simulated max response; **hard boundary ⊆ soft boundary** (if it's
+hard-schedulable it can't be over the stochastic stability knee). A wrong
+analyzer goes red in more than one.
+
+**Efficiency note:** util test `O(n)`; RTA pseudo-polynomial; both far cheaper
+than building a CTMC — so R-phases give designers an *instant* worst-case answer,
+with the stochastic CTMC reserved for the soft-degradation picture. R2's kernel
+proof is the on-brand payoff: leanlift proving its *own* schedulability analyzer
+sound, the same way it already proves its Petri firing kernel (V3).
