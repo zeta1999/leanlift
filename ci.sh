@@ -114,6 +114,14 @@ else
   bad "prism link"; cat "$TMP/lko"
 fi
 
+# Phase-transition sweep: the empirical knee must match the closed-form p*.
+if ./scripts/link-sweep.sh --check >"$TMP/sweep" 2>&1; then
+  k=$(grep -oE 'knee.*p ≈ [0-9.]+' "$TMP/sweep" | grep -oE '[0-9.]+$')
+  pass "link phase sweep  (empirical knee p≈$k ≈ closed-form p*)"
+else
+  bad "link phase sweep — knee vs p* mismatch"; tail -6 "$TMP/sweep"
+fi
+
 # ---------------------------------------------------------------------------- #
 sect "M3 — prove (Lean, sorry-free)"
 if have lean; then

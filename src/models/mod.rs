@@ -487,12 +487,21 @@ fn prism_cmd(a: Vec<String>) {
     let mut file: Option<String> = None;
     let mut out = PathBuf::from("model-report.json");
     let mut emit: Option<String> = None;
+    let mut overrides: std::collections::HashMap<String, f64> = std::collections::HashMap::new();
 
     let mut i = 0;
     while i < a.len() {
         match a[i].as_str() {
             "--out" => out = PathBuf::from(take(&a, &mut i)),
             "--emit" => emit = Some(take(&a, &mut i)),
+            // `--set name=value` overrides a [[param]] (dependents recompute) —
+            // the knob the performance sweep turns (PLAN-perf-demo §D3).
+            "--set" => {
+                let kv = take(&a, &mut i);
+                let (k, v) = kv.split_once('=').unwrap_or_else(|| fail("--set expects name=value"));
+                let val: f64 = v.parse().unwrap_or_else(|_| fail(&format!("--set {k}: `{v}` is not a number")));
+                overrides.insert(k.to_string(), val);
+            }
             s if s.starts_with("--") => fail(&format!("unknown flag: {s}")),
             _ => {
                 if file.is_some() {
@@ -515,7 +524,7 @@ fn prism_cmd(a: Vec<String>) {
             exit(2);
         }
     }
-    let net = gspn::parse(&src).unwrap_or_else(|e| fail(&format!("{file}: {e}")));
+    let net = gspn::parse_with(&src, &overrides).unwrap_or_else(|e| fail(&format!("{file}: {e}")));
     if net.has_immediate_cycle() {
         fail(&format!(
             "{file}: GSPN has an immediate-transition cycle (a 'timeless trap') — the CTMC is \
