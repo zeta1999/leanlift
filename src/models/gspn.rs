@@ -266,6 +266,65 @@ fn solve(mut a: Vec<Vec<f64>>, mut b: Vec<f64>) -> Vec<f64> {
     x
 }
 
+/// Stationary distribution π of an IRREDUCIBLE CTMC generator `q` (πQ = 0,
+/// Σπ = 1), by the **GTH (Grassmann–Taksar–Heyman) state-reduction** algorithm:
+/// Gaussian elimination performed with NO subtractions — every update sums
+/// non-negative quantities — so it is numerically stable even for stiff
+/// generators (PLAN-perf-demo §D1, the steady-state mode the queued performance
+/// metrics need). `q` must be conservative: `q[i][j] ≥ 0` off-diagonal, each row
+/// summing to 0; the diagonal is never read.
+// Wired into the queued-performance query (throughput / W / overflow) in
+// PLAN-perf-demo §D2; until then it is exercised only by the D1 tests.
+#[allow(dead_code)]
+pub(crate) fn steady_state(q: &[Vec<f64>]) -> Vec<f64> {
+    let n = q.len();
+    if n == 0 {
+        return Vec::new();
+    }
+    if n == 1 {
+        return vec![1.0];
+    }
+    // Work on a copy of the off-diagonal rates; the diagonal is unused.
+    let mut a: Vec<Vec<f64>> = q.iter().map(|r| r.clone()).collect();
+
+    // Reduction: fold state `e` into the survivors {0..e-1}, e = n-1 … 1.
+    for e in (1..n).rev() {
+        let s: f64 = (0..e).map(|j| a[e][j]).sum(); // outflow of e into survivors
+        if s <= 0.0 {
+            continue; // not reachable among survivors (shouldn't happen if irreducible)
+        }
+        // Fold the detour through e: q[i][j] += rate(i→e) · prob(e→j). Uses the
+        // RAW column rate a[i][e] and the RAW row a[e][j], dividing by s — only
+        // sums of non-negative terms, so no cancellation (GTH's stability).
+        for i in 0..e {
+            let aie = a[i][e];
+            if aie != 0.0 {
+                for j in 0..e {
+                    a[i][j] += aie * a[e][j] / s;
+                }
+            }
+        }
+        // Normalise the column for the back-substitution: prob(i→e).
+        for i in 0..e {
+            a[i][e] /= s;
+        }
+    }
+
+    // Back-substitution: π over states 0..n-1 (unnormalised), then normalise.
+    let mut pi = vec![0.0; n];
+    pi[0] = 1.0;
+    for k in 1..n {
+        pi[k] = (0..k).map(|i| pi[i] * a[i][k]).sum();
+    }
+    let total: f64 = pi.iter().sum();
+    if total > 0.0 {
+        for x in pi.iter_mut() {
+            *x /= total;
+        }
+    }
+    pi
+}
+
 /// Indices of transient (non-absorbing) states.
 fn transient_states(absorb: &[bool]) -> Vec<usize> {
     (0..absorb.len()).filter(|&i| !absorb[i]).collect()
@@ -744,5 +803,82 @@ mod tests {
         }
         panic::set_hook(prev);
         assert!(failed.is_none(), "{}", failed.unwrap());
+    }
+
+    // --- D1: steady-state solver (PLAN-perf-demo) --------------------------- //
+
+    /// The M/M/1/K generator: birth rate λ (i→i+1, i<K), death rate μ (i→i-1).
+    fn mm1k(lambda: f64, mu: f64, k: usize) -> Vec<Vec<f64>> {
+        let n = k + 1;
+        let mut q = vec![vec![0.0; n]; n];
+        for i in 0..n {
+            if i < k {
+                q[i][i + 1] = lambda;
+                q[i][i] -= lambda;
+            }
+            if i > 0 {
+                q[i][i - 1] = mu;
+                q[i][i] -= mu;
+            }
+        }
+        q
+    }
+
+    #[test]
+    fn steady_state_matches_mm1k_closed_form() {
+        // π_i = ρ^i (1-ρ)/(1-ρ^{K+1}), ρ=λ/μ — the textbook M/M/1/K stationary.
+        for &(lambda, mu) in &[(0.5, 1.0), (0.9, 1.0), (0.3, 1.2), (1.5, 1.0)] {
+            for &k in &[1usize, 2, 5, 10] {
+                let pi = steady_state(&mm1k(lambda, mu, k));
+                let rho = lambda / mu;
+                let pi0 = (1.0 - rho) / (1.0 - rho.powi(k as i32 + 1));
+                for (i, &p) in pi.iter().enumerate() {
+                    let want = rho.powi(i as i32) * pi0;
+                    assert!((p - want).abs() < 1e-9, "λ={lambda} μ={mu} K={k} i={i}: {p} vs {want}");
+                }
+            }
+        }
+    }
+
+    /// A random irreducible birth–death generator (always has a unique π).
+    fn random_bd(r: &mut Rng, n: usize) -> Vec<Vec<f64>> {
+        let mut q = vec![vec![0.0; n]; n];
+        for i in 0..n {
+            if i + 1 < n {
+                let lam = 0.1 + r.f();
+                q[i][i + 1] = lam;
+                q[i][i] -= lam;
+            }
+            if i > 0 {
+                let mu = 0.1 + r.f();
+                q[i][i - 1] = mu;
+                q[i][i] -= mu;
+            }
+        }
+        q
+    }
+
+    #[test]
+    fn steady_state_is_a_valid_stationary_distribution() {
+        let mut r = Rng(0xD15_7B_17_10_5EE_DA7Au64);
+        for _ in 0..2000 {
+            let n = 2 + r.upto(6); // 2..=7 states
+            let q = random_bd(&mut r, n);
+            let pi = steady_state(&q);
+            // (1) a probability vector
+            assert!((pi.iter().sum::<f64>() - 1.0).abs() < 1e-9, "Σπ ≠ 1");
+            assert!(pi.iter().all(|&p| p >= -1e-12 && p.is_finite()), "π not ≥ 0 / finite");
+            // (2) the defining equation πQ = 0 (every column residual ~ 0)
+            for j in 0..n {
+                let resid: f64 = (0..n).map(|i| pi[i] * q[i][j]).sum();
+                assert!(resid.abs() < 1e-9, "πQ residual {resid} in col {j}");
+            }
+            // (3) detailed balance for birth–death: π_i·λ_i = π_{i+1}·μ_{i+1}
+            for i in 0..n - 1 {
+                let up = pi[i] * q[i][i + 1];
+                let down = pi[i + 1] * q[i + 1][i];
+                assert!((up - down).abs() < 1e-9, "detailed balance broken at {i}");
+            }
+        }
     }
 }
