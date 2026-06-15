@@ -101,6 +101,19 @@ else
   bad "prism dock-gspn"; cat "$TMP/o"
 fi
 
+# Queued stop-and-wait link (steady-state metrics: mean / throughput / full).
+if "$LIFT" model prism "$M/link.model.toml" --emit "$TMP/lk" --out "$TMP/lk.json" >"$TMP/lko" 2>&1; then
+  xx=$(grep -E '^\s+X ' "$TMP/lko" | grep -o '[0-9]\.[0-9]*' | head -1)
+  # stable regime (p=0.3, λ=0.4): throughput ≈ λ ⇒ X in (0.39, 0.41).
+  if awk "BEGIN{exit !($xx > 0.39 && $xx < 0.41)}"; then
+    pass "prism link  (steady-state X=$xx ≈ λ=0.4, stable)"
+  else
+    bad "prism link: throughput X=$xx out of stable-regime band (0.39,0.41)"
+  fi
+else
+  bad "prism link"; cat "$TMP/lko"
+fi
+
 # ---------------------------------------------------------------------------- #
 sect "M3 — prove (Lean, sorry-free)"
 if have lean; then

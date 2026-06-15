@@ -87,5 +87,11 @@ fn csl(net: &Gspn, q: &Query) -> String {
             let time = q.time.expect("transient needs time");
             format!("P=? [ F<={time} \"{t}\" ];\n")
         }
+        // Steady-state metrics (PLAN-perf-demo §D2) are computed natively from the
+        // stationary distribution. PRISM can express them via S{...}=? / reward
+        // structures; that emission is a follow-up — for now they are native-only.
+        Compute::Mean | Compute::Throughput | Compute::Full => {
+            format!("// {}: steady-state metric — computed natively; PRISM S/R emission TODO\n", q.name)
+        }
     }
 }
