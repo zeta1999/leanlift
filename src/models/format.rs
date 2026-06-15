@@ -33,6 +33,7 @@ pub enum Family {
     Cpn,
     Bt,
     Spn,
+    Tasks,
 }
 
 impl Family {
@@ -43,6 +44,7 @@ impl Family {
             Family::Cpn => "cpn",
             Family::Bt => "bt",
             Family::Spn => "spn",
+            Family::Tasks => "tasks",
         }
     }
 }
@@ -56,8 +58,12 @@ pub fn detect(doc: &Doc) -> Result<Family, String> {
             "cpn" => Ok(Family::Cpn),
             "bt" => Ok(Family::Bt),
             "spn" | "gspn" => Ok(Family::Spn),
-            other => Err(format!("unknown kind `{other}` (have: fsm, petri, cpn, bt, spn)")),
+            "tasks" | "taskset" => Ok(Family::Tasks),
+            other => Err(format!("unknown kind `{other}` (have: fsm, petri, cpn, bt, spn, tasks)")),
         };
+    }
+    if !doc.table("task").is_empty() {
+        return Ok(Family::Tasks);
     }
     // Shape inference: `[[colour]]` ⇒ CPN, a `tree` ⇒ BT, `places` ⇒
     // Petri-family, `states`/`machines` ⇒ FSM.

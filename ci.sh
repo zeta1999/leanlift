@@ -123,6 +123,26 @@ else
 fi
 
 # ---------------------------------------------------------------------------- #
+sect "RT — schedulability (utilization bound + exact RTA)"
+if "$LIFT" model check "$M/tasks.model.toml" >"$TMP/rt" 2>&1; then
+  # the teaching case: util test FAILs but RTA proves SCHEDULABLE.
+  if grep -q "FAIL — sufficient" "$TMP/rt" && grep -q "level : SCHEDULABLE" "$TMP/rt"; then
+    pass "schedulability tasks  (RTA exact beats the bound: U>bound yet schedulable)"
+  else
+    bad "schedulability tasks: unexpected verdict"; cat "$TMP/rt"
+  fi
+else
+  bad "schedulability tasks did not return schedulable (exit $?)"; cat "$TMP/rt"
+fi
+# teeth: an overloaded set (U>1) must be reported NOT schedulable (exit 1).
+printf 'kind="tasks"\npolicy="RM"\n[[task]]\nname="a"\nc="3"\nt="4"\n[[task]]\nname="b"\nc="3"\nt="5"\n' >"$TMP/over.toml"
+if "$LIFT" model check "$TMP/over.toml" >"$TMP/rto" 2>&1; then
+  bad "overloaded task set wrongly reported schedulable"; cat "$TMP/rto"
+else
+  pass "schedulability teeth  (U>1 overload caught as NOT schedulable)"
+fi
+
+# ---------------------------------------------------------------------------- #
 sect "M3 — prove (Lean, sorry-free)"
 if have lean; then
   for f in mcl dock mission resource link; do
