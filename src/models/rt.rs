@@ -213,6 +213,65 @@ mod tests {
         assert_eq!(r, vec![Some(1), Some(2), Some(5)]);
     }
 
+    fn gcd(a: u32, b: u32) -> u32 {
+        if b == 0 {
+            a
+        } else {
+            gcd(b, a % b)
+        }
+    }
+
+    /// Discrete-event simulation of preemptive fixed-priority (RM) scheduling
+    /// from the CRITICAL INSTANT (all tasks released at t=0), over `cycles`
+    /// hyperperiods. Returns the observed worst-case response time per task.
+    fn simulate_rm(ts: &TaskSet, cycles: u32) -> Vec<u32> {
+        let n = ts.tasks.len();
+        let hyper = ts.tasks.iter().fold(1u32, |h, t| h / gcd(h, t.t) * t.t);
+        let mut order: Vec<usize> = (0..n).collect();
+        order.sort_by_key(|&i| ts.tasks[i].t); // RM: shorter period ⇒ higher priority
+        let mut remaining = vec![0u32; n];
+        let mut released = vec![0u32; n];
+        let mut max_resp = vec![0u32; n];
+        for t in 0..hyper * cycles {
+            for i in 0..n {
+                if t % ts.tasks[i].t == 0 {
+                    remaining[i] = ts.tasks[i].c; // new job (schedulable ⇒ prev done)
+                    released[i] = t;
+                }
+            }
+            if let Some(&i) = order.iter().find(|&&i| remaining[i] > 0) {
+                remaining[i] -= 1;
+                if remaining[i] == 0 {
+                    max_resp[i] = max_resp[i].max(t + 1 - released[i]);
+                }
+            }
+        }
+        max_resp
+    }
+
+    #[test]
+    fn rta_matches_simulation() {
+        // R3 empirical cross-check: exact RTA worst-case response times must equal
+        // what a fixed-priority scheduler actually produces from the critical
+        // instant (where RTA's worst case is realized). A wrong RTA goes red here.
+        for src in [
+            std::fs::read_to_string("examples/models/tasks.model.toml").unwrap(),
+            "kind=\"tasks\"\npolicy=\"RM\"\n\
+                [[task]]\nname=\"a\"\nc=\"2\"\nt=\"5\"\n\
+                [[task]]\nname=\"b\"\nc=\"1\"\nt=\"7\"\n\
+                [[task]]\nname=\"c\"\nc=\"2\"\nt=\"13\"\n"
+                .to_string(),
+        ] {
+            let ts = parse(&src).unwrap();
+            let rep = analyze(&ts);
+            assert!(rep.schedulable, "test sets must be schedulable");
+            let sim = simulate_rm(&ts, 2);
+            for (i, (_, r)) in rep.wcrt.iter().enumerate() {
+                assert_eq!(r.unwrap(), sim[i], "task {i}: RTA {r:?} vs simulated {}", sim[i]);
+            }
+        }
+    }
+
     #[test]
     fn overload_is_unschedulable() {
         // U > 1 ⇒ no policy can schedule it; RTA reports a deadline miss.
