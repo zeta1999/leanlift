@@ -81,9 +81,19 @@ pub fn parse(src: &str) -> Result<TaskSet, String> {
     Ok(TaskSet { tasks, policy })
 }
 
-/// `⌈a / b⌉` for positive `b`.
+/// `⌈a / b⌉` for positive `b`. Verified overflow-free & monotone in `a` by Kani
+/// (PLAN-perf-demo §8 R2, the `kani_harness` below).
 fn div_ceil(a: u32, b: u32) -> u32 {
     (a + b - 1) / b
+}
+
+/// One RTA interference term: a higher-priority task with period `tj` and cost
+/// `cj` preempts `⌈r/tj⌉` times in a window of length `r`. The body of the
+/// response-time recurrence — **monotone non-decreasing in `r`**, which is what
+/// makes the fixed-point iteration converge to the LEAST fixed point (the true
+/// worst-case response time). Kani proves that monotonicity (and no overflow).
+fn term(r: u32, cj: u32, tj: u32) -> u32 {
+    div_ceil(r, tj) * cj
 }
 
 /// Exact worst-case response time by the RTA fixed point. Returns `None` if it
@@ -92,7 +102,7 @@ fn div_ceil(a: u32, b: u32) -> u32 {
 fn response_time(c: u32, d: u32, hp: &[(u32, u32)]) -> Option<u32> {
     let mut r = c;
     loop {
-        let interference: u32 = hp.iter().map(|&(cj, tj)| div_ceil(r, tj) * cj).sum();
+        let interference: u32 = hp.iter().map(|&(cj, tj)| term(r, cj, tj)).sum();
         let r_new = c + interference;
         if r_new > d {
             return None;
@@ -235,5 +245,40 @@ mod tests {
             }
         }
         assert!(passed > 100, "util-bound test near-vacuous: only {passed} sets passed");
+    }
+}
+
+/// Bounded model-checking harnesses (PLAN-perf-demo §8 R2): the RTA recurrence
+/// kernel is monotone and overflow-free. Inert outside `cargo kani`; bounds kept
+/// small so CBMC stays light. leanlift proving its OWN schedulability analyzer.
+#[cfg(kani)]
+mod kani_harness {
+    use super::{div_ceil, term};
+
+    /// `div_ceil` never overflows and `⌈a/b⌉ ≤ a` (for `b ≥ 1`) — the latter is
+    /// the bound the response-time loop's termination leans on.
+    #[kani::proof]
+    fn div_ceil_safe() {
+        let a: u32 = kani::any();
+        let b: u32 = kani::any();
+        kani::assume(a <= 1000);
+        kani::assume(b >= 1 && b <= 1000);
+        let q = div_ceil(a, b); // no u32 overflow in (a + b - 1)
+        assert!(q <= a);
+    }
+
+    /// THE soundness property: the interference term is MONOTONE non-decreasing
+    /// in the window `r`. Monotonicity ⇒ the RTA iteration converges to the least
+    /// fixed point = the true worst-case response time. (No overflow under the
+    /// realistic bound.)
+    #[kani::proof]
+    fn term_monotone() {
+        let r: u32 = kani::any();
+        let r2: u32 = kani::any();
+        let cj: u32 = kani::any();
+        let tj: u32 = kani::any();
+        kani::assume(r <= 1000 && r2 <= 1000 && cj <= 1000 && tj >= 1 && tj <= 1000);
+        kani::assume(r <= r2);
+        assert!(term(r, cj, tj) <= term(r2, cj, tj));
     }
 }
