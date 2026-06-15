@@ -114,8 +114,12 @@ the highest-value `gspn.rs` upgrade independent of this demo.
    analytic_link` test (sim ≈ CTMC, stable & congested). Δ ≈ 0.1–3%.
 5. ✅ **D5 narrative** — `examples/models/link.recipe.md` (the designer-facing
    story: model, physics/`p*`, the cliff, the 3-way triangulation, commands).
-6. **Correctness leg (next):** model→Lean qualitative (buffer invariant) +
-   Aeneas kernel (code→Lean L3 of the protocol kernel).
+6. ✅ **Correctness leg** — model→Lean qualitative (`lift model prove link` →
+   M3, buf ≤ K via the conserved buf+slot invariant, `Gspn::to_ptnet`) **and**
+   Aeneas kernel (`lift prove link-buffer` → L3: `admit` keeps buf ≤ K, no
+   overflow — the code twin of the model bound). **The full stack is realized on
+   one example: code→Lean4 (L3) + model→Lean4 (M3) + model→PRISM/CTMC (M2) +
+   performance sweep + empirical simulation, all cross-checked.**
 
 ## 8. Real-time / schedulability — the natural deterministic intersection
 

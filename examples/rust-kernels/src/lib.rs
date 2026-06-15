@@ -14,6 +14,29 @@ pub fn fire_place(m: u32, pre: u32, post: u32) -> u32 {
     m - pre + post
 }
 
+/// Admit a message into a K-bounded buffer (the link protocol's arrival
+/// arithmetic, `examples/models/link.model.toml`): occupancy rises by one unless
+/// the buffer is full. The CODE mirror of the model's `buf ≤ K` safety invariant
+/// — Charon+Aeneas extracts it and `examples/models/BufferProofs.lean` proves
+/// (L3, PLAN-perf-demo): admit never exceeds K (so the `u32` add never overflows).
+pub fn admit(buf: u32, k: u32) -> u32 {
+    if buf < k {
+        buf + 1
+    } else {
+        buf
+    }
+}
+
+/// Release a message from the buffer on delivery: occupancy falls by one unless
+/// already empty. Proved (L3): never underflows, never increases.
+pub fn release(buf: u32) -> u32 {
+    if buf > 0 {
+        buf - 1
+    } else {
+        buf
+    }
+}
+
 /// Clamped floor-division vesting ramp (the streaming-vesting kernel).
 ///
 ///   streamed(deposit, start, stop, t) =
