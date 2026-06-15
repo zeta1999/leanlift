@@ -1,0 +1,26 @@
+# tasks — a periodic real-time task set (PLAN-perf-demo §8, R1). The deterministic
+# worst-case sibling of the link's stochastic performance: schedulability is a
+# hard "works until a threshold" boundary (utilization / response-time), the
+# twin of the queueing stability boundary.
+#
+# This set is the classic teaching case: U = 1/3 + 1/5 + 2/8 = 0.783 EXCEEDS the
+# RM utilization bound 3(2^{1/3}-1) = 0.780 — so the O(n) sufficient test FAILS —
+# yet exact response-time analysis proves every task meets its deadline. RTA is
+# tighter (exact) than the bound: `lift model check examples/models/tasks.model.toml`.
+kind = "tasks"
+policy = "RM"
+
+[[task]]
+name = "sensor"
+c = "1"
+t = "3"
+
+[[task]]
+name = "filter"
+c = "1"
+t = "5"
+
+[[task]]
+name = "control"
+c = "2"
+t = "8"

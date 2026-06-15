@@ -24,6 +24,7 @@ mod fuzz;
 #[cfg(test)]
 mod proptest;
 mod report;
+mod rt;
 mod scxml;
 mod toml;
 mod xml;
@@ -163,6 +164,14 @@ fn check_cmd(a: Vec<String>) {
             eprintln!("detected a stochastic (gspn) model — use `lift model prism <file>` for M2 quantitative analysis");
             exit(2);
         }
+        Family::Tasks => {
+            // Real-time schedulability (PLAN-perf-demo §8): not a transition
+            // system — utilization bound + exact response-time analysis (RTA).
+            let ts = rt::parse(&src).unwrap_or_else(|e| fail(&format!("{file}: {e}")));
+            let rep = rt::analyze(&ts);
+            rt::print_report(&rep, &ts, &file);
+            exit(if rep.schedulable { 0 } else { 1 });
+        }
     };
     report::print_human(&result, &file, &hash);
     if let Err(e) = report::write_json(&result, &file, &hash, &out) {
@@ -257,6 +266,12 @@ fn prove_cmd(a: Vec<String>) {
             let mut r = check::check(&net, check::DEFAULT_BOUND);
             r.notes = petri_notes(&net, &r);
             (r, lean::emit_petri(&net, &ns))
+        }
+        Family::Tasks => {
+            // The schedulability verdict is `lift model check` (RTA); the Lean
+            // proof of the RTA fixed point is the R2 kernel (PLAN-perf-demo §8).
+            eprintln!("schedulability is `lift model check <file>` (RTA); the analyzer's Lean/Kani kernel proof is R2 — not in this build");
+            exit(2);
         }
     }
     };
