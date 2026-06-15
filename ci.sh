@@ -125,7 +125,7 @@ fi
 # ---------------------------------------------------------------------------- #
 sect "M3 — prove (Lean, sorry-free)"
 if have lean; then
-  for f in mcl dock mission resource; do
+  for f in mcl dock mission resource link; do
     if "$LIFT" model prove "$M/$f.model.toml" --emit "$TMP/$f.gen.lean" --out "$TMP/r.json" >"$TMP/o" 2>&1; then
       pass "prove $f  ($(grep -o 'M3 proved' "$TMP/o"))"
     else

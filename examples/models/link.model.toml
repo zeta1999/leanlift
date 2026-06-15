@@ -14,6 +14,16 @@ kind = "gspn"
 places = ["buf", "slot", "tx", "wait", "idle"]
 initial = "slot:8, idle:1"          # K=8 free buffer slots; link idle; nothing in flight
 
+# Qualitative safety (proved in Lean by `lift model prove`): the buffer never
+# overflows. It rides the conserved mass buf+slot = K = 8 (every transition
+# preserves it), so buf ≤ 8 in every reachable marking — survives even the lossy
+# transitions. The quantitative performance is `lift model prism` (above).
+conserved = ["buf", "slot"]
+[[bound]]
+name = "buffer"
+max = "8"
+places = ["buf"]
+
 [[param]]
 name = "lam"
 value = "0.4"
