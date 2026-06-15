@@ -24,6 +24,7 @@ pub struct Example {
 pub const NAMES: &[&str] = &[
     "streamed", "avg", "rust-streamed", "cpp-streamed", "cpp-dot2", "go-avg", "sol-dot2",
     "rust-isqrt", "cpp-isqrt", "rust-bisect", "cpp-bisect", "quant", "cpp-quant", "models-fire",
+    "link-buffer",
 ];
 
 fn lean_lib() -> PathBuf {
@@ -227,6 +228,24 @@ pub fn lookup(name: &str) -> Option<Example> {
                 entrypoint: "fire_place".into(),
             },
             proof_frag: Some("examples/models/FireProofs.lean".into()),
+        }),
+        // The code→Lean leg of the perf-demo (PLAN-perf-demo): the link sender's
+        // buffer `admit` arithmetic, extracted from Rust by Charon+Aeneas and
+        // proved sorry-free to keep `buf ≤ K` (no overflow) — the CODE twin of the
+        // model→Lean bound `lift model prove link`. `lift prove link-buffer`.
+        "link-buffer" => Some(Example {
+            name: "link-buffer",
+            lang: Lang::Cpp,
+            source: "examples/rust-kernels/src/lib.rs".into(),
+            fn_name: "admit",
+            signature: u(IntType::U32, 2),
+            profile: Profile::Avg, // unused by prove
+            gen: vectors::avg_vectors, // unused by prove
+            frontend: Frontend::RustAeneas {
+                crate_dir: "examples/rust-kernels".into(),
+                entrypoint: "admit".into(),
+            },
+            proof_frag: Some("examples/models/BufferProofs.lean".into()),
         }),
         _ => None,
     }
