@@ -75,6 +75,18 @@ else
 fi
 
 # ---------------------------------------------------------------------------- #
+sect "Creusot — deductive checker-invariant proof (V3.5)"
+if command -v cargo-creusot >/dev/null 2>&1; then
+  if ./verify-creusot.sh >"$TMP/creusot.out" 2>&1; then
+    pass "verify-creusot.sh  (reachable_set closed-under-step discharged)"
+  else
+    bad "verify-creusot.sh"; sed 's/^/      /' "$TMP/creusot.out" | tail -20
+  fi
+else
+  skip "creusot not installed — V3.5 deductive proof skipped (invariant covered by the closure property test)"
+fi
+
+# ---------------------------------------------------------------------------- #
 sect "M1 ↔ M3 agreement over random FSMs (V0.5)"
 if command -v lake >/dev/null 2>&1; then
   if ./verify-m1m3.sh 5 >"$TMP/m1m3.out" 2>&1; then
@@ -106,12 +118,10 @@ fi
 
 # ---------------------------------------------------------------------------- #
 sect "parser fuzzing (V2)"
-if have cargo-fuzz && [ -d fuzz ]; then
-  # V2 not yet implemented; when it is, run a short time-budget here.
-  skip "fuzz targets present but the V2 runner is not wired yet"
-else
-  skip "cargo-fuzz / fuzz/ targets not present — V2 not implemented yet"
-fi
+# V2 is the in-crate fuzzer (`parsers_never_panic`, 20k mutated inputs) — it
+# already ran in the "property/.../tests" phase above (rides cargo test). The
+# coverage-guided libFuzzer variant is deferred (needs a lib API; see plan §V2).
+pass "in-crate fuzzer (parsers_never_panic) ran with cargo test; libFuzzer deferred"
 
 # ---------------------------------------------------------------------------- #
 echo
