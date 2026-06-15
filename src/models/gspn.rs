@@ -460,12 +460,23 @@ fn transient(q: &[Vec<f64>], start: usize, time: f64) -> Vec<f64> {
 
 // --- parsing ----------------------------------------------------------------- //
 
+/// No-override convenience entry (used by the test suite; production goes through
+/// `parse_with` so `--set` can override params).
+#[allow(dead_code)]
 pub fn parse(src: &str) -> Result<Gspn, String> {
-    let doc = toml::parse(src)?;
-    build(&doc)
+    parse_with(src, &HashMap::new())
 }
 
-fn build(doc: &Doc) -> Result<Gspn, String> {
+/// Like `parse`, but `overrides` replace named `[[param]]` values before
+/// evaluation — so dependent params recompute (e.g. overriding `p` recomputes
+/// `mu_l = mu_d·p/(1-p)`). Backs `lift model … --set name=value`, the knob the
+/// performance sweep turns (PLAN-perf-demo §D3).
+pub fn parse_with(src: &str, overrides: &HashMap<String, f64>) -> Result<Gspn, String> {
+    let doc = toml::parse(src)?;
+    build_with(&doc, overrides)
+}
+
+fn build_with(doc: &Doc, overrides: &HashMap<String, f64>) -> Result<Gspn, String> {
     let places: Vec<String> = doc
         .scalar("places")
         .ok_or("GSPN requires a `places` array")?
@@ -483,7 +494,11 @@ fn build(doc: &Doc) -> Result<Gspn, String> {
     for (i, p) in doc.table("param").iter().enumerate() {
         let name = p.get("name").ok_or_else(|| format!("param {i}: missing `name`"))?.as_str("name")?.to_string();
         let expr = p.get("value").ok_or_else(|| format!("param {i}: missing `value`"))?.as_str("value")?;
-        let v = eval_expr(expr, &params).map_err(|e| format!("param `{name}`: {e}"))?;
+        // An override replaces the file value (dependents still recompute below).
+        let v = match overrides.get(&name) {
+            Some(&ov) => ov,
+            None => eval_expr(expr, &params).map_err(|e| format!("param `{name}`: {e}"))?,
+        };
         params.insert(name, v);
     }
 

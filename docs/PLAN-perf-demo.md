@@ -106,8 +106,10 @@ the highest-value `gspn.rs` upgrade independent of this demo.
    metrics `mean`/`throughput`/`full` in the evaluator, validated vs M/M/1/K
    closed form + Little; `prism link` in `ci.sh`. Manual `p`-sweep already shows
    the collapse (X: 0.40→0.21, Pblock: 0.0003→0.48 as p: 0.3→0.95).
-3. **D3 sweep** — fastest path to *seeing* the phase change (next).
-4. **D4 sim cross-check**, **D5 narrative**, **Aeneas kernel** — in any order.
+3. ✅ **D3 sweep** — `--set name=value` param override + `scripts/link-sweep.sh`:
+   ASCII curve of L/X/Pblock vs `p`, closed-form `p* = R/(1+R)`, empirical knee,
+   self-check (`--check`) wired into `ci.sh`. Knee p≈0.88 ≈ p*=0.882.
+4. **D4 sim cross-check**, **D5 narrative**, **Aeneas kernel** — in any order (next).
 
 ## 8. Real-time / schedulability — the natural deterministic intersection
 
