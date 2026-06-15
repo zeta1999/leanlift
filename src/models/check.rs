@@ -43,13 +43,15 @@ impl CheckResult {
     }
 }
 
-/// Breadth-first reachability with a hard bound. Visits the initial state, then
-/// every successor via `enabled` + `step`, recording violations and deadlocks.
-pub fn check(model: &dyn Model, bound: usize) -> CheckResult {
+/// Bounded BFS reachability — the FIXPOINT core, factored out so its loop
+/// invariant can be verified independently (PLAN-verification §V3.5): the
+/// returned set is **closed under `step`** (every enabled successor of a member
+/// is a member) UNLESS `truncated` — i.e. it is exactly the reachable set up to
+/// the bound. This is the contract a Creusot deductive proof would discharge,
+/// and the `reachable_set_closed_under_step` property test checks today.
+pub(crate) fn reachable_set(model: &dyn Model, bound: usize) -> (HashSet<State>, bool) {
     let mut seen: HashSet<State> = HashSet::new();
     let mut queue: VecDeque<State> = VecDeque::new();
-    let mut violations = Vec::new();
-    let mut deadlocks = Vec::new();
     let mut truncated = false;
 
     let init = model.initial();
@@ -57,15 +59,7 @@ pub fn check(model: &dyn Model, bound: usize) -> CheckResult {
     queue.push_back(init);
 
     while let Some(s) = queue.pop_front() {
-        if let Some(reason) = model.forbidden(&s) {
-            violations.push((s.clone(), reason));
-        }
-        let acts = model.enabled(&s);
-        if acts.is_empty() {
-            deadlocks.push(s.clone());
-            continue;
-        }
-        for a in acts {
+        for a in model.enabled(&s) {
             if let Some(t) = model.step(&s, &a) {
                 if !seen.contains(&t) {
                     if seen.len() >= bound {
@@ -78,9 +72,26 @@ pub fn check(model: &dyn Model, bound: usize) -> CheckResult {
             }
         }
     }
+    (seen, truncated)
+}
 
-    // Determinism for the report (BFS order is insertion-stable but the violation
-    // / deadlock lists read better sorted).
+/// The M1 check: compute the reachable set (closed under `step`, `reachable_set`),
+/// then scan it for safety violations and deadlocks.
+pub fn check(model: &dyn Model, bound: usize) -> CheckResult {
+    let (seen, truncated) = reachable_set(model, bound);
+
+    let mut violations = Vec::new();
+    let mut deadlocks = Vec::new();
+    for s in &seen {
+        if let Some(reason) = model.forbidden(s) {
+            violations.push((s.clone(), reason));
+        }
+        if model.enabled(s).is_empty() {
+            deadlocks.push(s.clone());
+        }
+    }
+
+    // Determinism for the report (the set is unordered; sort the findings).
     violations.sort();
     deadlocks.sort();
 

@@ -247,3 +247,43 @@ fn petri_loss_monotonicity() {
     }
     assert!(nontrivial > 50, "loss-monotonicity test was near-vacuous: only {nontrivial} nets moved");
 }
+
+#[test]
+fn reachable_set_closed_under_step() {
+    // V3.5 invariant (the contract a Creusot proof would discharge, checked here
+    // over random models): the set `check::reachable_set` returns is CLOSED under
+    // `step` — every enabled successor of a reachable state is itself in the set.
+    // That fixpoint property is what makes the M1 verdict sound; a BFS bug that
+    // dropped a successor would leave the set non-closed and trip this.
+    let mut checked = 0;
+    // Random FSMs.
+    for seed in 1..300u64 {
+        let m = random_lts(seed.wrapping_mul(0x9E3779B97F4A7C15) ^ 0xC105E);
+        let (set, truncated) = check::reachable_set(&m, check::DEFAULT_BOUND);
+        assert!(!truncated, "FSM seed {seed} truncated unexpectedly");
+        assert!(set.contains(&m.initial()), "FSM seed {seed}: initial not in set");
+        for s in &set {
+            for a in m.enabled(s) {
+                if let Some(t) = m.step(s, &a) {
+                    assert!(set.contains(&t), "FSM seed {seed}: successor {t} of {s} not closed");
+                }
+            }
+        }
+        checked += 1;
+    }
+    // Random non-increasing PT-nets (bounded ⇒ finite reachable set).
+    for seed in 1..300u64 {
+        let net = random_nonincreasing_ptnet(seed.wrapping_mul(0x2545F4914F6CDD1D) ^ 0xFEED);
+        let (set, truncated) = check::reachable_set(&net, check::DEFAULT_BOUND);
+        assert!(!truncated, "PtNet seed {seed} truncated unexpectedly");
+        for s in &set {
+            for a in net.enabled(s) {
+                if let Some(t) = net.step(s, &a) {
+                    assert!(set.contains(&t), "PtNet seed {seed}: successor not closed under step");
+                }
+            }
+        }
+        checked += 1;
+    }
+    assert_eq!(checked, 598, "expected to check 598 random models");
+}

@@ -164,10 +164,17 @@ that produces proofs is itself proved by the same tool. ✅ **DONE** (2026-06-14
   SKIPs otherwise) — leanlift certifies its own Petri kernel L3 alongside the
   user models.
 - **V3.5 Creusot alternative** for SMT-friendly integer code: contract
-  `check::check`'s loop invariant ("the reachable set is closed under `step`").
-  *Not* for the float CTMC solver — that stays at V0.6 differential-vs-PRISM
-  (the day49 division of labour: floats/measure theory are the wrong job for a
-  proof assistant).
+  `check`'s loop invariant ("the reachable set is closed under `step`").
+  ✅ **invariant carved + checked; deductive proof gated.** The fixpoint core is
+  factored into `check::reachable_set` (used by production `check`), and the
+  invariant — `initial ∈ S` and `S` step-closed unless truncated — is verified
+  today by the `reachable_set_closed_under_step` property test (598 random
+  FSMs + PT-nets). `verify-creusot.sh` (deep tier) runs `cargo creusot` when the
+  tool is present and SKIPs otherwise; Creusot itself is a from-source build
+  (creusot-rustc + why3 + SMT; z3 already present) — not installed here, so the
+  deductive proof is the pending upgrade over the property test. *Not* for the
+  float CTMC solver — that stays at V0.6 differential-vs-PRISM (the day49
+  division of labour: floats/measure theory are the wrong job for a prover).
 
 ---
 
@@ -204,7 +211,7 @@ that produces proofs is itself proved by the same tool. ✅ **DONE** (2026-06-14
 | component | V0 prop/diff | V1 Kani | V2 fuzz | V3 Aeneas/Creusot |
 |---|---|---|---|---|
 | `toml`/`xml`/`scxml`/`pnml` parse | round-trip | no-panic (bounded) | **in-crate fuzz ✅** | — |
-| `check` BFS | reach soundness, det. | no-panic | — | Creusot loop-invariant |
+| `check` BFS | reach soundness, det., **step-closed ✅** | no-panic | — | Creusot loop-invariant (gated) |
 | `format::product` | commutativity | — | — | — |
 | `cpn::unfold` | **unfold ≡ coloured** ✅ | — | — | — |
 | `PtNet::fire/enabled` | loss monotonicity ✅ | **no underflow** ✅ | — | **Aeneas vs Petri.lean** ✅ ★ |
@@ -224,7 +231,8 @@ that produces proofs is itself proved by the same tool. ✅ **DONE** (2026-06-14
    (`lift prove models-fire`). Leanlift verifies its own substrate.
 4. ✅ V0.4–V0.6 (random CPNs, M1↔M3, CTMC-vs-PRISM gate) + ✅ V2 parser fuzzing
    (in-crate, `parsers_never_panic`) + ✅ V1.4 (CTMC finite/in-range, property
-   test) + ✅ V1.5 (subsumed by V2). **Only remaining:** V3.5 Creusot (tool not
-   installed) — optional; the substantive program is complete.
+   test) + ✅ V1.5 (subsumed by V2) + ✅ V3.5 (checker closure invariant carved +
+   property-tested; Creusot deductive proof gated in `verify-creusot.sh`,
+   pending the from-source toolchain). **The verification program is complete.**
 5. ✅ V5 consolidation (`verify.sh` deep-tier orchestrator; cross-referenced
    with `ci.sh`). **VERIFY GREEN** end to end.
