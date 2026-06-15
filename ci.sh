@@ -141,6 +141,13 @@ if "$LIFT" model check "$TMP/over.toml" >"$TMP/rto" 2>&1; then
 else
   pass "schedulability teeth  (U>1 overload caught as NOT schedulable)"
 fi
+# R4 intersection: hard boundary is conservative (soft miss still low there).
+if ./scripts/tasks-sweep.sh --check >"$TMP/tsweep" 2>&1; then
+  hb=$(grep -oE 'hard boundary.*scale ≈ [0-9.]+' "$TMP/tsweep" | grep -oE '[0-9.]+$')
+  pass "hard/soft intersection  (hard boundary scale≈$hb conservative vs soft miss)"
+else
+  bad "hard/soft intersection sweep"; tail -6 "$TMP/tsweep"
+fi
 
 # ---------------------------------------------------------------------------- #
 sect "M3 — prove (Lean, sorry-free)"

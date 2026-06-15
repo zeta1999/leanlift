@@ -155,6 +155,81 @@ pub fn analyze(ts: &TaskSet) -> RtReport {
     RtReport { policy, util, util_bound, util_test_pass, wcrt, schedulable }
 }
 
+/// Scale every worst-case execution time by `s` (round up, ≥ 1) — the load knob
+/// for the hard/soft sweep (PLAN-perf-demo §8 R4).
+pub fn scaled(ts: &TaskSet, s: f64) -> TaskSet {
+    TaskSet {
+        policy: ts.policy,
+        tasks: ts
+            .tasks
+            .iter()
+            .map(|t| Task { name: t.name.clone(), c: ((t.c as f64 * s).ceil() as u32).max(1), t: t.t, d: t.d })
+            .collect(),
+    }
+}
+
+/// Monte-Carlo deadline-miss fraction under preemptive RM with STOCHASTIC
+/// execution: each job runs a uniform random amount in `[⌈α·C⌉, C]` (the
+/// worst-case `C` is what hard RTA uses; typical jobs are lighter). Returns the
+/// overall miss probability across all jobs. The SOFT companion to the hard RTA
+/// verdict (PLAN-perf-demo §8 R4): graceful degradation vs a hard step.
+pub fn simulate_miss(ts: &TaskSet, alpha: f64, cycles: u32, seed: u64) -> f64 {
+    let n = ts.tasks.len();
+    let hyper = ts.tasks.iter().fold(1u32, |h, t| {
+        let g = {
+            let (mut a, mut b) = (h, t.t);
+            while b != 0 {
+                let r = a % b;
+                a = b;
+                b = r;
+            }
+            a
+        };
+        h / g * t.t
+    });
+    let horizon = hyper.saturating_mul(cycles).max(1);
+    let mut order: Vec<usize> = (0..n).collect();
+    order.sort_by_key(|&i| ts.tasks[i].t);
+    let mut s = seed | 1;
+    let mut rng = |bound: u32| {
+        s ^= s << 13;
+        s ^= s >> 7;
+        s ^= s << 17;
+        (s % bound as u64) as u32
+    };
+    let (mut remaining, mut released, mut active) = (vec![0u32; n], vec![0u32; n], vec![false; n]);
+    let (mut missed, mut jobs) = (0u64, 0u64);
+    for t in 0..horizon {
+        for i in 0..n {
+            if active[i] && t >= released[i] + ts.tasks[i].d {
+                missed += 1; // unfinished at its deadline
+                active[i] = false;
+            }
+        }
+        for i in 0..n {
+            if t % ts.tasks[i].t == 0 {
+                let c = ts.tasks[i].c;
+                let lo = ((alpha * c as f64).ceil() as u32).clamp(1, c);
+                remaining[i] = lo + rng(c - lo + 1); // uniform [lo, c]
+                released[i] = t;
+                active[i] = true;
+                jobs += 1;
+            }
+        }
+        if let Some(&i) = order.iter().find(|&&i| active[i] && remaining[i] > 0) {
+            remaining[i] -= 1;
+            if remaining[i] == 0 {
+                active[i] = false;
+            }
+        }
+    }
+    if jobs == 0 {
+        0.0
+    } else {
+        missed as f64 / jobs as f64
+    }
+}
+
 pub fn print_report(rep: &RtReport, ts: &TaskSet, file: &str) {
     println!();
     println!("  leanlift schedulability certificate — `{file}` ({} tasks, {})", ts.tasks.len(), rep.policy);
@@ -270,6 +345,18 @@ mod tests {
                 assert_eq!(r.unwrap(), sim[i], "task {i}: RTA {r:?} vs simulated {}", sim[i]);
             }
         }
+    }
+
+    #[test]
+    fn soft_miss_rises_with_load() {
+        // R4: the soft deadline-miss probability is ~0 at nominal load and high
+        // under heavy overload (the sigmoid the intersection sweep draws).
+        let ts = parse(&std::fs::read_to_string("examples/models/tasks.model.toml").unwrap()).unwrap();
+        let low = simulate_miss(&scaled(&ts, 1.0), 0.5, 200, 1);
+        let high = simulate_miss(&scaled(&ts, 4.0), 0.5, 200, 1);
+        assert!(low < 0.01, "should not miss at nominal load: {low}");
+        assert!(high > 0.3, "should miss heavily at 4x load: {high}");
+        assert!(low <= high);
     }
 
     #[test]
