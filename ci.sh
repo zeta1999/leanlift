@@ -203,6 +203,27 @@ else
 fi
 
 # ---------------------------------------------------------------------------- #
+sect "FPGA — Aria-HDL IR-JSON bridge (Phase B round-trip)"
+if "$LIFT" fpga info "$M/../fpga/tcp_ip.aria.json" >"$TMP/fp" 2>&1; then
+  if grep -q "4 module(s)" "$TMP/fp" \
+     && grep -q "annotations: clock_freq=125000000" "$TMP/fp" \
+     && grep -q "assert always" "$TMP/fp"; then
+    pass "fpga ingest  (4 modules; annotations + formal properties carried)"
+  else
+    bad "fpga ingest: missing annotations/formals"; cat "$TMP/fp"
+  fi
+else
+  bad "fpga ingest failed (exit $?)"; cat "$TMP/fp"
+fi
+# teeth: a wrong-schema document must be rejected (exit 1), not silently accepted.
+printf '{"schema":"nope","id":0,"name":"x","ports":[],"clock_domains":[],"annotations":[],"nodes":[],"timing":{}}\n' >"$TMP/badschema.json"
+if "$LIFT" fpga info "$TMP/badschema.json" >"$TMP/fpb" 2>&1; then
+  bad "fpga accepted an unsupported schema"; cat "$TMP/fpb"
+else
+  pass "fpga teeth  (unsupported schema rejected)"
+fi
+
+# ---------------------------------------------------------------------------- #
 sect "M3 — prove (Lean, sorry-free)"
 if have lean; then
   for f in mcl dock mission resource link; do

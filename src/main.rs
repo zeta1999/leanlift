@@ -46,7 +46,9 @@ fn usage() -> ! {
         \x20 lift prove  <example> [--out <proof.json>]\n\
         \x20     discharge the example's proof obligation on the extracted model (L3, Aeneas only).\n\
         \x20 lift model check <file> [--bound N] [--out <model-report.json>]\n\
-        \x20     behavioural-model checker (M1); family auto-detected. See docs/PLAN-models.md.\n\n\
+        \x20     behavioural-model checker (M1); family auto-detected. See docs/PLAN-models.md.\n\
+        \x20 lift fpga info <design.aria.json>\n\
+        \x20     ingest an Aria-HDL IR-JSON export (aria-hdl --emit-ir-json). See docs/PLAN-fpga.md.\n\n\
         \x20 examples: {}\n",
         examples::NAMES.join(", ")
     );
@@ -144,6 +146,10 @@ fn main() {
         Some("model") => {
             argv.remove(0);
             models::main(argv);
+        }
+        Some("fpga") => {
+            argv.remove(0);
+            models::fpga::main(argv);
         }
         _ => usage(),
     }

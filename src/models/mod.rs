@@ -13,6 +13,7 @@ mod bt;
 mod check;
 mod codegen;
 mod cpn;
+pub mod fpga;
 mod format;
 mod gspn;
 mod ir;
