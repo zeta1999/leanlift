@@ -610,6 +610,168 @@ pub fn certify_timing(m: &AriaModule) -> Option<TimingCert> {
 }
 
 // ===================================================================
+// T2 — pipeline throughput / backpressure (PLAN-fpga Phase T, reuse qnet.rs).
+//
+// Project a streaming pipeline onto an open tandem Jackson network: one M/M/1
+// station per stage, service rate μᵢ = 1/comb_delayᵢ (the intrinsic rate of that
+// stage's logic), external offered load λ⁰ = clock_freq / II at stage 0, tandem
+// routing (stage i → i+1, last exits). REUSE `qnet.rs` for the traffic-equation
+// solve, the bottleneck station, and the stability verdict.
+//
+// HARD facts (deterministic): the max sustainable throughput is `min μᵢ =
+// 1/critical_path`; the bottleneck is the slowest stage; the pipeline is stable
+// at the offered load iff every ρᵢ < 1 — which is timing closure restated, so we
+// CROSS-CHECK that the qnet bottleneck station IS the critical-path (max-delay)
+// stage. The per-stage mean occupancy Lᵢ is the SOFT/stochastic companion (an
+// M/M/1 upper bound; a synchronous pipeline's deterministic timing is no worse) —
+// the provably-safe ⊊ probably-safe boundary, now under a clock.
+//
+// When Aria gives no per-stage `comb_delay_ns` (common), there is no asymmetry to
+// place a bottleneck, so we report the balanced-pipeline throughput clock_freq/II
+// directly and do NOT fabricate a qnet — sound by omission, not by guessing.
+// ===================================================================
+
+use super::qnet;
+
+pub struct ThroughputCert {
+    pub module: String,
+    pub ii: u64,
+    /// Offered input rate (items/s) = clock_freq / II, when clocked.
+    pub offered: Option<f64>,
+    /// Max sustainable throughput (items/s) = min stage rate, when per-stage rates known.
+    pub max_sustainable: Option<f64>,
+    /// Per-stage (name-or-index, service-rate items/s) when per-stage delays exist.
+    pub stage_rates: Vec<(String, f64)>,
+    /// qnet verdict, when a network was built (per-stage rates available).
+    pub qnet: Option<QNetVerdict>,
+    /// Index of the critical-path (max-delay) stage, when per-stage delays exist.
+    pub critical_stage: Option<usize>,
+    /// Set when the qnet bottleneck disagrees with the critical-path stage.
+    pub bottleneck_mismatch: bool,
+}
+
+pub struct QNetVerdict {
+    pub stable: bool,
+    pub bottleneck: usize,
+    pub throughput: f64,
+    /// Per-stage (name, ρ, mean occupancy L) — L is the soft M/M/1 companion.
+    pub stations: Vec<(String, f64, f64)>,
+}
+
+impl ThroughputCert {
+    /// Stable at the offered load AND the bottleneck cross-check agrees. With no
+    /// per-stage rates, stability is the trivial II ≥ 1 (always true) — reported,
+    /// not failed.
+    pub fn ok(&self) -> bool {
+        !self.bottleneck_mismatch && self.qnet.as_ref().map(|q| q.stable).unwrap_or(true)
+    }
+}
+
+pub fn certify_throughput(m: &AriaModule) -> Option<ThroughputCert> {
+    let p = m.pipeline.as_ref()?;
+    let ii = p.initiation_interval.max(1);
+    let clk_hz = m.clock_freq_hz().map(|hz| hz as f64).or_else(|| m.target_period_ns.map(|t| 1.0e9 / t));
+    let offered = clk_hz.map(|f| f / ii as f64);
+
+    // Per-stage service rates require every stage's comb_delay (>0).
+    let have_rates = !p.stage_delays.is_empty()
+        && p.stage_delays.iter().all(|d| matches!(d, Some(x) if *x > 0.0));
+
+    if !have_rates {
+        // Balanced fallback: no asymmetry, throughput = clock_freq/II, no bottleneck.
+        return Some(ThroughputCert {
+            module: m.name.clone(),
+            ii,
+            offered,
+            max_sustainable: offered, // balanced ⇒ sustainable == offered
+            stage_rates: Vec::new(),
+            qnet: None,
+            critical_stage: None,
+            bottleneck_mismatch: false,
+        });
+    }
+
+    let delays: Vec<f64> = p.stage_delays.iter().map(|d| d.unwrap()).collect();
+    let rates: Vec<f64> = delays.iter().map(|d| 1.0e9 / d).collect(); // items/s
+    let max_sustainable = rates.iter().cloned().fold(f64::INFINITY, f64::min);
+    let max_delay = delays.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+    // First-wins, matching qnet's bottleneck convention (`rho > max_rho`), so the
+    // two never disagree on ties.
+    let n = delays.len();
+    let mut crit = 0;
+    for i in 1..n {
+        if delays[i] > delays[crit] {
+            crit = i;
+        }
+    }
+    let critical_stage = Some(crit);
+
+    // Build the Jackson net only when there is a real offered load. With no clock
+    // (offered = None) the queueing model has no input and "stability" is vacuous —
+    // report the per-stage rates but do NOT assert a stability verdict.
+    let stage_rates = (0..n).map(|i| (format!("stage{i}"), rates[i])).collect();
+    let Some(lam) = offered.filter(|o| *o > 0.0) else {
+        return Some(ThroughputCert {
+            module: m.name.clone(),
+            ii,
+            offered,
+            max_sustainable: Some(max_sustainable),
+            stage_rates,
+            qnet: None,
+            critical_stage,
+            bottleneck_mismatch: false,
+        });
+    };
+
+    let stations: Vec<qnet::Station> = (0..n)
+        .map(|i| qnet::Station {
+            name: format!("stage{i}"),
+            mu: rates[i],
+            servers: 1,
+            lambda0: if i == 0 { lam } else { 0.0 },
+        })
+        .collect();
+    // Tandem routing: stage i → i+1; the last stage exits the network.
+    let mut routing = vec![vec![0.0; n]; n];
+    for i in 0..n - 1 {
+        routing[i][i + 1] = 1.0;
+    }
+    let net = qnet::QNet { stations, routing };
+
+    let (qv, bottleneck_mismatch) = match qnet::analyze(&net) {
+        Ok(rep) => {
+            // VALUE-based consistency check (robust to ties): the station qnet calls
+            // the bottleneck must be one of the genuinely-slowest (max-delay) stages.
+            // A disagreement here would mean the traffic-equation solve mis-weighted
+            // the tandem — a plumbing bug — so it fails closed.
+            let mismatch = (delays[rep.bottleneck] - max_delay).abs() > 1e-9;
+            let stations = rep
+                .stations
+                .iter()
+                .map(|s| (s.name.clone(), s.rho, s.l))
+                .collect();
+            (
+                Some(QNetVerdict { stable: rep.stable, bottleneck: rep.bottleneck, throughput: rep.throughput, stations }),
+                mismatch,
+            )
+        }
+        // A non-physical network (shouldn't happen for an open tandem) is not a
+        // verdict; treat the qnet as unavailable rather than a false pass/fail.
+        Err(_) => (None, false),
+    };
+    Some(ThroughputCert {
+        module: m.name.clone(),
+        ii,
+        offered,
+        max_sustainable: Some(max_sustainable),
+        stage_rates,
+        qnet: qv,
+        critical_stage,
+        bottleneck_mismatch,
+    })
+}
+
+// ===================================================================
 // CLI: `lift fpga …`
 // ===================================================================
 
@@ -624,6 +786,11 @@ fn usage() -> ! {
         \x20     certify each pipeline's HARD latency + timing closure (clock\n\
         \x20     period vs critical path), cross-checked; RTA fold check on II.\n\
         \x20     Exit 1 if any pipeline violates closure / a cross-check disagrees.\n\
+        \x20 lift fpga throughput <design.aria.json>\n\
+        \x20     project each pipeline → a Jackson network (reuse qnet): max\n\
+        \x20     sustainable rate, bottleneck stage (cross-checked vs critical\n\
+        \x20     path), stability at the offered load, per-stage occupancy.\n\
+        \x20     Exit 1 if a pipeline is unstable / the bottleneck disagrees.\n\
         \x20 (planned: lift fpga check|prove|equiv — see docs/PLAN-fpga.md)\n"
     );
     exit(2);
@@ -640,12 +807,17 @@ pub fn main(mut argv: Vec<String>) {
             argv.remove(0);
             "timing"
         }
+        Some("throughput") => {
+            argv.remove(0);
+            "throughput"
+        }
         Some(s) if !s.starts_with('-') => "info",
         _ => usage(),
     };
     match verb {
         "info" => info_cmd(argv),
         "timing" => timing_cmd(argv),
+        "throughput" => throughput_cmd(argv),
         _ => usage(),
     }
 }
@@ -769,6 +941,83 @@ fn timing_cmd(a: Vec<String>) {
             "CERTIFIED"
         };
         println!("  verdict      : {verdict}");
+    }
+
+    println!();
+    println!("{}/{} pipeline(s) certified", certs.iter().filter(|c| c.ok()).count(), certs.len());
+    if !all_ok {
+        exit(1);
+    }
+}
+
+/// Human-readable rate (items/s) with a G/M/k/plain tier so sub-MHz rates don't
+/// underflow to `0.000`.
+fn rate_str(r: f64) -> String {
+    if r >= 1.0e9 {
+        format!("{:.3} Gitems/s", r / 1.0e9)
+    } else if r >= 1.0e6 {
+        format!("{:.3} Mitems/s", r / 1.0e6)
+    } else if r >= 1.0e3 {
+        format!("{:.3} kitems/s", r / 1.0e3)
+    } else {
+        format!("{r:.3} items/s")
+    }
+}
+
+fn throughput_cmd(a: Vec<String>) {
+    let path = one_file(a);
+    let modules = load(&path);
+
+    let certs: Vec<_> = modules.iter().filter_map(certify_throughput).collect();
+    if certs.is_empty() {
+        eprintln!("no pipelined modules in {path} (nothing to analyze)");
+        exit(2);
+    }
+
+    println!("leanlift FPGA throughput certificate — {path}");
+    println!("════════════════════════════════════════════════════");
+    let mut all_ok = true;
+    for c in &certs {
+        all_ok &= c.ok();
+        println!();
+        println!("pipeline `{}` — II {}", c.module, c.ii);
+        match c.offered {
+            Some(o) => println!("  offered load : {} (clock / II)", rate_str(o)),
+            None => println!("  offered load : (no clock stated)"),
+        }
+        match c.max_sustainable {
+            Some(s) => println!("  sustainable  : {} (min stage rate = 1/critical-path)", rate_str(s)),
+            None => println!("  sustainable  : unknown"),
+        }
+        if c.stage_rates.is_empty() {
+            println!("  model        : balanced (no per-stage delays) — bottleneck is II");
+        } else if let Some(q) = &c.qnet {
+            println!("  qnet (Jackson tandem, {} stations):", q.stations.len());
+            for (i, (name, rho, l)) in q.stations.iter().enumerate() {
+                let mark = if i == q.bottleneck { "  ← bottleneck" } else { "" };
+                println!("    {name}: ρ={rho:.3}, L={l:.3}{mark}");
+            }
+            // ρ < 1 here IS per-stage timing closure (μ = 1/comb_delay, λ = clock/II);
+            // L is the SOFT M/M/1 companion (an upper bound — deterministic timing
+            // is no worse), not a probabilistic safety margin.
+            println!(
+                "  stability    : {} (ρ<1 = per-stage closure; throughput {})",
+                if q.stable { "STABLE ✓" } else { "SATURATED ✗" },
+                rate_str(q.throughput)
+            );
+            if let Some(cs) = c.critical_stage {
+                println!(
+                    "    cross-check: qnet bottleneck stage{} is a slowest stage (critical-path stage{}) {}",
+                    q.bottleneck,
+                    cs,
+                    if c.bottleneck_mismatch { "✗ DISAGREE" } else { "✓" }
+                );
+            }
+        } else {
+            // per-stage rates known but no offered load (no clock) — no qnet built.
+            println!("  model        : per-stage rates known, no offered load — stability not assessed");
+        }
+        println!("  verdict      : {}", if c.ok() { "CERTIFIED" } else { "FAILED" });
     }
 
     println!();
@@ -1080,6 +1329,79 @@ mod tests {
         let j = pipe_json_full(5_000_000_000, 1, 2, &[1.0, 1.0], 1.0, 8.0, "125000000");
         let c = certify_timing(&read_file(&j).unwrap()[0]).unwrap();
         assert!(c.fold_malformed);
+        assert!(!c.ok());
+    }
+
+    // ---- T2: throughput / qnet -----------------------------------------
+
+    #[test]
+    fn throughput_balanced_fallback_no_stage_delays() {
+        // pipeline_demo-shaped: no per-stage delays ⇒ balanced model, no qnet.
+        let j = pipe_json(1, 2, &[], 0.8, 8.0, "125000000");
+        let c = certify_throughput(&read_file(&j).unwrap()[0]).unwrap();
+        assert!(c.qnet.is_none());
+        assert!(c.stage_rates.is_empty());
+        assert_eq!(c.offered, Some(125_000_000.0)); // 125 MHz / II 1
+        assert!(c.ok());
+    }
+
+    #[test]
+    fn throughput_bottleneck_is_critical_path_stage() {
+        // Three stages, slowest is stage 1 (4 ns ⇒ slowest ⇒ critical path). The
+        // qnet bottleneck MUST coincide with the critical-path stage.
+        let j = pipe_json(1, 3, &[2.0, 4.0, 1.0], 4.0, 8.0, "125000000");
+        let c = certify_throughput(&read_file(&j).unwrap()[0]).unwrap();
+        let q = c.qnet.as_ref().unwrap();
+        assert_eq!(q.bottleneck, 1);
+        assert_eq!(c.critical_stage, Some(1));
+        assert!(!c.bottleneck_mismatch);
+        // Max sustainable = 1/4ns = 250 Mitems/s; offered 125 M < 250 M ⇒ stable.
+        assert!((c.max_sustainable.unwrap() - 250_000_000.0).abs() < 1.0);
+        assert!(q.stable);
+        assert!(c.ok());
+    }
+
+    #[test]
+    fn throughput_two_equal_slowest_stages_not_false_rejected() {
+        // Two stages tie for slowest (5 ns each). The qnet bottleneck (first-wins)
+        // and the critical-path stage must NOT be reported as disagreeing — a
+        // value-based cross-check, robust to ties. Regression for the index
+        // tie-break bug (qnet first-wins vs max_by last-wins).
+        let j = pipe_json(1, 3, &[5.0, 5.0, 1.0], 5.0, 8.0, "125000000");
+        let c = certify_throughput(&read_file(&j).unwrap()[0]).unwrap();
+        assert!(!c.bottleneck_mismatch, "tied slowest stages must not false-reject");
+        assert!(c.ok());
+    }
+
+    #[test]
+    fn throughput_per_stage_rates_without_clock_skips_stability() {
+        // Per-stage delays present but no clock at all (no @clock_freq, no
+        // target_period_ns) ⇒ no offered load ⇒ no qnet, stability not asserted,
+        // but the design is not falsely rejected either.
+        let j = r#"{
+          "schema": "aria-ir-json/v1", "id": 0, "name": "p",
+          "ports": [], "clock_domains": [], "annotations": [], "nodes": [],
+          "pipeline": {"id": 0, "num_stages": 2, "latency": 2, "initiation_interval": 1, "flow_control": {"fc": "none"},
+            "stages": [{"index":0,"name":null,"comb_delay_ns":2.0,"lut_count":null,"reg_count":0,"forwarded_values":[]},
+                       {"index":1,"name":null,"comb_delay_ns":1.0,"lut_count":null,"reg_count":0,"forwarded_values":[]}]},
+          "systolic": null,
+          "timing": {"c_slow_factor": 1, "target_period_ns": null, "critical_path_ns": 2.0, "retiming_weights": [], "buffers": []}
+        }"#;
+        let c = certify_throughput(&read_file(j).unwrap()[0]).unwrap();
+        assert!(c.offered.is_none());
+        assert!(c.qnet.is_none());
+        assert_eq!(c.critical_stage, Some(0)); // 2 ns stage is slowest
+        assert!(c.ok());
+    }
+
+    #[test]
+    fn throughput_saturates_when_offered_exceeds_a_stage() {
+        // 1 GHz offered (II 1) but stage 0 caps at 1/2ns = 500 Mitems/s ⇒ ρ>1 ⇒
+        // SATURATED. (1 GHz clock here is an intentionally over-driven stress.)
+        let j = pipe_json(1, 2, &[2.0, 0.5], 2.0, 1.0, "1000000000");
+        let c = certify_throughput(&read_file(&j).unwrap()[0]).unwrap();
+        let q = c.qnet.as_ref().unwrap();
+        assert!(!q.stable, "a stage slower than the offered rate must saturate");
         assert!(!c.ok());
     }
 

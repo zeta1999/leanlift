@@ -253,6 +253,32 @@ else
     || { bad "fpga timing teeth: over-fold not caught"; cat "$TMP/fto"; }
 fi
 
+# T2 — throughput: balanced fallback on the real fixture (no per-stage delays).
+if "$LIFT" fpga throughput "$M/../fpga/pipeline_demo.aria.json" >"$TMP/fq" 2>&1; then
+  grep -q "125.000 Mitems/s" "$TMP/fq" && grep -q "2/2 pipeline(s) certified" "$TMP/fq" \
+    && pass "fpga throughput  (mac: 125 Mitems/s @125MHz, II 1)" \
+    || { bad "fpga throughput: wrong report"; cat "$TMP/fq"; }
+else
+  bad "fpga throughput failed (exit $?)"; cat "$TMP/fq"
+fi
+# qnet bottleneck must coincide with the critical-path (slowest) stage.
+printf '{"schema":"aria-ir-json/v1","id":0,"name":"unbal","ports":[],"clock_domains":[],"annotations":[{"kind":"clock_freq","value":"125000000"}],"nodes":[],"pipeline":{"id":0,"num_stages":3,"latency":3,"initiation_interval":1,"flow_control":{"fc":"ready_valid"},"stages":[{"index":0,"name":null,"comb_delay_ns":2.0,"lut_count":null,"reg_count":0,"forwarded_values":[]},{"index":1,"name":null,"comb_delay_ns":4.0,"lut_count":null,"reg_count":0,"forwarded_values":[]},{"index":2,"name":null,"comb_delay_ns":1.0,"lut_count":null,"reg_count":0,"forwarded_values":[]}]},"systolic":null,"timing":{"c_slow_factor":1,"target_period_ns":8.0,"critical_path_ns":4.0,"retiming_weights":[],"buffers":[]}}\n' >"$TMP/unbal.json"
+if "$LIFT" fpga throughput "$TMP/unbal.json" >"$TMP/fqu" 2>&1; then
+  grep -q "qnet bottleneck stage1 is a slowest stage (critical-path stage1) ✓" "$TMP/fqu" \
+    && pass "fpga throughput  (qnet bottleneck == critical-path stage)" \
+    || { bad "fpga throughput: bottleneck cross-check wrong"; cat "$TMP/fqu"; }
+else
+  bad "fpga throughput on unbal failed"; cat "$TMP/fqu"
+fi
+# teeth: a stage slower than the offered rate must SATURATE (exit 1).
+printf '{"schema":"aria-ir-json/v1","id":0,"name":"sat","ports":[],"clock_domains":[],"annotations":[{"kind":"clock_freq","value":"1000000000"}],"nodes":[],"pipeline":{"id":0,"num_stages":2,"latency":2,"initiation_interval":1,"flow_control":{"fc":"ready_valid"},"stages":[{"index":0,"name":null,"comb_delay_ns":2.0,"lut_count":null,"reg_count":0,"forwarded_values":[]},{"index":1,"name":null,"comb_delay_ns":0.5,"lut_count":null,"reg_count":0,"forwarded_values":[]}]},"systolic":null,"timing":{"c_slow_factor":1,"target_period_ns":1.0,"critical_path_ns":2.0,"retiming_weights":[],"buffers":[]}}\n' >"$TMP/sat.json"
+if "$LIFT" fpga throughput "$TMP/sat.json" >"$TMP/fqs" 2>&1; then
+  bad "fpga throughput accepted a saturated pipeline"; cat "$TMP/fqs"
+else
+  grep -q "SATURATED" "$TMP/fqs" && pass "fpga throughput teeth  (offered > stage rate → SATURATED, exit 1)" \
+    || { bad "fpga throughput teeth: saturation not caught"; cat "$TMP/fqs"; }
+fi
+
 # ---------------------------------------------------------------------------- #
 sect "M3 — prove (Lean, sorry-free)"
 if have lean; then
