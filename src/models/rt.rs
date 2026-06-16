@@ -40,6 +40,90 @@ pub struct RtReport {
     /// exceeds the deadline (unschedulable) or is not computed (EDF).
     pub wcrt: Vec<(String, Option<u32>)>,
     pub schedulable: bool,
+    /// EDF only: the first deadline point `t` where the demand-bound function
+    /// `dbf(t) > t` (the proof of infeasibility), if any.
+    pub edf_first_fail: Option<(u64, u64)>,
+}
+
+fn gcd(a: u64, b: u64) -> u64 {
+    if b == 0 {
+        a
+    } else {
+        gcd(b, a % b)
+    }
+}
+
+/// EDF processor-demand test (exact for constrained deadlines `D ≤ T`). The
+/// demand-bound function `dbf(t) = Σᵢ max(0, ⌊(t−Dᵢ)/Tᵢ⌋ + 1)·Cᵢ` is the maximum
+/// execution that can be RELEASED-AND-DUE within any window of length `t`; EDF is
+/// feasible iff `U ≤ 1` AND `dbf(t) ≤ t` at every deadline point up to a bound
+/// `L`. Returns `(schedulable, first failing (t, dbf))`.
+fn demand_bound_test(ts: &TaskSet) -> (bool, Option<(u64, u64)>) {
+    let u: f64 = ts.tasks.iter().map(|t| t.c as f64 / t.t as f64).sum();
+    if u > 1.0 + 1e-12 {
+        return (false, None); // overload — infeasible, no finite witness needed
+    }
+    // Checking horizon: the hyperperiod is exact for periodic tasks; the
+    // busy-period bound La = Σ(Tᵢ−Dᵢ)Uᵢ/(1−U) is tighter when D<T. Use the
+    // smaller VALID bound, never below the largest deadline. Both are sound on
+    // their own (for D ≤ T), so if the hyperperiod LCM overflows we fall back to
+    // La rather than risk a wrapped (too-small) horizon that misses a violation.
+    let max_d = ts.tasks.iter().map(|t| t.d as u64).max().unwrap_or(0);
+    let mut hyper: u64 = 1;
+    for task in &ts.tasks {
+        let g = gcd(hyper, task.t as u64);
+        match (hyper / g).checked_mul(task.t as u64) {
+            Some(h) => hyper = h,
+            None => {
+                hyper = u64::MAX; // overflow ⇒ defer to the (finite, valid) La bound
+                break;
+            }
+        }
+    }
+    // La is valid only for U < 1; +1 guards against f64 rounding under-estimating
+    // the true bound. U == 1 (only possible with D=T here) ⇒ use the hyperperiod.
+    let la_bound = if u < 1.0 {
+        let la = ts.tasks.iter().map(|t| (t.t as f64 - t.d as f64) * (t.c as f64 / t.t as f64)).sum::<f64>() / (1.0 - u);
+        if la.is_finite() && la >= 0.0 {
+            (la.ceil() as u64).saturating_add(1)
+        } else {
+            u64::MAX
+        }
+    } else {
+        u64::MAX
+    };
+    let l = hyper.min(la_bound).max(max_d);
+    // deadline points t = k·Tᵢ + Dᵢ ≤ L.
+    let mut points: Vec<u64> = Vec::new();
+    for task in &ts.tasks {
+        let (d, period) = (task.d as u64, task.t as u64);
+        let mut t = d;
+        while t <= l {
+            points.push(t);
+            t += period;
+        }
+    }
+    points.sort_unstable();
+    points.dedup();
+    for &t in &points {
+        // u128 so the demand never wraps (a wrapped-down dbf could falsely pass).
+        let dbf: u128 = ts
+            .tasks
+            .iter()
+            .map(|task| {
+                let (d, period, c) = (task.d as u64, task.t as u64, task.c as u128);
+                if t >= d {
+                    (((t - d) / period + 1) as u128) * c
+                } else {
+                    0
+                }
+            })
+            .sum();
+        if dbf > t as u128 {
+            return (false, Some((t, dbf.min(u64::MAX as u128) as u64)));
+        }
+    }
+    (true, None)
 }
 
 fn field_u32(t: &std::collections::HashMap<String, toml::Value>, key: &str, i: usize) -> Result<u32, String> {
@@ -73,6 +157,15 @@ pub fn parse(src: &str) -> Result<TaskSet, String> {
             Some(v) => v.as_str("d")?.parse().map_err(|_| format!("task `{name}`: bad `d`"))?,
             None => period,
         };
+        // Both RTA and the EDF demand bound here assume CONSTRAINED deadlines
+        // (D ≤ T). Arbitrary deadlines (D > T) need the busy-window generalization
+        // — refuse rather than analyze them outside the proven envelope.
+        if d > period {
+            return Err(format!("task `{name}`: deadline d={d} exceeds period t={period} (only D ≤ T is supported)"));
+        }
+        if d == 0 {
+            return Err(format!("task `{name}`: deadline `d` must be positive"));
+        }
         tasks.push(Task { name, c, t: period, d });
     }
     if tasks.is_empty() {
@@ -124,12 +217,15 @@ pub fn analyze(ts: &TaskSet) -> RtReport {
     };
     let util_test_pass = util <= util_bound + 1e-12;
 
+    let mut edf_first_fail = None;
     let (wcrt, schedulable) = match ts.policy {
-        // EDF with implicit deadlines: U ≤ 1 is exact (necessary & sufficient).
-        Policy::Edf => (
-            ts.tasks.iter().map(|t| (t.name.clone(), None)).collect(),
-            util <= 1.0 + 1e-12,
-        ),
+        // EDF: exact processor-demand test (handles constrained deadlines D ≤ T,
+        // not just the U ≤ 1 implicit-deadline case).
+        Policy::Edf => {
+            let (sched, fail) = demand_bound_test(ts);
+            edf_first_fail = fail;
+            (ts.tasks.iter().map(|t| (t.name.clone(), None)).collect(), sched)
+        }
         // Fixed priority: RM orders by period, DM by deadline (smaller ⇒ higher).
         Policy::Rm | Policy::Dm => {
             let mut order: Vec<usize> = (0..n).collect();
@@ -152,7 +248,7 @@ pub fn analyze(ts: &TaskSet) -> RtReport {
         }
     };
 
-    RtReport { policy, util, util_bound, util_test_pass, wcrt, schedulable }
+    RtReport { policy, util, util_bound, util_test_pass, wcrt, schedulable, edf_first_fail }
 }
 
 /// Scale every worst-case execution time by `s` (round up, ≥ 1) — the load knob
@@ -240,7 +336,12 @@ pub fn print_report(rep: &RtReport, ts: &TaskSet, file: &str) {
         rep.util_bound,
         if rep.util_test_pass { "PASS" } else { "FAIL" }
     );
-    if !matches!(ts.policy, Policy::Edf) {
+    if matches!(ts.policy, Policy::Edf) {
+        match rep.edf_first_fail {
+            None => println!("  demand-bound test (exact): dbf(t) ≤ t at every deadline point ✓"),
+            Some((t, dbf)) => println!("  demand-bound test (exact): dbf({t}) = {dbf} > {t}  ✗  (overdemand)"),
+        }
+    } else {
         println!("  response-time analysis (exact):");
         for (t, (name, r)) in ts.tasks.iter().zip(&rep.wcrt) {
             match r {
@@ -345,6 +446,47 @@ mod tests {
                 assert_eq!(r.unwrap(), sim[i], "task {i}: RTA {r:?} vs simulated {}", sim[i]);
             }
         }
+    }
+
+    #[test]
+    fn edf_implicit_agrees_with_utilization() {
+        // Implicit deadlines (D=T): the exact demand test agrees with U ≤ 1.
+        let sched = "kind=\"tasks\"\npolicy=\"EDF\"\n\
+            [[task]]\nname=\"a\"\nc=\"1\"\nt=\"3\"\n\
+            [[task]]\nname=\"b\"\nc=\"1\"\nt=\"2\"\n"; // U=1/3+1/2=0.833 ≤ 1
+        assert!(analyze(&parse(sched).unwrap()).schedulable);
+        let over = "kind=\"tasks\"\npolicy=\"EDF\"\n\
+            [[task]]\nname=\"a\"\nc=\"2\"\nt=\"3\"\n\
+            [[task]]\nname=\"b\"\nc=\"1\"\nt=\"2\"\n"; // U=2/3+1/2=1.166 > 1
+        assert!(!analyze(&parse(over).unwrap()).schedulable);
+    }
+
+    #[test]
+    fn edf_demand_catches_constrained_deadline() {
+        // U ≤ 1 but tight deadlines ⇒ infeasible; demand-bound finds dbf(1)=2>1.
+        let rep = analyze(&parse(&std::fs::read_to_string("examples/models/tasks-edf.model.toml").unwrap()).unwrap());
+        assert!(rep.util <= 1.0, "U must pass the naive test");
+        assert!(!rep.schedulable, "demand-bound must catch the constrained-deadline infeasibility");
+        assert_eq!(rep.edf_first_fail, Some((1, 2)));
+    }
+
+    #[test]
+    fn arbitrary_deadline_is_refused() {
+        // REGRESSION (brutal review): D > T runs outside the proven envelope
+        // (RTA + demand bound assume D ≤ T) — must be refused, not analyzed.
+        let src = "kind=\"tasks\"\npolicy=\"EDF\"\n[[task]]\nname=\"x\"\nc=\"1\"\nt=\"3\"\nd=\"5\"\n";
+        assert!(parse(src).is_err(), "D>T must be rejected");
+    }
+
+    #[test]
+    fn edf_constrained_but_schedulable() {
+        // Constrained deadlines (D<T) that the demand test passes (sanity: it is
+        // not just rejecting everything with D<T).
+        let src = "kind=\"tasks\"\npolicy=\"EDF\"\n\
+            [[task]]\nname=\"a\"\nc=\"1\"\nt=\"5\"\nd=\"3\"\n\
+            [[task]]\nname=\"b\"\nc=\"1\"\nt=\"8\"\nd=\"6\"\n";
+        let rep = analyze(&parse(src).unwrap());
+        assert!(rep.schedulable && rep.edf_first_fail.is_none());
     }
 
     #[test]
