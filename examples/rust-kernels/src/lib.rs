@@ -37,6 +37,16 @@ pub fn release(buf: u32) -> u32 {
     }
 }
 
+/// One RTA interference term — `⌈r/tj⌉·cj` — the body of the response-time
+/// recurrence (a verbatim mirror of `src/models/rt.rs::term`). Charon+Aeneas
+/// extracts it and `examples/models/RtaProofs.lean` proves it equals the spec
+/// `((r+tj−1)/tj)·cj` (the DEDUCTIVE, unbounded companion to the R2 Kani proof);
+/// monotonicity in `r` — what makes the RTA fixed point the true WCRT — follows
+/// from the spec as a Nat lemma. PRECONDITION: tj ≥ 1, no u32 overflow.
+pub fn rta_term(r: u32, cj: u32, tj: u32) -> u32 {
+    ((r + tj - 1) / tj) * cj
+}
+
 /// Clamped floor-division vesting ramp (the streaming-vesting kernel).
 ///
 ///   streamed(deposit, start, stop, t) =

@@ -24,7 +24,7 @@ pub struct Example {
 pub const NAMES: &[&str] = &[
     "streamed", "avg", "rust-streamed", "cpp-streamed", "cpp-dot2", "go-avg", "sol-dot2",
     "rust-isqrt", "cpp-isqrt", "rust-bisect", "cpp-bisect", "quant", "cpp-quant", "models-fire",
-    "link-buffer",
+    "link-buffer", "rta-kernel",
 ];
 
 fn lean_lib() -> PathBuf {
@@ -246,6 +246,24 @@ pub fn lookup(name: &str) -> Option<Example> {
                 entrypoint: "admit".into(),
             },
             proof_frag: Some("examples/models/BufferProofs.lean".into()),
+        }),
+        // The DEDUCTIVE companion to the R2 Kani RTA proof (PLAN-qnet-rta §A):
+        // the RTA interference term `⌈r/tj⌉·cj`, extracted from Rust by
+        // Charon+Aeneas and proved to equal its spec sorry-free — leanlift
+        // certifying its own schedulability kernel. `lift prove rta-kernel`.
+        "rta-kernel" => Some(Example {
+            name: "rta-kernel",
+            lang: Lang::Cpp,
+            source: "examples/rust-kernels/src/lib.rs".into(),
+            fn_name: "rta_term",
+            signature: u(IntType::U32, 3),
+            profile: Profile::Avg, // unused by prove
+            gen: vectors::avg_vectors, // unused by prove
+            frontend: Frontend::RustAeneas {
+                crate_dir: "examples/rust-kernels".into(),
+                entrypoint: "rta_term".into(),
+            },
+            proof_frag: Some("examples/models/RtaProofs.lean".into()),
         }),
         _ => None,
     }
