@@ -8,19 +8,61 @@ auto-detected one-command path. This page is the authoring reference.
 
 | Verb | Level | What it does |
 |------|-------|--------------|
-| `lift model check <file>` | M1 | bounded-BFS reachability + safety; deadlocks; family-specific findings |
-| `lift model prove <file>` | M3 | export a Lean model + proof, certify sorry-free (FSM/BT/Petri/CPN) |
+| `lift model check <file>` | M1 | reachability + safety (FSM/BT/Petri/CPN); **schedulability** (tasks); **stability + bottleneck** (qnet) |
+| `lift model prove <file>` | M3 | export a Lean model + proof, certify sorry-free (FSM/BT/Petri/CPN/GSPN) |
 | `lift model prism <file>` | M2 | GSPN → tangible CTMC: solve quantitative queries + export PRISM |
+| `lift model simulate <file>` | — | empirical cross-check: SSA (GSPN/qnet) or Monte-Carlo (tasks) vs the analytic value |
 | `lift model export <file>` | L1 | generate a Rust/C++/Go executor; `--verify` difftests it vs the model |
+
+Refining flags: `--set name=value` (override a GSPN `[[param]]`), `--scale S`
+(load knob for `tasks`/`qnet`), `--time`/`--seed` (simulation), `--bound`,
+`--emit`, `--out`.
 
 The **family is auto-detected from the file** — no `--kind` needed. Every flag
 *refines, never enables*: the bare verb on the bare file always does something
 useful. Each run writes a human verdict to stdout and a `model-report.json`;
-exit code is `0` iff the claimed level was reached.
+exit code is `0` iff the claimed level was reached (e.g. unschedulable/unstable ⇒ `1`).
 
 Detection precedence: explicit `kind = "…"`, else `[[colour]]` ⇒ cpn, `tree` ⇒
-bt, `places` ⇒ petri (or `kind="gspn"` for stochastic), `states`/`machines` ⇒
-fsm.
+bt, `[[station]]` ⇒ qnet, `[[task]]` ⇒ tasks, `places` ⇒ petri (or `kind="gspn"`
+for stochastic), `states`/`machines` ⇒ fsm.
+
+## Real-time — `tasks` (schedulability)
+
+```
+kind   = "tasks"
+policy = "RM"          # RM | DM | EDF
+[[task]]               # one block per periodic task
+name = "ctrl"
+c    = "10"            # worst-case execution time
+t    = "40"            # period
+d    = "20"            # relative deadline (optional; defaults to t; must be ≤ t)
+```
+
+`lift model check` reports the utilization bound (sufficient, `O(n)`) and, for
+RM/DM, the **exact response-time analysis** (`Rᵢ = Cᵢ + Σⱼ∈hp ⌈Rᵢ/Tⱼ⌉Cⱼ`); for
+EDF the exact **processor-demand** test (`dbf(t) ≤ t`, handles `D < T`).
+Schedulable ⇒ exit `0`. `--scale S` raises the load (the hard/soft sweep). The
+RTA kernel is proved monotone & overflow-free (Kani, `lift prove rta-kernel`).
+
+## Queueing — `qnet` (open Jackson network)
+
+```
+kind = "qnet"
+[[station]]            # one block per service station (single-server / M/M/1)
+name   = "frontend"
+mu     = "5.0"         # service rate
+lambda = "2.0"         # external arrival rate (optional; ≥ 0)
+[[route]]              # routing: P(job leaving `from` → `to`)
+from = "frontend"
+to   = "worker"
+prob = "1.0"           # each station's out-probs sum to ≤ 1; the rest exits
+```
+
+`lift model check` solves the traffic equations `(I − Pᵀ)λ = λ⁰`, reports
+per-station `ρ/L/W`, the network `L/W`, **stability** and the **bottleneck**.
+Stable ⇒ exit `0`; a saturated or trapped (closed) network is reported and exits
+`1`/errors. `--scale S` scales external load (bottleneck divergence).
 
 ## FSM — finite-state machines
 
