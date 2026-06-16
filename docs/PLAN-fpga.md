@@ -188,7 +188,7 @@ modules + a **lossy channel** — proved correct on every axis at once.
 | B2 | IrModule → IR-JSON | yes (hand-written serializer) | round-trip echo |
 | B3 | IR-JSON → AriaIr | yes (parser) | round-trip echo |
 | T1 | PipelineInfo → latency/closure + C-slow fold→TaskSet | yes | dual-source cross-check (stage-delay↔critical-path, freq↔period) + RTA over-fold |
-| T2 | pipeline → Jackson net | yes | bottleneck vs critical-path stage |
+| T2 | pipeline → Jackson net (qnet) | yes | bottleneck value-cross-check vs critical-path stage; saturation teeth |
 | F1 | enum Register+Mux → Lts | yes | reach set vs emulator |
 | F2 | Lts → Lean | yes (`emit_fsm`) | Lean kernel (sorry-free) |
 | D1 | Fifo/handshake → PtNet | yes | bound vs emulator depth |
@@ -227,7 +227,13 @@ proved kernel is touched.
       `rt.rs` RTA (`c_slow_factor` streams ≤ II slots — over-fold caught). 16 unit
       tests; ci.sh GREEN with closure + over-fold teeth; brutal-reviewed
       (tautological-fold/false-accept findings fixed). `[CPU]` ★
-- [ ] T2 — pipeline → qnet throughput/bottleneck/stability. `[CPU]` ★
+- [x] T2 — `lift fpga throughput`: project the pipeline → an open tandem Jackson
+      network (one M/M/1 station per stage, μ = 1/comb_delay, λ⁰ = clock/II),
+      REUSE `qnet.rs` for max sustainable rate, bottleneck stage, stability
+      (ρ<1 = per-stage closure), per-stage occupancy (soft companion). Bottleneck
+      value-cross-checked vs the critical-path stage; balanced fallback when Aria
+      gives no per-stage delays. 21 fpga unit tests; ci.sh GREEN with bottleneck +
+      saturation teeth; brutal-reviewed (tie-break false-reject + tautology fixed). `[CPU]` ★
 - [ ] T3 — hard-vs-soft sweep `scripts/fpga-pipeline-sweep.sh` (+`--check`). `[CPU]`/`[GPU]`
 
 ### Slice ② control-FSM safety
