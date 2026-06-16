@@ -87,7 +87,17 @@ executable by a person *or an agent*.
   stochastic (`link`/`qnet`) and deterministic (`tasks`) sides + the shared
   workload.
 
-## Ordered execution (CI + brutal review at each ★ step)
+## Ordered execution (CI + brutal review at each ★ step) — ✅ COMPLETE
 
-1. ★ Q1+Q2  2. ★ Q3  3. ★ Q4  4. Q5  5. ★ E1+E2  6. E3  7. ★ A1–A3
-8. C1+C2  9. M  10. F1  11. F2 (subagent)  12. ★ F3 (subagent)  13. F4
+1. ✅ Q1+Q2 (+ brutal review → 2 CRITICAL fixed)  2. ✅ Q3  3. ✅ Q4  4. ✅ Q5
+5. ✅ E1+E2 (+ brutal review → CRITICAL overflow + D>T fixed)  6. ✅ E3
+7. ✅ A1–A3 (`lift prove rta-kernel`, L3 sorry-free)  8. ✅ C1+C2
+9. ✅ M (`docs/TESTING.md`)  10. ✅ F1 (README + FORMATS)  11. ✅ F2 (manual-test
+subagent: 28/28 PASS incl. live Kani+Aeneas)  12. ✅ F3 (final review subagent →
+2 CRITICAL + 2 HIGH + 2 MEDIUM in the simulators/knobs, all fixed)  13. ✅ F4
+(`docs/TUTORIAL.md`).
+
+Every step ended CI-green; `verify.sh` (Kani + Aeneas) green. The whole plan is
+done — qnet family, EDF demand-bound, the Aeneas RTA proof, the shared-workload
+connection, the testing manual, and the tutorial — all under "bugs are not an
+option" with brutal-review hardening.
