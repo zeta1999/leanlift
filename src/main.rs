@@ -33,13 +33,16 @@ struct Args {
     lean_path: PathBuf,
     out: PathBuf,
     candidate: Option<PathBuf>,
+    lane: String,
 }
 
 fn usage() -> ! {
     eprintln!(
         "usage:\n\
-        \x20 lift verify <example> [--lean <candidate.lean>] [--lean-path <dir>] [--out <report.json>]\n\
+        \x20 lift verify <example> [--lean <candidate.lean>] [--lean-path <dir>] [--lane <name>] [--out <report.json>]\n\
         \x20     bit-exact differential validation (L1). --lean overrides the example's candidate.\n\
+        \x20     --lane selects the C++→Lean backend for cpp-* examples: claude|skill|gemma|qwen\n\
+        \x20     (env LEANLIFT_LANE; default claude). qwen needs LEANLIFT_QWEN_URL or it is skipped.\n\
         \x20 lift prove  <example> [--out <proof.json>]\n\
         \x20     discharge the example's proof obligation on the extracted model (L3, Aeneas only).\n\
         \x20 lift model check <file> [--bound N] [--out <model-report.json>]\n\
@@ -56,6 +59,9 @@ fn parse_verify_args(a: Vec<String>) -> Args {
     let mut lean_path = PathBuf::from("lean");
     let mut out = PathBuf::from("report.json");
     let mut candidate: Option<PathBuf> = None;
+    // The LLM lane (cpp-* examples); flag overrides LEANLIFT_LANE, default claude.
+    let mut lane = std::env::var("LEANLIFT_LANE").ok().filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "claude".into());
 
     let mut i = 0;
     while i < a.len() {
@@ -63,6 +69,7 @@ fn parse_verify_args(a: Vec<String>) -> Args {
             "--example" => example = Some(take(&a, &mut i)),
             "--lean" => candidate = Some(PathBuf::from(take(&a, &mut i))),
             "--lean-path" => lean_path = PathBuf::from(take(&a, &mut i)),
+            "--lane" => lane = take(&a, &mut i),
             "--out" => out = PathBuf::from(take(&a, &mut i)),
             s if s.starts_with("--") => {
                 eprintln!("unknown flag: {s}");
@@ -78,7 +85,7 @@ fn parse_verify_args(a: Vec<String>) -> Args {
         i += 1;
     }
 
-    Args { example: example.unwrap_or_else(|| usage()), lean_path, out, candidate }
+    Args { example: example.unwrap_or_else(|| usage()), lean_path, out, candidate, lane }
 }
 
 fn take(a: &[String], i: &mut usize) -> String {
@@ -295,9 +302,19 @@ fn verify_cmd(args: Args) {
         // The LLM path runs its own propose→difftest→repair loop (it needs the
         // oracle results), and returns the final candidate.
         frontend::Frontend::Llm { max_iters } => {
+            // Resolve the translation lane; an unconfigured lane (e.g. qwen with
+            // no endpoint) is a SKIP, not a failure — exit 0 so CI can record it.
+            let lane = match harness::Lane::resolve(&args.lane) {
+                Ok(l) => l,
+                Err(reason) => {
+                    eprintln!("  lane `{}` skipped: {reason}", args.lane);
+                    println!("  level: SKIPPED (lane `{}` not available)", args.lane);
+                    exit(0);
+                }
+            };
             match harness::run_llm(
                 ex.lang, &ex.source, ex.fn_name, &ex.signature, &vecs, &cpp, ex.profile,
-                &args.lean_path, &work, *max_iters,
+                &args.lean_path, &work, *max_iters, &lane,
             ) {
                 Ok(o) => {
                     eprintln!("  harness: settled after {} iter(s), conformant={}", o.iters, o.conformant);

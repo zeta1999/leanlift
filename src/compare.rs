@@ -21,6 +21,14 @@ pub enum Profile {
     Isqrt,
     Bisect,
     Quant,
+    // Float optimizers (bit-pattern args/result; postconditions decode via
+    // `f64::from_bits`). No declared-overflow class — floats produce NaN/Inf,
+    // canonicalized by the runner, not a `wrap` divergence.
+    OptGss,
+    OptGd,
+    OptHj,
+    /// Phase-1 float smoke (`a + b`): no postcondition, no divergence class.
+    Fadd,
 }
 
 impl Profile {
@@ -33,6 +41,10 @@ impl Profile {
             Profile::Isqrt => &["isqrt"],
             Profile::Bisect => &["bisect"],
             Profile::Quant => &["quant"],
+            Profile::OptGss => &["gss"],
+            Profile::OptGd => &["gd"],
+            Profile::OptHj => &["hj"],
+            Profile::Fadd => &["fadd"],
         }
     }
 
@@ -67,6 +79,49 @@ impl Profile {
                 let err = (q as i128 - n as i128).unsigned_abs() <= step / 2;
                 Some(repr && err)
             }
+            // Float optimizers — args/result are IEEE bit patterns. The objective
+            // is fixed per kernel; we check the optimizer's own guarantee.
+            // gss: minimize f(x)=(x-3)²+1 on [a,b] → a ≤ x ≤ b and no worse than
+            // either endpoint (robust to the tolerance).
+            Profile::OptGss => {
+                let (a, b, tol) =
+                    (f64::from_bits(args[0]), f64::from_bits(args[1]), f64::from_bits(args[2]));
+                let x = f64::from_bits(result);
+                if !x.is_finite() {
+                    return None;
+                }
+                // The GSS accuracy guarantee, with the finite-precision floor:
+                // a derivative-free search on a quadratic locates the minimizer
+                // to ≈√ε ≈ 1e-8 (the objective goes flat and `fc<fd` drowns in
+                // rounding below that), so the bound is max(½·tol, √ε·scale).
+                Some(a <= x && x <= b && (x - 3.0).abs() <= 0.5 * tol + 1e-7)
+            }
+            // gd: returns the final objective f(x_K); in the STABLE regime
+            // (η ≤ 1) it must not exceed f(x_0). η > 1 diverges by design — its
+            // bit-exactness is still checked by conformance, but the descent
+            // claim does not apply, so it is out of scope here (None).
+            Profile::OptGd => {
+                let (x0, y0, eta) =
+                    (f64::from_bits(args[0]), f64::from_bits(args[1]), f64::from_bits(args[2]));
+                let fr = f64::from_bits(result);
+                if !fr.is_finite() || eta > 1.0 {
+                    return None;
+                }
+                let f0 = (x0 - 1.0) * (x0 - 1.0) + (y0 - 2.0) * (y0 - 2.0);
+                let eps = 1e-9 * (1.0 + f0.abs());
+                Some(fr >= 0.0 && fr <= f0 + eps)
+            }
+            // nm: returns the best objective; it is no worse than the start.
+            Profile::OptHj => {
+                let (x0, y0) = (f64::from_bits(args[0]), f64::from_bits(args[1]));
+                let fr = f64::from_bits(result);
+                if !fr.is_finite() {
+                    return None;
+                }
+                let f0 = (x0 - 1.0) * (x0 - 1.0) + (y0 - 2.0) * (y0 - 2.0);
+                let eps = 1e-9 * (1.0 + f0.abs());
+                Some(fr >= 0.0 && fr <= f0 + eps)
+            }
             _ => None,
         }
     }
@@ -77,6 +132,9 @@ impl Profile {
             Profile::Isqrt => Some("r·r ≤ n < (r+1)²"),
             Profile::Bisect => Some("lo·lo ≤ n < (lo+eps+1)²"),
             Profile::Quant => Some("q representable, |q−n| ≤ ulp/2"),
+            Profile::OptGss => Some("a ≤ x ≤ b ∧ |x − 3| ≤ ½·tol + √ε"),
+            Profile::OptGd => Some("0 ≤ f(x_K) ≤ f(x_0)  (descent)"),
+            Profile::OptHj => Some("0 ≤ f(best) ≤ f(start)  (no worse than start)"),
             _ => None,
         }
     }
@@ -99,6 +157,10 @@ impl Profile {
             Profile::Isqrt => "isqrt",
             Profile::Bisect => "bisect",
             Profile::Quant => "quant",
+            Profile::OptGss => "gss",
+            Profile::OptGd => "gd",
+            Profile::OptHj => "hj",
+            Profile::Fadd => "fadd",
         }
     }
 
@@ -117,8 +179,10 @@ impl Profile {
             Profile::Dot2 => {
                 a[0] as u128 * a[1] as u128 + a[2] as u128 * a[3] as u128 >= (1u128 << 32)
             }
-            // bounded / deterministic: no overflow-divergence class
+            // bounded / deterministic, or float (NaN/Inf canonicalized, not a
+            // declared `wrap` class): no overflow-divergence.
             Profile::Isqrt | Profile::Bisect | Profile::Quant => false,
+            Profile::OptGss | Profile::OptGd | Profile::OptHj | Profile::Fadd => false,
         }
     }
 }
