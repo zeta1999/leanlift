@@ -34,6 +34,7 @@ pub enum Family {
     Bt,
     Spn,
     Tasks,
+    Qnet,
 }
 
 impl Family {
@@ -45,6 +46,7 @@ impl Family {
             Family::Bt => "bt",
             Family::Spn => "spn",
             Family::Tasks => "tasks",
+            Family::Qnet => "qnet",
         }
     }
 }
@@ -59,11 +61,15 @@ pub fn detect(doc: &Doc) -> Result<Family, String> {
             "bt" => Ok(Family::Bt),
             "spn" | "gspn" => Ok(Family::Spn),
             "tasks" | "taskset" => Ok(Family::Tasks),
-            other => Err(format!("unknown kind `{other}` (have: fsm, petri, cpn, bt, spn, tasks)")),
+            "qnet" | "queueing" | "jackson" => Ok(Family::Qnet),
+            other => Err(format!("unknown kind `{other}` (have: fsm, petri, cpn, bt, spn, tasks, qnet)")),
         };
     }
     if !doc.table("task").is_empty() {
         return Ok(Family::Tasks);
+    }
+    if !doc.table("station").is_empty() {
+        return Ok(Family::Qnet);
     }
     // Shape inference: `[[colour]]` ⇒ CPN, a `tree` ⇒ BT, `places` ⇒
     // Petri-family, `states`/`machines` ⇒ FSM.

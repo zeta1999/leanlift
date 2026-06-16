@@ -1,0 +1,34 @@
+# qnet — an open queueing network (PLAN-qnet-rta §Q). Requests arrive at the
+# frontend, flow to the worker, which either completes (exits) or bounces to a
+# retry station and back — a feedback loop the traffic equations resolve. The
+# bottleneck and the network stability boundary fall out of the product-form
+# solution: `lift model check examples/models/qnet.model.toml`.
+kind = "qnet"
+
+[[station]]
+name = "frontend"
+mu = "5.0"
+lambda = "2.0"      # external arrivals
+
+[[station]]
+name = "worker"
+mu = "4.0"
+
+[[station]]
+name = "retry"
+mu = "6.0"
+
+[[route]]            # all frontend output → worker
+from = "frontend"
+to = "worker"
+prob = "1.0"
+
+[[route]]            # 30% of worker output bounces to retry (70% exits)
+from = "worker"
+to = "retry"
+prob = "0.3"
+
+[[route]]            # retried work goes back to the worker
+from = "retry"
+to = "worker"
+prob = "1.0"

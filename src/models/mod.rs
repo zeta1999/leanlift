@@ -23,6 +23,7 @@ mod prism;
 mod fuzz;
 #[cfg(test)]
 mod proptest;
+mod qnet;
 mod report;
 mod rt;
 mod scxml;
@@ -180,6 +181,14 @@ fn check_cmd(a: Vec<String>) {
             rt::print_report(&rep, &ts, &file);
             exit(if rep.schedulable { 0 } else { 1 });
         }
+        Family::Qnet => {
+            // Open queueing network (PLAN-qnet-rta §Q): traffic equations +
+            // per-station product-form metrics + stability/bottleneck.
+            let net = qnet::parse(&src).unwrap_or_else(|e| fail(&format!("{file}: {e}")));
+            let rep = qnet::analyze(&net).unwrap_or_else(|e| fail(&format!("{file}: {e}")));
+            qnet::print_report(&rep, &file);
+            exit(if rep.stable { 0 } else { 1 });
+        }
     };
     report::print_human(&result, &file, &hash);
     if let Err(e) = report::write_json(&result, &file, &hash, &out) {
@@ -279,6 +288,10 @@ fn prove_cmd(a: Vec<String>) {
             // The schedulability verdict is `lift model check` (RTA); the Lean
             // proof of the RTA fixed point is the R2 kernel (PLAN-perf-demo §8).
             eprintln!("schedulability is `lift model check <file>` (RTA); the analyzer's Lean/Kani kernel proof is R2 — not in this build");
+            exit(2);
+        }
+        Family::Qnet => {
+            eprintln!("queueing-network analysis is `lift model check <file>` (product-form) / `lift model simulate` — `prove` does not apply");
             exit(2);
         }
     }
