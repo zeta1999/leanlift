@@ -167,6 +167,20 @@ if "$LIFT" model check "$TMP/qover.toml" >"$TMP/qno" 2>&1; then
 else
   pass "qnet teeth  (λ>μ saturation caught as UNSTABLE)"
 fi
+# bottleneck phase transition: empirical instability scale ≈ closed-form 1/maxρ.
+if ./scripts/qnet-sweep.sh --check >"$TMP/qsweep" 2>&1; then
+  ks=$(grep -oE 'instability.*scale ≈ [0-9.]+' "$TMP/qsweep" | grep -oE '[0-9.]+$')
+  pass "qnet bottleneck sweep  (instability scale≈$ks ≈ closed-form 1/maxρ)"
+else
+  bad "qnet bottleneck sweep"; tail -6 "$TMP/qsweep"
+fi
+# teeth: a trapped/closed cycle must ERROR, not report a bogus verdict.
+printf 'kind="qnet"\n[[station]]\nname="a"\nmu="9"\nlambda="2"\n[[station]]\nname="b"\nmu="9"\n[[route]]\nfrom="a"\nto="b"\nprob="1.0"\n[[route]]\nfrom="b"\nto="a"\nprob="1.0"\n' >"$TMP/qtrap.toml"
+if "$LIFT" model check "$TMP/qtrap.toml" >"$TMP/qtr" 2>&1; then
+  bad "trapped network wrongly accepted"; cat "$TMP/qtr"
+else
+  pass "qnet teeth  (trapped/closed cycle rejected, not falsely stable)"
+fi
 
 # ---------------------------------------------------------------------------- #
 sect "M3 — prove (Lean, sorry-free)"
