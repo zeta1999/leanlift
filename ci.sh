@@ -185,6 +185,15 @@ if ./scripts/qnet-sweep.sh --check >"$TMP/qsweep" 2>&1; then
 else
   bad "qnet bottleneck sweep"; tail -6 "$TMP/qsweep"
 fi
+
+# shared workload: provably-safe (RT/RTA) ⊊ probably-safe (queue stability).
+if ./scripts/shared-workload-sweep.sh --check >"$TMP/shared" 2>&1; then
+  hb=$(grep -oE 'provably-safe boundary.*ℓ ≈ [0-9.]+' "$TMP/shared" | grep -oE '[0-9.]+$')
+  sb=$(grep -oE 'probably-safe boundary.*ℓ ≈ [0-9.]+' "$TMP/shared" | grep -oE '[0-9.]+$')
+  pass "shared workload  (provably-safe ℓ≈$hb ⊊ probably-safe ℓ≈$sb)"
+else
+  bad "shared workload sweep"; tail -6 "$TMP/shared"
+fi
 # teeth: a trapped/closed cycle must ERROR, not report a bogus verdict.
 printf 'kind="qnet"\n[[station]]\nname="a"\nmu="9"\nlambda="2"\n[[station]]\nname="b"\nmu="9"\n[[route]]\nfrom="a"\nto="b"\nprob="1.0"\n[[route]]\nfrom="b"\nto="a"\nprob="1.0"\n' >"$TMP/qtrap.toml"
 if "$LIFT" model check "$TMP/qtrap.toml" >"$TMP/qtr" 2>&1; then

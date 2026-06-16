@@ -1,0 +1,9 @@
+# shared-queue — the STOCHASTIC (average-case) view of the SAME workload
+# (PLAN-qnet-rta §C): one M/M/1 server whose utilization matches the task set's
+# (ρ = 0.5 at scale 1). `--scale ℓ` raises the arrival rate; the queue is stable
+# until ρ → 1 (ℓ → 2). Its deterministic twin is shared-tasks.model.toml.
+kind = "qnet"
+[[station]]
+name = "server"
+mu = "1.0"
+lambda = "0.5"
