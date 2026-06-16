@@ -57,7 +57,15 @@ impl Json {
     /// dodge f64 precision loss) as numeric strings. Accept both.
     pub fn as_u64(&self) -> Option<u64> {
         match self {
-            Json::Num(n) if n.is_finite() && *n >= 0.0 => Some(*n as u64),
+            // A bare JSON number must be a non-negative integer within exact f64
+            // range (≤ 2^53); beyond that `as u64` would silently saturate and
+            // fractionals would silently truncate — both reject (return None).
+            // Wide values (Hz, u128/i128/u64 literals) arrive as strings instead.
+            Json::Num(n)
+                if n.is_finite() && *n >= 0.0 && *n == n.trunc() && *n <= 9_007_199_254_740_992.0 =>
+            {
+                Some(*n as u64)
+            }
             Json::Str(s) => s.parse::<u64>().ok(),
             _ => None,
         }
@@ -79,7 +87,7 @@ impl Json {
 /// module, concatenated). Returns them in order.
 pub fn parse_stream(src: &str) -> Result<Vec<Json>, String> {
     let b: Vec<char> = src.chars().collect();
-    let mut p = Parser { b: &b, i: 0 };
+    let mut p = Parser { b: &b, i: 0, depth: 0 };
     let mut out = Vec::new();
     p.skip_ws();
     while p.i < b.len() {
@@ -92,9 +100,14 @@ pub fn parse_stream(src: &str) -> Result<Vec<Json>, String> {
     Ok(out)
 }
 
+/// Guard against unbounded recursion: truncated/adversarial input must return an
+/// `Err`, never overflow the stack and abort the process.
+const MAX_DEPTH: usize = 512;
+
 struct Parser<'a> {
     b: &'a [char],
     i: usize,
+    depth: usize,
 }
 
 impl Parser<'_> {
@@ -110,8 +123,16 @@ impl Parser<'_> {
             return Err("unexpected end of input".into());
         }
         match self.b[self.i] {
-            '{' => self.object(),
-            '[' => self.array(),
+            '{' | '[' => {
+                // Bound nesting at the two recursion points; abort cleanly past MAX_DEPTH.
+                self.depth += 1;
+                if self.depth > MAX_DEPTH {
+                    return Err(format!("nesting too deep (> {MAX_DEPTH}) at {}", self.i));
+                }
+                let r = if self.b[self.i] == '{' { self.object() } else { self.array() };
+                self.depth -= 1;
+                r
+            }
             '"' => Ok(Json::Str(self.string()?)),
             't' | 'f' => self.boolean(),
             'n' => self.null(),
@@ -516,13 +537,32 @@ fn info_cmd(a: Vec<String>) {
     j.push_str(&format!("  \"schema\": \"{SCHEMA}\",\n"));
     j.push_str(&format!("  \"modules\": {},\n", modules.len()));
     j.push_str("  \"names\": [");
-    let names: Vec<String> = modules.iter().map(|m| format!("\"{}\"", m.name)).collect();
+    let names: Vec<String> = modules.iter().map(|m| json_str(&m.name)).collect();
     j.push_str(&names.join(", "));
     j.push_str("],\n");
     let total_formals: usize = modules.iter().map(|m| m.formals.len()).sum();
     j.push_str(&format!("  \"formal_properties\": {total_formals}\n"));
     j.push_str("}\n");
     let _ = std::fs::write(&report, j);
+}
+
+/// JSON-escape and quote a string (for the `fpga-report.json` echo).
+fn json_str(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('"');
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
 }
 
 #[cfg(test)]
@@ -592,5 +632,23 @@ mod tests {
     fn parses_multi_module_stream() {
         let two = format!("{SAMPLE}\n{SAMPLE}");
         assert_eq!(read_file(&two).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn deep_nesting_errs_not_panics() {
+        // Adversarial/truncated input must return Err, never overflow the stack.
+        let deep = "[".repeat(100_000);
+        assert!(parse_stream(&deep).is_err());
+    }
+
+    #[test]
+    fn as_u64_rejects_nonintegral_and_overflow() {
+        // Bare numbers: integral & within exact-f64 range only.
+        assert_eq!(Json::Num(3.0).as_u64(), Some(3));
+        assert_eq!(Json::Num(3.9).as_u64(), None);          // fractional → reject
+        assert_eq!(Json::Num(-1.0).as_u64(), None);         // negative → reject
+        assert_eq!(Json::Num(1e30).as_u64(), None);         // > 2^53 → reject (no saturation)
+        // Wide values still round-trip exactly through the string form.
+        assert_eq!(Json::Str("18446744073709551615".into()).as_u64(), Some(u64::MAX));
     }
 }

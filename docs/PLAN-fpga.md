@@ -213,9 +213,11 @@ proved kernel is touched.
 ## Tasks / TODO (tracked)
 
 ### Bridge
-- [ ] B1 — write `docs/FORMATS-fpga.md` bridge schema (versioned). `[CPU]`
-- [ ] B2 — `../fpga-meta-compiler` `--emit-ir-json` (`src/ir_json.rs`), round-trips demo. `[CPU]` ★
-- [ ] B3 — leanlift `src/models/fpga.rs` JSON reader + `lift fpga` dispatch + echo. `[CPU]` ★
+- [x] B1 — `docs/FORMATS-fpga.md` bridge schema (versioned, `aria-ir-json/v1`). `[CPU]`
+- [x] B2 — `../fpga-meta-compiler` `--emit-ir-json` (`src/ir_json.rs`); 118 tests, all
+      12 examples round-trip to valid JSON; annotations + formal props exported. `[CPU]` ★
+- [x] B3 — leanlift `src/models/fpga.rs` JSON reader + `lift fpga info` + echo;
+      ci.sh FPGA section GREEN; fixture `examples/fpga/tcp_ip.aria.json`. `[CPU]` ★
 
 ### Slice ① timing + throughput
 - [ ] T1 — PipelineInfo → TaskSet, RTA latency bound; cross-check emulator. `[CPU]` ★
