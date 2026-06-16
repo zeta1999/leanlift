@@ -1,0 +1,16 @@
+# shared-tasks — the DETERMINISTIC (worst-case) view of a shared workload
+# (PLAN-qnet-rta §C). Two periodic jobs on one server with TIGHT deadlines
+# (D = T/2). Base utilization U = 10/40 + 20/80 = 0.5; `--scale ℓ` raises the
+# load. Its stochastic twin is shared-queue.model.toml (same base utilization).
+kind = "tasks"
+policy = "RM"
+[[task]]
+name = "ctrl"
+c = "10"
+t = "40"
+d = "20"
+[[task]]
+name = "plan"
+c = "20"
+t = "80"
+d = "40"
