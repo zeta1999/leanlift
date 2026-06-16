@@ -141,6 +141,17 @@ if "$LIFT" model check "$TMP/over.toml" >"$TMP/rto" 2>&1; then
 else
   pass "schedulability teeth  (U>1 overload caught as NOT schedulable)"
 fi
+# EDF demand-bound: U≤1 passes but constrained deadlines make it infeasible.
+if "$LIFT" model check "$M/tasks-edf.model.toml" >"$TMP/edf" 2>&1; then
+  bad "tasks-edf wrongly reported schedulable"; cat "$TMP/edf"
+else
+  if grep -q "PASS — sufficient" "$TMP/edf" && grep -q "dbf(1) = 2 > 1" "$TMP/edf"; then
+    pass "EDF demand-bound  (U≤1 passes, but demand test catches dbf(1)>1)"
+  else
+    bad "EDF demand-bound: unexpected output"; cat "$TMP/edf"
+  fi
+fi
+
 # R4 intersection: hard boundary is conservative (soft miss still low there).
 if ./scripts/tasks-sweep.sh --check >"$TMP/tsweep" 2>&1; then
   hb=$(grep -oE 'hard boundary.*scale ≈ [0-9.]+' "$TMP/tsweep" | grep -oE '[0-9.]+$')
