@@ -120,6 +120,20 @@ pub fn parse(src: &str) -> Result<QNet, String> {
     Ok(QNet { stations, routing })
 }
 
+/// Scale every external arrival rate by `s` (the load knob for the bottleneck
+/// sweep, PLAN-qnet-rta §Q5). ρ is linear in λ⁰, so `max ρ` scales with `s` and
+/// the network goes unstable at `s* = 1 / max ρ(1)`.
+pub fn scaled(net: &QNet, s: f64) -> QNet {
+    QNet {
+        stations: net
+            .stations
+            .iter()
+            .map(|st| Station { name: st.name.clone(), mu: st.mu, servers: st.servers, lambda0: st.lambda0 * s })
+            .collect(),
+        routing: net.routing.clone(),
+    }
+}
+
 /// Solve `A x = b` by Gaussian elimination with partial pivoting (small, dense).
 /// Returns `None` if `A` is (numerically) SINGULAR — for `(I − Pᵀ)` that means
 /// the routing traps jobs (a closed sub-network with no exit), so the open-network
@@ -211,6 +225,76 @@ pub fn analyze(net: &QNet) -> Result<QNetReport, String> {
     Ok(QNetReport { stations, stable, bottleneck, l_total, w_total, throughput })
 }
 
+/// Discrete-event (SSA) simulation of the open network: external Poisson
+/// arrivals (rate λ⁰ᵢ), exponential service (rate μᵢ when busy), probabilistic
+/// routing on completion. Returns the time-average number in each station — the
+/// EMPIRICAL cross-check of the product-form `Lᵢ` (PLAN-qnet-rta §Q4). Requires
+/// a stable network (else the queue grows without bound).
+pub fn simulate(net: &QNet, horizon: f64, seed: u64) -> Vec<f64> {
+    let n = net.stations.len();
+    let mu: Vec<f64> = net.stations.iter().map(|s| s.mu).collect();
+    let lam0: Vec<f64> = net.stations.iter().map(|s| s.lambda0).collect();
+    let mut s = seed | 1;
+    let mut u = || {
+        s ^= s << 13;
+        s ^= s >> 7;
+        s ^= s << 17;
+        ((s >> 11) as f64 / (1u64 << 53) as f64).max(1e-15) // (0,1]
+    };
+    let mut q = vec![0u64; n]; // queue length per station
+    let mut area = vec![0.0f64; n]; // ∫ q dt
+    let mut t = 0.0;
+    while t < horizon {
+        // total event rate: all external arrivals + service at busy stations.
+        let mut rate = 0.0;
+        for i in 0..n {
+            rate += lam0[i];
+            if q[i] > 0 {
+                rate += mu[i];
+            }
+        }
+        if rate <= 0.0 {
+            break;
+        }
+        let dt = -(u().ln()) / rate;
+        for i in 0..n {
+            area[i] += q[i] as f64 * dt;
+        }
+        t += dt;
+        // pick the event proportional to its rate.
+        let mut x = u() * rate;
+        let mut fired = None;
+        'pick: for i in 0..n {
+            if x < lam0[i] {
+                q[i] += 1; // external arrival
+                fired = Some(());
+                break 'pick;
+            }
+            x -= lam0[i];
+            if q[i] > 0 {
+                if x < mu[i] {
+                    // service completion at i: depart, then route.
+                    q[i] -= 1;
+                    let mut y = u();
+                    for j in 0..n {
+                        let p = net.routing[i][j];
+                        if y < p {
+                            q[j] += 1;
+                            break;
+                        }
+                        y -= p;
+                    }
+                    fired = Some(());
+                    break 'pick;
+                }
+                x -= mu[i];
+            }
+        }
+        let _ = fired;
+    }
+    area.iter().map(|a| a / t).collect()
+}
+
 pub fn print_report(rep: &QNetReport, file: &str) {
     println!();
     println!("  leanlift queueing-network certificate — `{file}` ({} stations)", rep.stations.len());
@@ -294,6 +378,19 @@ mod tests {
         assert!(!s_hi); // unstable past μ
         // monotone growth toward the boundary
         assert!(l_at(3.6).1 > l_at(2.0).1);
+    }
+
+    #[test]
+    fn simulation_matches_analytic() {
+        // Q4 empirical cross-check: SSA simulation of the open network must match
+        // the product-form per-station L (Monte-Carlo tolerance).
+        let net = parse(&std::fs::read_to_string("examples/models/qnet.model.toml").unwrap()).unwrap();
+        let rep = analyze(&net).unwrap();
+        let sim = simulate(&net, 300_000.0, 7);
+        for (i, s) in rep.stations.iter().enumerate() {
+            let tol = (0.12 * s.l).max(0.08);
+            assert!((sim[i] - s.l).abs() <= tol, "{}: analytic L={:.4} vs sim {:.4}", s.name, s.l, sim[i]);
+        }
     }
 
     #[test]

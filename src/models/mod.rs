@@ -184,7 +184,10 @@ fn check_cmd(a: Vec<String>) {
         Family::Qnet => {
             // Open queueing network (PLAN-qnet-rta §Q): traffic equations +
             // per-station product-form metrics + stability/bottleneck.
-            let net = qnet::parse(&src).unwrap_or_else(|e| fail(&format!("{file}: {e}")));
+            let mut net = qnet::parse(&src).unwrap_or_else(|e| fail(&format!("{file}: {e}")));
+            if scale != 1.0 {
+                net = qnet::scaled(&net, scale); // load knob for the bottleneck sweep
+            }
             let rep = qnet::analyze(&net).unwrap_or_else(|e| fail(&format!("{file}: {e}")));
             qnet::print_report(&rep, &file);
             exit(if rep.stable { 0 } else { 1 });
@@ -407,8 +410,26 @@ fn simulate_cmd(a: Vec<String>) {
             println!();
             exit(0);
         }
+        Family::Qnet => {
+            // Q4: SSA simulation of the open network vs the product-form L.
+            let net = qnet::parse(&src).unwrap_or_else(|e| fail(&format!("{file}: {e}")));
+            let rep = qnet::analyze(&net).unwrap_or_else(|e| fail(&format!("{file}: {e}")));
+            if !rep.stable {
+                eprintln!("network is UNSTABLE — simulation of an unbounded queue is meaningless");
+                exit(1);
+            }
+            let sim = qnet::simulate(&net, time, seed);
+            println!();
+            println!("  simulating `{file}` — open-network DES (T={time}, seed={seed})");
+            println!("  {:<12} {:>12} {:>12} {:>10}", "station L", "empirical", "analytic", "|Δ|");
+            for (i, s) in rep.stations.iter().enumerate() {
+                println!("  {:<12} {:>12.4} {:>12.4} {:>10.4}", s.name, sim[i], s.l, (sim[i] - s.l).abs());
+            }
+            println!();
+            exit(0);
+        }
         other => {
-            eprintln!("`lift model simulate` needs a `kind = \"gspn\"` or `\"tasks\"` model; detected `{}`", other.tag());
+            eprintln!("`lift model simulate` needs a `kind = \"gspn\"`, `\"tasks\"`, or `\"qnet\"` model; detected `{}`", other.tag());
             exit(2);
         }
     }
