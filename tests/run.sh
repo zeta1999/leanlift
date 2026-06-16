@@ -46,7 +46,7 @@ if [ -x "$AENEAS/bin/aeneas" ]; then
     fi
   done
   echo "== L3 proofs =="
-  for pe in rust-streamed rust-isqrt rust-bisect models-fire link-buffer; do
+  for pe in rust-streamed rust-isqrt rust-bisect models-fire link-buffer rta-kernel; do
     if "$LIFT" prove "$pe" --out "$TMP/proof_$pe.json" >"$TMP/prove_$pe.out" 2>&1; then
       n=$(grep -c '✓' "$TMP/prove_$pe.out")
       pass "prove $pe  ($(grep -o 'L3 proved' "$TMP/prove_$pe.out"), $n obligations, sorry-free)"
