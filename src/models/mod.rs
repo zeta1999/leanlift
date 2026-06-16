@@ -100,7 +100,10 @@ fn check_cmd(a: Vec<String>) {
                     .unwrap_or_else(|_| fail("--bound expects a positive integer"))
             }
             "--scale" => {
-                scale = take(&a, &mut i).parse().unwrap_or_else(|_| fail("--scale expects a number"))
+                scale = take(&a, &mut i).parse().unwrap_or_else(|_| fail("--scale expects a number"));
+                if !(scale.is_finite() && scale > 0.0) {
+                    fail("--scale must be a positive, finite number");
+                }
             }
             s if s.starts_with("--") => fail(&format!("unknown flag: {s}")),
             _ => {
@@ -375,9 +378,19 @@ fn simulate_cmd(a: Vec<String>) {
                 let val: f64 = v.parse().unwrap_or_else(|_| fail(&format!("--set {k}: `{v}` is not a number")));
                 overrides.insert(k.to_string(), val);
             }
-            "--time" => time = take(&a, &mut i).parse().unwrap_or_else(|_| fail("--time expects a number")),
+            "--time" => {
+                time = take(&a, &mut i).parse().unwrap_or_else(|_| fail("--time expects a number"));
+                if !(time.is_finite() && time > 0.0) {
+                    fail("--time must be a positive, finite number");
+                }
+            }
             "--seed" => seed = take(&a, &mut i).parse().unwrap_or_else(|_| fail("--seed expects an integer")),
-            "--scale" => scale = take(&a, &mut i).parse().unwrap_or_else(|_| fail("--scale expects a number")),
+            "--scale" => {
+                scale = take(&a, &mut i).parse().unwrap_or_else(|_| fail("--scale expects a number"));
+                if !(scale.is_finite() && scale > 0.0) {
+                    fail("--scale must be a positive, finite number");
+                }
+            }
             s if s.starts_with("--") => fail(&format!("unknown flag: {s}")),
             _ => {
                 if file.is_some() {

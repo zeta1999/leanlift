@@ -153,6 +153,15 @@ pub fn parse(src: &str) -> Result<TaskSet, String> {
         if period == 0 {
             return Err(format!("task `{name}`: period `t` must be positive"));
         }
+        if c == 0 {
+            return Err(format!("task `{name}`: execution time `c` must be positive"));
+        }
+        // Bound the magnitudes so the (overflow-safe) RTA/demand arithmetic stays
+        // well inside range even after `--scale`. Realistic time units, not a real limit.
+        const MAX: u32 = 1_000_000;
+        if c > MAX || period > MAX {
+            return Err(format!("task `{name}`: `c`/`t` exceed {MAX} (unit too fine?)"));
+        }
         let d = match t.get("d") {
             Some(v) => v.as_str("d")?.parse().map_err(|_| format!("task `{name}`: bad `d`"))?,
             None => period,
@@ -184,7 +193,11 @@ fn div_ceil(a: u32, b: u32) -> u32 {
 /// `cj` preempts `⌈r/tj⌉` times in a window of length `r`. The body of the
 /// response-time recurrence — **monotone non-decreasing in `r`**, which is what
 /// makes the fixed-point iteration converge to the LEAST fixed point (the true
-/// worst-case response time). Kani proves that monotonicity (and no overflow).
+/// worst-case response time). Kani proves that monotonicity (`term_monotone`) and
+/// the Aeneas `rta-kernel` proves the formula; production `response_time` computes
+/// the SAME product with a checked multiply so it can never overflow (an overflow
+/// would mean astronomically high demand ⇒ unschedulable, the safe direction).
+#[cfg_attr(not(kani), allow(dead_code))]
 fn term(r: u32, cj: u32, tj: u32) -> u32 {
     div_ceil(r, tj) * cj
 }
@@ -195,8 +208,14 @@ fn term(r: u32, cj: u32, tj: u32) -> u32 {
 fn response_time(c: u32, d: u32, hp: &[(u32, u32)]) -> Option<u32> {
     let mut r = c;
     loop {
-        let interference: u32 = hp.iter().map(|&(cj, tj)| term(r, cj, tj)).sum();
-        let r_new = c + interference;
+        // checked arithmetic: any overflow ⇒ demand exceeds any deadline ⇒
+        // unschedulable (None), never a wrapped-small (falsely schedulable) value.
+        let mut interference: u32 = 0;
+        for &(cj, tj) in hp {
+            let ti = div_ceil(r, tj).checked_mul(cj)?; // = term(r,cj,tj), overflow ⇒ None
+            interference = interference.checked_add(ti)?;
+        }
+        let r_new = c.checked_add(interference)?;
         if r_new > d {
             return None;
         }
@@ -271,19 +290,11 @@ pub fn scaled(ts: &TaskSet, s: f64) -> TaskSet {
 /// verdict (PLAN-perf-demo §8 R4): graceful degradation vs a hard step.
 pub fn simulate_miss(ts: &TaskSet, alpha: f64, cycles: u32, seed: u64) -> f64 {
     let n = ts.tasks.len();
-    let hyper = ts.tasks.iter().fold(1u32, |h, t| {
-        let g = {
-            let (mut a, mut b) = (h, t.t);
-            while b != 0 {
-                let r = a % b;
-                a = b;
-                b = r;
-            }
-            a
-        };
-        h / g * t.t
-    });
-    let horizon = hyper.saturating_mul(cycles).max(1);
+    // Hyperperiod in u64 with overflow-safe LCM, capped so the unit-step loop
+    // can't run away (the sim is Monte-Carlo, so a capped horizon = fewer
+    // samples, never a wrong answer).
+    let hyper = ts.tasks.iter().fold(1u64, |h, t| (h / gcd(h, t.t as u64)).saturating_mul(t.t as u64));
+    let horizon: u64 = hyper.saturating_mul(cycles as u64).clamp(1, 2_000_000);
     let mut order: Vec<usize> = (0..n).collect();
     order.sort_by_key(|&i| ts.tasks[i].t);
     let mut s = seed | 1;
@@ -293,23 +304,29 @@ pub fn simulate_miss(ts: &TaskSet, alpha: f64, cycles: u32, seed: u64) -> f64 {
         s ^= s << 17;
         (s % bound as u64) as u32
     };
-    let (mut remaining, mut released, mut active) = (vec![0u32; n], vec![0u32; n], vec![false; n]);
+    let (mut remaining, mut released, mut active) = (vec![0u32; n], vec![0u64; n], vec![false; n]);
     let (mut missed, mut jobs) = (0u64, 0u64);
+    let deadline = |i: usize, rel: u64| rel + ts.tasks[i].d as u64;
     for t in 0..horizon {
         for i in 0..n {
-            if active[i] && t >= released[i] + ts.tasks[i].d {
-                missed += 1; // unfinished at its deadline
+            // a job unfinished AT its deadline is a miss (deadline < horizon here).
+            if active[i] && t >= deadline(i, released[i]) {
+                missed += 1;
                 active[i] = false;
             }
         }
         for i in 0..n {
-            if t % ts.tasks[i].t == 0 {
+            if t % ts.tasks[i].t as u64 == 0 {
                 let c = ts.tasks[i].c;
                 let lo = ((alpha * c as f64).ceil() as u32).clamp(1, c);
                 remaining[i] = lo + rng(c - lo + 1); // uniform [lo, c]
                 released[i] = t;
                 active[i] = true;
-                jobs += 1;
+                // count only jobs whose deadline is fully inside the observed
+                // window — else the denominator includes unobservable jobs.
+                if deadline(i, t) <= horizon {
+                    jobs += 1;
+                }
             }
         }
         if let Some(&i) = order.iter().find(|&&i| active[i] && remaining[i] > 0) {
@@ -317,6 +334,13 @@ pub fn simulate_miss(ts: &TaskSet, alpha: f64, cycles: u32, seed: u64) -> f64 {
             if remaining[i] == 0 {
                 active[i] = false;
             }
+        }
+    }
+    // Final sweep: a job whose deadline is exactly the horizon (never seen by the
+    // `t < horizon` loop) and is still unfinished is a miss.
+    for i in 0..n {
+        if active[i] && deadline(i, released[i]) <= horizon {
+            missed += 1;
         }
     }
     if jobs == 0 {
@@ -468,6 +492,35 @@ mod tests {
         assert!(rep.util <= 1.0, "U must pass the naive test");
         assert!(!rep.schedulable, "demand-bound must catch the constrained-deadline infeasibility");
         assert_eq!(rep.edf_first_fail, Some((1, 2)));
+    }
+
+    #[test]
+    fn simulate_miss_counts_horizon_edge() {
+        // REGRESSION (final review C1): a job whose deadline lands exactly at the
+        // simulation horizon must be counted as a miss, not silently dropped (the
+        // falsely-optimistic direction). U=1.2 ⇒ the low-priority job overruns.
+        let ts = parse("kind=\"tasks\"\npolicy=\"RM\"\n\
+            [[task]]\nname=\"a\"\nc=\"6\"\nt=\"10\"\n\
+            [[task]]\nname=\"b\"\nc=\"6\"\nt=\"10\"\n").unwrap();
+        assert!(simulate_miss(&ts, 1.0, 1, 1) > 0.0, "horizon-edge miss undercounted");
+    }
+
+    #[test]
+    fn zero_execution_is_refused() {
+        // REGRESSION (final review C2): c=0 must be rejected (else simulate_miss's
+        // clamp(1,0) panics); execution time must be positive.
+        assert!(parse("kind=\"tasks\"\npolicy=\"RM\"\n[[task]]\nname=\"z\"\nc=\"0\"\nt=\"5\"\n").is_err());
+    }
+
+    #[test]
+    fn huge_execution_is_schedulable_safe() {
+        // REGRESSION (final review M2): astronomically large C ⇒ overflow-safe RTA
+        // returns NOT SCHEDULABLE (never a wrapped-small false SCHEDULABLE).
+        let ts = parse("kind=\"tasks\"\npolicy=\"RM\"\n\
+            [[task]]\nname=\"a\"\nc=\"1000000\"\nt=\"1000000\"\nd=\"1000000\"\n\
+            [[task]]\nname=\"b\"\nc=\"1000000\"\nt=\"1000000\"\nd=\"1000000\"\n").unwrap();
+        // two tasks each using the whole processor ⇒ the second cannot fit.
+        assert!(!analyze(&ts).schedulable);
     }
 
     #[test]
