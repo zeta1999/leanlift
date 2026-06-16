@@ -187,7 +187,7 @@ modules + a **lossy channel** — proved correct on every axis at once.
 |---|---|---|---|
 | B2 | IrModule → IR-JSON | yes (hand-written serializer) | round-trip echo |
 | B3 | IR-JSON → AriaIr | yes (parser) | round-trip echo |
-| T1 | PipelineInfo → TaskSet | yes | RTA vs Aria emulator latency |
+| T1 | PipelineInfo → latency/closure + C-slow fold→TaskSet | yes | dual-source cross-check (stage-delay↔critical-path, freq↔period) + RTA over-fold |
 | T2 | pipeline → Jackson net | yes | bottleneck vs critical-path stage |
 | F1 | enum Register+Mux → Lts | yes | reach set vs emulator |
 | F2 | Lts → Lean | yes (`emit_fsm`) | Lean kernel (sorry-free) |
@@ -220,7 +220,13 @@ proved kernel is touched.
       ci.sh FPGA section GREEN; fixture `examples/fpga/tcp_ip.aria.json`. `[CPU]` ★
 
 ### Slice ① timing + throughput
-- [ ] T1 — PipelineInfo → TaskSet, RTA latency bound; cross-check emulator. `[CPU]` ★
+- [x] T1 — `lift fpga timing`: hard latency (`latency × clk_period`) + timing
+      closure (critical-path ≤ clock period), each cross-checked against an
+      INDEPENDENT source (max stage-delay vs Aria critical-path; @clock_freq vs
+      target_period_ns), fail-closed on disagreement; C-slow fold feasibility via
+      `rt.rs` RTA (`c_slow_factor` streams ≤ II slots — over-fold caught). 16 unit
+      tests; ci.sh GREEN with closure + over-fold teeth; brutal-reviewed
+      (tautological-fold/false-accept findings fixed). `[CPU]` ★
 - [ ] T2 — pipeline → qnet throughput/bottleneck/stability. `[CPU]` ★
 - [ ] T3 — hard-vs-soft sweep `scripts/fpga-pipeline-sweep.sh` (+`--check`). `[CPU]`/`[GPU]`
 

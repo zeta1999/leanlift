@@ -223,6 +223,36 @@ else
   pass "fpga teeth  (unsupported schema rejected)"
 fi
 
+# T1 — pipeline timing certificate: hard latency + timing closure (cross-checked).
+if "$LIFT" fpga timing "$M/../fpga/pipeline_demo.aria.json" >"$TMP/ft" 2>&1; then
+  if grep -q "16.000 ns" "$TMP/ft" \
+     && grep -q "0.800 ns ≤ clock 8.000 ns → CLOSES" "$TMP/ft" \
+     && grep -q "2/2 pipeline(s) certified" "$TMP/ft"; then
+    pass "fpga timing  (mac: 2-cyc 16ns latency @125MHz, closes 0.8≤8ns)"
+  else
+    bad "fpga timing: wrong certificate"; cat "$TMP/ft"
+  fi
+else
+  bad "fpga timing failed (exit $?)"; cat "$TMP/ft"
+fi
+# teeth: a stage slower than the clock must FAIL closure (exit 1).
+printf '{"schema":"aria-ir-json/v1","id":0,"name":"slow","ports":[],"clock_domains":[],"annotations":[{"kind":"clock_freq","value":"500000000"}],"nodes":[],"pipeline":{"id":0,"num_stages":2,"latency":2,"initiation_interval":1,"flow_control":{"fc":"none"},"stages":[{"index":0,"name":null,"comb_delay_ns":3.0,"lut_count":null,"reg_count":0,"forwarded_values":[]},{"index":1,"name":null,"comb_delay_ns":1.0,"lut_count":null,"reg_count":0,"forwarded_values":[]}]},"systolic":null,"timing":{"c_slow_factor":1,"target_period_ns":2.0,"critical_path_ns":3.0,"retiming_weights":[],"buffers":[]}}\n' >"$TMP/slow.json"
+if "$LIFT" fpga timing "$TMP/slow.json" >"$TMP/fts" 2>&1; then
+  bad "fpga timing accepted a path slower than the clock"; cat "$TMP/fts"
+else
+  grep -q "VIOLATED" "$TMP/fts" && pass "fpga timing teeth  (3ns path > 2ns clock → VIOLATED, exit 1)" \
+    || { bad "fpga timing teeth: wrong failure"; cat "$TMP/fts"; }
+fi
+# teeth: over-folding (more C-slow streams than II slots) must be caught by the RTA
+# fold check — proves it is a real schedulability test, not a tautology.
+printf '{"schema":"aria-ir-json/v1","id":0,"name":"overfold","ports":[],"clock_domains":[],"annotations":[{"kind":"clock_freq","value":"125000000"}],"nodes":[],"pipeline":{"id":0,"num_stages":2,"latency":2,"initiation_interval":2,"flow_control":{"fc":"none"},"stages":[]},"systolic":null,"timing":{"c_slow_factor":4,"target_period_ns":8.0,"critical_path_ns":1.0,"retiming_weights":[],"buffers":[]}}\n' >"$TMP/overfold.json"
+if "$LIFT" fpga timing "$TMP/overfold.json" >"$TMP/fto" 2>&1; then
+  bad "fpga timing accepted 4 streams over 2 slots (over-fold)"; cat "$TMP/fto"
+else
+  grep -q "OVER-FOLDED" "$TMP/fto" && pass "fpga timing teeth  (4 streams > 2 slots → OVER-FOLDED, exit 1)" \
+    || { bad "fpga timing teeth: over-fold not caught"; cat "$TMP/fto"; }
+fi
+
 # ---------------------------------------------------------------------------- #
 sect "M3 — prove (Lean, sorry-free)"
 if have lean; then

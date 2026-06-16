@@ -299,6 +299,9 @@ pub struct AriaModule {
     pub pipeline: Option<PipelineSummary>,
     pub target_period_ns: Option<f64>,
     pub critical_path_ns: Option<f64>,
+    /// C-slowing factor from `TimingInfo` (1 = not C-slowed). The number of
+    /// independent computation streams interleaved through one physical datapath.
+    pub c_slow_factor: u64,
 }
 
 pub struct FormalSummary {
@@ -312,6 +315,9 @@ pub struct PipelineSummary {
     pub latency: u64,
     pub initiation_interval: u64,
     pub flow_control: String,
+    /// Per-stage estimated combinational delay (ns), in stage order. `None` where
+    /// Aria did not estimate it (common). Used to cross-check `critical_path_ns`.
+    pub stage_delays: Vec<Option<f64>>,
 }
 
 /// Project a parsed JSON module object into the typed view, validating the schema.
@@ -392,11 +398,17 @@ pub fn read_module(v: &Json) -> Result<AriaModule, String> {
             .and_then(|f| f.str_field("fc"))
             .unwrap_or("?")
             .to_string(),
+        stage_delays: p
+            .get("stages")
+            .and_then(Json::as_arr)
+            .map(|ss| ss.iter().map(|s| s.get("comb_delay_ns").and_then(Json::as_f64)).collect())
+            .unwrap_or_default(),
     });
 
     let timing = v.get("timing");
     let target_period_ns = timing.and_then(|t| t.get("target_period_ns")).and_then(Json::as_f64);
     let critical_path_ns = timing.and_then(|t| t.get("critical_path_ns")).and_then(Json::as_f64);
+    let c_slow_factor = timing.and_then(|t| t.get("c_slow_factor")).and_then(Json::as_u64).unwrap_or(1).max(1);
 
     Ok(AriaModule {
         name,
@@ -410,12 +422,191 @@ pub fn read_module(v: &Json) -> Result<AriaModule, String> {
         pipeline,
         target_period_ns,
         critical_path_ns,
+        c_slow_factor,
     })
 }
 
 /// Parse a whole IR-JSON file (possibly several modules) into typed views.
 pub fn read_file(src: &str) -> Result<Vec<AriaModule>, String> {
     parse_stream(src)?.iter().map(read_module).collect()
+}
+
+impl AriaModule {
+    /// Resolve the module's clock frequency (Hz): the `@clock_freq` annotation if
+    /// present, else the first clock domain that declares a `freq_hz`. `None` if
+    /// the design states no clock — then only cycle-counts (not wall-clock ns) and
+    /// no timing-closure verdict are available.
+    pub fn clock_freq_hz(&self) -> Option<u64> {
+        if let Some((_, v)) = self.annotations.iter().find(|(k, _)| k == "clock_freq") {
+            if let Ok(hz) = v.parse::<u64>() {
+                return Some(hz);
+            }
+        }
+        self.clock_domains.iter().find_map(|(_, f)| *f)
+    }
+}
+
+// ===================================================================
+// T1 — pipeline timing certificate (PLAN-fpga Phase T).
+//
+// Project an Aria `PipelineInfo` (+ `@clock_freq` + `TimingInfo`) onto a HARD
+// latency/timing-closure obligation. Every number here is mechanical and is
+// CROSS-CHECKED against an independent source (the No-LLM ledger, T1):
+//
+//   * timing closure  — the binding constraint `critical_path_ns ≤ clock_period`.
+//     Where Aria also gives per-stage `comb_delay_ns`, we re-derive the critical
+//     path as `max(stage delay)` and assert it agrees with Aria's `critical_path_ns`
+//     (two independent derivations of the same number).
+//   * hard latency    — `latency` cycles ⇒ `latency × clock_period` ns. For a
+//     feed-forward pipeline (II = 1) the cycle latency must equal `num_stages`
+//     (one register delay per stage); we assert that independent identity.
+//   * fold feasibility — a C-slowed datapath interleaves `c_slow_factor`
+//     INDEPENDENT computation streams through ONE physical datapath, one slot per
+//     `II` cycles. That is a genuine TDM scheduling question (NOT a spatial
+//     pipeline — those stages run in parallel and need no scheduling proof), so we
+//     REUSE `rt.rs` RTA: `c_slow_factor` unit-cost lanes with period = deadline =
+//     II. It is feasible iff `c_slow_factor ≤ II` (RTA finds WCRT = c_slow_factor).
+//     This is a real cross-check of two IR fields — over-folding (more streams than
+//     slots) is caught — not a tautology. For the common case (c_slow=1, II=1) it
+//     is one lane, trivially feasible.
+//
+// Where two independent sources for a number exist, they are RECONCILED, never
+// silently preferred: clock period (@clock_freq vs target_period_ns) and the
+// critical path (max stage-delay vs Aria's critical_path_ns). Any disagreement
+// FAILS the certificate (fail-closed) rather than trusting one source.
+// ===================================================================
+
+use super::rt;
+
+/// Guard against absurd/garbage IR: an II or C-slow factor past this is treated as
+/// malformed (fail-closed) rather than truncated to u32 or used to size a Vec.
+const MAX_FOLD: u64 = 1 << 16;
+
+pub struct TimingCert {
+    pub module: String,
+    pub num_stages: u64,
+    pub latency_cycles: u64,
+    pub ii: u64,
+    pub c_slow_factor: u64,
+    pub clk_period_ns: Option<f64>,
+    pub critical_path_ns: Option<f64>,
+    /// Independent critical path = max per-stage comb delay, when all stages
+    /// carry an estimate; `None` if any stage delay is missing.
+    pub derived_critical_ns: Option<f64>,
+    /// `Some(true/false)` once a critical path and clock period are both known.
+    pub closes_timing: Option<bool>,
+    /// True when closure rests on an INDEPENDENTLY-derived critical path (every
+    /// stage annotated); false when it can only trust Aria's `critical_path_ns`.
+    pub closure_independent: bool,
+    /// Hard end-to-end latency budget in ns (`latency × clk_period`), when clocked.
+    pub latency_ns: Option<f64>,
+    /// Feed-forward note (II = 1): `latency` vs `num_stages`. `None` if II≠1.
+    /// Equal = clean single-register stages; greater = benign (multi-cycle stages);
+    /// less = a real inconsistency (can't traverse N stages in < N cycles).
+    pub latency_vs_depth: Option<std::cmp::Ordering>,
+    /// RTA verdict on the C-slow fold (`c_slow_factor` lanes ≤ II slots).
+    pub fold_schedulable: bool,
+    /// Set when the two critical-path derivations disagree.
+    pub critical_mismatch: bool,
+    /// Set when @clock_freq and target_period_ns disagree on the clock period.
+    pub period_mismatch: bool,
+    /// Set when II or c_slow_factor is past `MAX_FOLD` (malformed IR).
+    pub fold_malformed: bool,
+}
+
+impl TimingCert {
+    /// Fail-closed: certified iff closure does not VIOLATE, the fold is schedulable
+    /// and well-formed, latency is not impossibly small, and no cross-check
+    /// disagreed. Unknown closure (no critical-path/clock) and "trusts Aria"
+    /// (no per-stage breakdown) are WARNINGS, not failures.
+    pub fn ok(&self) -> bool {
+        self.closes_timing != Some(false)
+            && self.fold_schedulable
+            && !self.fold_malformed
+            && !self.critical_mismatch
+            && !self.period_mismatch
+            && self.latency_vs_depth != Some(std::cmp::Ordering::Less)
+    }
+}
+
+/// Build the timing certificate for a module, or `None` if it has no pipeline.
+pub fn certify_timing(m: &AriaModule) -> Option<TimingCert> {
+    let p = m.pipeline.as_ref()?;
+    let ii = p.initiation_interval.max(1);
+    let c_slow = m.c_slow_factor.max(1);
+
+    // Clock period (ns) from two independent sources — reconcile them. @clock_freq
+    // is the design constraint; target_period_ns is Aria's recorded target. If both
+    // exist and disagree (> 1 ps), the IR is inconsistent ⇒ fail-closed.
+    let freq_period = m.clock_freq_hz().map(|hz| 1.0e9 / hz as f64);
+    let period_mismatch = match (freq_period, m.target_period_ns) {
+        (Some(a), Some(b)) => (a - b).abs() > 1e-3,
+        _ => false,
+    };
+    let clk_period_ns = freq_period.or(m.target_period_ns);
+
+    // Independent critical path: max per-stage combinational delay, but only when
+    // EVERY stage carries an estimate (else the max would understate the path).
+    let derived_critical_ns = if !p.stage_delays.is_empty() && p.stage_delays.iter().all(Option::is_some) {
+        p.stage_delays.iter().filter_map(|d| *d).fold(f64::NEG_INFINITY, f64::max).into()
+    } else {
+        None
+    };
+
+    // Cross-check the two critical-path derivations when both exist (1 ps tol).
+    let critical_mismatch = match (derived_critical_ns, m.critical_path_ns) {
+        (Some(d), Some(a)) => (d - a).abs() > 1e-3,
+        _ => false,
+    };
+
+    // Timing closure: the slowest path must fit in one clock period. Prefer the
+    // independently-derived critical path; fall back to Aria's reported one (and
+    // record that the closure then rests on a single, un-cross-checked source).
+    let crit = derived_critical_ns.or(m.critical_path_ns);
+    let closure_independent = derived_critical_ns.is_some();
+    let closes_timing = match (crit, clk_period_ns) {
+        (Some(c), Some(t)) => Some(c <= t + 1e-9),
+        _ => None,
+    };
+
+    let latency_ns = clk_period_ns.map(|t| p.latency as f64 * t);
+
+    // Feed-forward relation (II = 1 only): latency vs pipeline depth.
+    let latency_vs_depth = (ii == 1).then(|| p.latency.cmp(&p.num_stages));
+
+    // Fold feasibility via RTA (rt.rs): `c_slow_factor` lanes contend for II slots.
+    // Guard absurd sizes (truncation / Vec blow-up) as malformed, fail-closed.
+    let fold_malformed = ii > MAX_FOLD || c_slow > MAX_FOLD;
+    let fold_schedulable = if fold_malformed {
+        false
+    } else {
+        let ts = rt::TaskSet {
+            policy: rt::Policy::Rm,
+            tasks: (0..c_slow)
+                .map(|k| rt::Task { name: format!("stream{k}"), c: 1, t: ii as u32, d: ii as u32 })
+                .collect(),
+        };
+        rt::analyze(&ts).schedulable
+    };
+
+    Some(TimingCert {
+        module: m.name.clone(),
+        num_stages: p.num_stages,
+        latency_cycles: p.latency,
+        ii,
+        c_slow_factor: c_slow,
+        clk_period_ns,
+        critical_path_ns: m.critical_path_ns,
+        derived_critical_ns,
+        closes_timing,
+        closure_independent,
+        latency_ns,
+        latency_vs_depth,
+        fold_schedulable,
+        critical_mismatch,
+        period_mismatch,
+        fold_malformed,
+    })
 }
 
 // ===================================================================
@@ -429,7 +620,11 @@ fn usage() -> ! {
         \x20     ingest an Aria-HDL IR-JSON export and echo a faithful summary\n\
         \x20     (modules, ports, clock domains, annotations, formal properties,\n\
         \x20     pipeline + timing). Phase B round-trip check.\n\
-        \x20 (planned: lift fpga check|prove|timing|equiv — see docs/PLAN-fpga.md)\n"
+        \x20 lift fpga timing <design.aria.json>\n\
+        \x20     certify each pipeline's HARD latency + timing closure (clock\n\
+        \x20     period vs critical path), cross-checked; RTA fold check on II.\n\
+        \x20     Exit 1 if any pipeline violates closure / a cross-check disagrees.\n\
+        \x20 (planned: lift fpga check|prove|equiv — see docs/PLAN-fpga.md)\n"
     );
     exit(2);
 }
@@ -441,42 +636,151 @@ pub fn main(mut argv: Vec<String>) {
             argv.remove(0);
             "info"
         }
+        Some("timing") => {
+            argv.remove(0);
+            "timing"
+        }
         Some(s) if !s.starts_with('-') => "info",
         _ => usage(),
     };
     match verb {
         "info" => info_cmd(argv),
+        "timing" => timing_cmd(argv),
         _ => usage(),
     }
 }
 
-fn info_cmd(a: Vec<String>) {
+/// Shared positional-file argument parsing for the single-file verbs.
+fn one_file(a: Vec<String>) -> String {
     let mut file: Option<String> = None;
-    let mut i = 0;
-    while i < a.len() {
-        match a[i].as_str() {
-            s if s.starts_with("--") => {
-                eprintln!("unknown flag: {s}");
-                usage();
-            }
-            _ => {
-                if file.is_some() {
-                    usage();
-                }
-                file = Some(a[i].clone());
-            }
+    for arg in &a {
+        if arg.starts_with("--") {
+            eprintln!("unknown flag: {arg}");
+            usage();
+        } else if file.is_some() {
+            usage();
+        } else {
+            file = Some(arg.clone());
         }
-        i += 1;
     }
-    let path = file.unwrap_or_else(|| usage());
-    let src = std::fs::read_to_string(&path).unwrap_or_else(|e| {
+    file.unwrap_or_else(|| usage())
+}
+
+fn load(path: &str) -> Vec<AriaModule> {
+    let src = std::fs::read_to_string(path).unwrap_or_else(|e| {
         eprintln!("error reading {path}: {e}");
         exit(2);
     });
-    let modules = read_file(&src).unwrap_or_else(|e| {
+    read_file(&src).unwrap_or_else(|e| {
         eprintln!("error: {path}: {e}");
         exit(1);
-    });
+    })
+}
+
+fn timing_cmd(a: Vec<String>) {
+    let path = one_file(a);
+    let modules = load(&path);
+
+    let mut certs = Vec::new();
+    for m in &modules {
+        if let Some(c) = certify_timing(m) {
+            certs.push(c);
+        }
+    }
+    if certs.is_empty() {
+        eprintln!("no pipelined modules in {path} (nothing to certify)");
+        exit(2);
+    }
+
+    println!("leanlift FPGA timing certificate — {path}");
+    println!("════════════════════════════════════════════════════");
+    let mut all_ok = true;
+    for c in &certs {
+        all_ok &= c.ok();
+        println!();
+        println!("pipeline `{}` — {} stages, II {}, C-slow {}", c.module, c.num_stages, c.ii, c.c_slow_factor);
+
+        // Hard latency bound.
+        match (c.clk_period_ns, c.latency_ns) {
+            (Some(t), Some(ns)) => {
+                let mhz = 1.0e3 / t; // f(MHz) = 1e9/period(ns) / 1e6 = 1e3/period(ns)
+                println!(
+                    "  hard latency : {} cycle(s) = {:.3} ns  (clk {:.3} ns, {:.1} MHz)",
+                    c.latency_cycles, ns, t, mhz
+                );
+            }
+            _ => println!("  hard latency : {} cycle(s)  (no clock stated — cycles only)", c.latency_cycles),
+        }
+        if c.period_mismatch {
+            println!("    ✗ DISAGREE : @clock_freq period ≠ Aria target_period_ns — inconsistent IR");
+        }
+        if let Some(ord) = c.latency_vs_depth {
+            use std::cmp::Ordering::*;
+            let note = match ord {
+                Equal => "latency == depth (clean single-register stages) ✓".to_string(),
+                Greater => format!("latency {} > depth {} (multi-cycle stages — ok)", c.latency_cycles, c.num_stages),
+                Less => format!("latency {} < depth {} — IMPOSSIBLE ✗", c.latency_cycles, c.num_stages),
+            };
+            println!("    cross-check: {note}");
+        }
+
+        // Timing closure.
+        match (c.derived_critical_ns.or(c.critical_path_ns), c.clk_period_ns, c.closes_timing) {
+            (Some(crit), Some(t), Some(ok)) => {
+                let basis = if c.closure_independent { "max stage-delay" } else { "Aria critical-path (trusted, no per-stage breakdown)" };
+                println!(
+                    "  closure      : {} {:.3} ns {} clock {:.3} ns → {}",
+                    basis,
+                    crit,
+                    if ok { "≤" } else { ">" },
+                    t,
+                    if ok { "CLOSES" } else { "VIOLATED" }
+                );
+            }
+            _ => println!("  closure      : unknown (no critical-path / clock estimate) — WARN"),
+        }
+        // Independent critical-path cross-check (only when stages are fully annotated).
+        if let (Some(d), Some(a)) = (c.derived_critical_ns, c.critical_path_ns) {
+            println!(
+                "    cross-check: max stage-delay {:.3} ns vs Aria critical-path {:.3} ns {}",
+                d,
+                a,
+                if c.critical_mismatch { "✗ DISAGREE" } else { "✓" }
+            );
+        }
+
+        // RTA fold feasibility (rt.rs): c_slow_factor streams contend for II slots.
+        if c.fold_malformed {
+            println!("  fold (RTA)   : II/C-slow past {MAX_FOLD} — malformed IR ✗");
+        } else {
+            println!(
+                "  fold (RTA)   : {} stream(s) @ {} slot(s)/frame → {}",
+                c.c_slow_factor,
+                c.ii,
+                if c.fold_schedulable { "schedulable ✓" } else { "OVER-FOLDED ✗" }
+            );
+        }
+
+        let verdict = if !c.ok() {
+            "FAILED"
+        } else if c.closes_timing == Some(true) && !c.closure_independent {
+            "CERTIFIED (closure trusts Aria critical-path)"
+        } else {
+            "CERTIFIED"
+        };
+        println!("  verdict      : {verdict}");
+    }
+
+    println!();
+    println!("{}/{} pipeline(s) certified", certs.iter().filter(|c| c.ok()).count(), certs.len());
+    if !all_ok {
+        exit(1);
+    }
+}
+
+fn info_cmd(a: Vec<String>) {
+    let path = one_file(a);
+    let modules = load(&path);
 
     println!("aria-ir-json: {} module(s) from {}", modules.len(), path);
     for m in &modules {
@@ -639,6 +943,158 @@ mod tests {
         // Adversarial/truncated input must return Err, never overflow the stack.
         let deep = "[".repeat(100_000);
         assert!(parse_stream(&deep).is_err());
+    }
+
+    // ---- T1: timing certificate ----------------------------------------
+
+    /// A pipeline with per-stage delays, a clock, and a healthy closure margin.
+    fn pipe_json(ii: u64, latency: u64, stages: &[f64], crit: f64, period: f64, freq_hz: &str) -> String {
+        pipe_json_full(ii, 1, latency, stages, crit, period, freq_hz)
+    }
+
+    /// Full knobs: also the C-slow factor (for the fold) and the period source.
+    #[allow(clippy::too_many_arguments)]
+    fn pipe_json_full(ii: u64, c_slow: u64, latency: u64, stages: &[f64], crit: f64, period: f64, freq_hz: &str) -> String {
+        let stage_arr: Vec<String> = stages
+            .iter()
+            .enumerate()
+            .map(|(i, d)| format!(r#"{{"index": {i}, "name": null, "comb_delay_ns": {d}, "lut_count": null, "reg_count": 0, "forwarded_values": []}}"#))
+            .collect();
+        let freq_ann = if freq_hz.is_empty() {
+            String::new()
+        } else {
+            format!(r#"{{"kind": "clock_freq", "value": "{freq_hz}"}}"#)
+        };
+        format!(
+            r#"{{
+              "schema": "aria-ir-json/v1", "id": 0, "name": "p",
+              "ports": [], "clock_domains": [],
+              "annotations": [{freq_ann}],
+              "nodes": [],
+              "pipeline": {{"id": 0, "num_stages": {n}, "latency": {latency},
+                "initiation_interval": {ii}, "flow_control": {{"fc": "none"}},
+                "stages": [{stages_joined}]}},
+              "systolic": null,
+              "timing": {{"c_slow_factor": {c_slow}, "target_period_ns": {period}, "critical_path_ns": {crit}, "retiming_weights": [], "buffers": []}}
+            }}"#,
+            n = stages.len(),
+            stages_joined = stage_arr.join(", "),
+        )
+    }
+
+    #[test]
+    fn timing_closes_with_margin() {
+        use std::cmp::Ordering;
+        // 125 MHz ⇒ 8 ns period; slowest stage 2 ns ⇒ closes with room.
+        let j = pipe_json(1, 2, &[1.5, 2.0], 2.0, 8.0, "125000000");
+        let m = &read_file(&j).unwrap()[0];
+        let c = certify_timing(m).unwrap();
+        assert_eq!(c.clk_period_ns, Some(8.0));
+        assert_eq!(c.closes_timing, Some(true));
+        assert!(c.closure_independent); // every stage annotated
+        assert_eq!(c.derived_critical_ns, Some(2.0)); // max(1.5, 2.0)
+        assert!(!c.critical_mismatch); // 2.0 == Aria 2.0
+        assert!(!c.period_mismatch); // 8 ns == 1e9/125e6
+        assert_eq!(c.latency_ns, Some(16.0)); // 2 cycles × 8 ns
+        assert_eq!(c.latency_vs_depth, Some(Ordering::Equal)); // II=1, latency==num_stages
+        assert!(c.fold_schedulable);
+        assert!(c.ok());
+    }
+
+    #[test]
+    fn timing_violation_when_stage_slower_than_clock() {
+        // 500 MHz ⇒ 2 ns period; a 3 ns stage cannot close — teeth.
+        let j = pipe_json(1, 2, &[3.0, 1.0], 3.0, 2.0, "500000000");
+        let c = certify_timing(&read_file(&j).unwrap()[0]).unwrap();
+        assert_eq!(c.closes_timing, Some(false));
+        assert!(!c.ok(), "a path slower than the clock must FAIL the certificate");
+    }
+
+    #[test]
+    fn critical_path_cross_check_disagreement_flags() {
+        // Aria says critical-path 1.0 ns but the stages' max is 5 ns — the two
+        // derivations disagree, so the certificate must refuse (no silent accept).
+        let j = pipe_json(1, 2, &[5.0, 2.0], 1.0, 8.0, "125000000");
+        let c = certify_timing(&read_file(&j).unwrap()[0]).unwrap();
+        assert!(c.critical_mismatch);
+        assert!(!c.ok());
+    }
+
+    #[test]
+    fn period_cross_check_disagreement_flags() {
+        // @clock_freq 125 MHz ⇒ 8 ns, but Aria target_period_ns says 4 ns. A stale
+        // frequency annotation must NOT silently win — the disagreement fails closed.
+        let j = pipe_json(1, 2, &[1.0, 1.0], 1.0, 4.0, "125000000");
+        let c = certify_timing(&read_file(&j).unwrap()[0]).unwrap();
+        assert!(c.period_mismatch);
+        assert!(!c.ok());
+    }
+
+    #[test]
+    fn feedforward_latency_below_depth_is_impossible() {
+        // II=1 but latency (1) < num_stages (2): cannot traverse 2 stages in 1 cycle.
+        let j = pipe_json(1, 1, &[1.0, 1.0], 1.0, 8.0, "125000000");
+        let c = certify_timing(&read_file(&j).unwrap()[0]).unwrap();
+        assert_eq!(c.latency_vs_depth, Some(std::cmp::Ordering::Less));
+        assert!(!c.ok());
+    }
+
+    #[test]
+    fn feedforward_latency_above_depth_is_benign() {
+        // II=1, latency (5) > num_stages (2): legitimate multi-cycle stages, not a
+        // failure. Must NOT false-reject a correct design.
+        let j = pipe_json(1, 5, &[1.0, 1.0], 1.0, 8.0, "125000000");
+        let c = certify_timing(&read_file(&j).unwrap()[0]).unwrap();
+        assert_eq!(c.latency_vs_depth, Some(std::cmp::Ordering::Greater));
+        assert!(c.ok(), "multi-cycle stages (latency > depth) are valid");
+    }
+
+    #[test]
+    fn cslow_fold_consistent_is_schedulable() {
+        // C-slow 4 interleaved through II=4 slots: exactly one slot per stream ⇒ feasible.
+        let j = pipe_json_full(4, 4, 4, &[1.0, 1.0, 1.0, 1.0], 1.0, 8.0, "125000000");
+        let c = certify_timing(&read_file(&j).unwrap()[0]).unwrap();
+        assert_eq!(c.c_slow_factor, 4);
+        assert_eq!(c.ii, 4);
+        assert!(c.fold_schedulable);
+        assert_eq!(c.latency_vs_depth, None); // only checked for II=1
+        assert!(c.ok());
+    }
+
+    #[test]
+    fn cslow_overfold_is_caught() {
+        // C-slow 4 streams but only II=2 slots/frame: two streams miss their slot.
+        // The fold (RTA) must find this OVER-FOLDED — a real, non-tautological check.
+        let j = pipe_json_full(2, 4, 2, &[1.0, 1.0], 1.0, 8.0, "125000000");
+        let c = certify_timing(&read_file(&j).unwrap()[0]).unwrap();
+        assert_eq!(c.c_slow_factor, 4);
+        assert_eq!(c.ii, 2);
+        assert!(!c.fold_schedulable, "4 streams cannot share 2 slots/frame");
+        assert!(!c.ok());
+    }
+
+    #[test]
+    fn malformed_huge_fold_fails_closed() {
+        // An absurd II must be rejected as malformed, never truncated to u32 or used
+        // to allocate a giant Vec.
+        let j = pipe_json_full(5_000_000_000, 1, 2, &[1.0, 1.0], 1.0, 8.0, "125000000");
+        let c = certify_timing(&read_file(&j).unwrap()[0]).unwrap();
+        assert!(c.fold_malformed);
+        assert!(!c.ok());
+    }
+
+    #[test]
+    fn real_pipeline_demo_fixture_certifies() {
+        // The committed faithful fixture (Aria `pipeline_demo.ahdl`): mac closes at
+        // 125 MHz with a 0.8 ns critical path; no per-stage delays, so the critical
+        // cross-check is skipped (not a mismatch).
+        let src = std::fs::read_to_string("examples/fpga/pipeline_demo.aria.json").unwrap();
+        let mods = read_file(&src).unwrap();
+        let mac = mods.iter().find(|m| m.name == "mac").unwrap();
+        let c = certify_timing(mac).unwrap();
+        assert_eq!(c.closes_timing, Some(true)); // 0.8 ns ≤ 8 ns
+        assert!(!c.critical_mismatch);
+        assert!(c.ok());
     }
 
     #[test]
