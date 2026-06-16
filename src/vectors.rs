@@ -48,6 +48,125 @@ impl SplitMix64 {
 /// The shared seed (the analogue of the spike generator's fixed Python seed).
 pub const SEED: u64 = 0x1EA5_11F7_2026_0612;
 
+/// Encode an `f64` as the `u64` IEEE-754 bit pattern a float Vector arg carries.
+/// (The whole float path moves bit patterns so the integer join-key/compare
+/// machinery is reused unchanged.)
+pub fn f64_bits(x: f64) -> u64 {
+    x.to_bits()
+}
+
+/// A finite `f64` drawn from `rng`, uniform in `[lo, hi]` (full mantissa
+/// randomness via the 53-bit quotient).
+fn rand_f64(rng: &mut SplitMix64, lo: f64, hi: f64) -> f64 {
+    let u = (rng.next() >> 11) as f64 / (1u64 << 53) as f64; // [0,1)
+    lo + u * (hi - lo)
+}
+
+/// `fadd(a, b) = a + b` over f64 — the Phase-1 smoke test for the float path.
+/// Edge doubles (zeros, ±1, fractions, large/small) plus random finite pairs;
+/// the only point is that C++ `double` and Lean `Float` agree bit-for-bit.
+pub fn fadd_vectors() -> Vec<Vector> {
+    let mut v = Vec::new();
+    let mut push = |a: f64, b: f64| v.push(Vector::new(vec![f64_bits(a), f64_bits(b)]));
+    for (a, b) in [
+        (0.0, 0.0),
+        (1.0, 2.0),
+        (-1.0, 1.0),
+        (0.1, 0.2),       // the classic non-representable sum
+        (0.5, 0.25),
+        (1e16, 1.0),      // 1.0 lost below the ulp
+        (1e-300, 1e-300), // tiny
+        (3.141592653589793, 2.718281828459045),
+        (-0.0, 0.0),      // signed-zero canonicalization check
+    ] {
+        push(a, b);
+    }
+    let mut rng = SplitMix64(SEED);
+    for _ in 0..200 {
+        push(rand_f64(&mut rng, -1e6, 1e6), rand_f64(&mut rng, -1e6, 1e6));
+    }
+    v
+}
+
+/// `gss(a, b, tol)` over f64 — golden-section search for the min of
+/// f(x)=(x-3)²+1. Brackets that enclose the minimizer x*=3, across a spread of
+/// tolerances (tight → exact, loose → early exit) plus random enclosing
+/// brackets. Encoded as IEEE bit patterns.
+pub fn gss_vectors() -> Vec<Vector> {
+    let mut v = Vec::new();
+    let tols = [1.0_f64, 1e-1, 1e-3, 1e-6, 1e-9, 1e-12];
+    let mut push = |a: f64, b: f64, t: f64| {
+        v.push(Vector::new(vec![f64_bits(a), f64_bits(b), f64_bits(t)]))
+    };
+    // edges: brackets straddling x*=3, including asymmetric and wide ones
+    for (a, b) in [(0.0, 10.0), (2.5, 3.5), (-10.0, 20.0), (2.9, 3.1), (0.0, 3.0), (3.0, 6.0)] {
+        for &t in &tols {
+            push(a, b, t);
+        }
+    }
+    let mut rng = SplitMix64(SEED);
+    // random enclosing brackets: a ∈ [-20,2.9], b ∈ [3.1,20]
+    for _ in 0..150 {
+        let a = rand_f64(&mut rng, -20.0, 2.9);
+        let b = rand_f64(&mut rng, 3.1, 20.0);
+        let t = tols[(rng.range(0, tols.len() as u64 - 1)) as usize];
+        push(a, b, t);
+    }
+    v
+}
+
+/// `gd(x0, y0, eta)` over f64 — fixed-step gradient descent on
+/// f(x,y)=(x-1)²+(y-2)². A spread of starting points × step sizes: mostly
+/// stable η ∈ (0,1) (converging), plus η = 1 (oscillating, objective preserved)
+/// and a couple of large η (diverging — still bit-exact; the postcondition skips
+/// non-finite results). Encoded as IEEE bit patterns.
+pub fn gd_vectors() -> Vec<Vector> {
+    let mut v = Vec::new();
+    let etas = [0.01_f64, 0.05, 0.1, 0.25, 0.5, 0.9, 1.0, 1.5];
+    let mut push = |x: f64, y: f64, e: f64| {
+        v.push(Vector::new(vec![f64_bits(x), f64_bits(y), f64_bits(e)]))
+    };
+    for (x, y) in [(0.0, 0.0), (1.0, 2.0), (-5.0, 5.0), (10.0, -10.0), (3.0, 3.0)] {
+        for &e in &etas {
+            push(x, y, e);
+        }
+    }
+    let mut rng = SplitMix64(SEED);
+    for _ in 0..150 {
+        let x = rand_f64(&mut rng, -50.0, 50.0);
+        let y = rand_f64(&mut rng, -50.0, 50.0);
+        // bias toward stable steps so the descent postcondition is meaningful
+        let e = etas[(rng.range(0, 5)) as usize];
+        push(x, y, e);
+    }
+    v
+}
+
+/// `hooke_jeeves(x0, y0, step)` over f64 — derivative-free pattern search on
+/// f(x,y)=(x-1)²+(y-2)². Starting points × initial step sizes; the method never
+/// diverges (it only descends or shrinks the step), so every result is finite.
+/// Encoded as IEEE bit patterns.
+pub fn hj_vectors() -> Vec<Vector> {
+    let mut v = Vec::new();
+    let steps = [0.05_f64, 0.1, 0.25, 0.5, 1.0, 2.0];
+    let mut push = |x: f64, y: f64, s: f64| {
+        v.push(Vector::new(vec![f64_bits(x), f64_bits(y), f64_bits(s)]))
+    };
+    for (x, y) in [(0.0, 0.0), (1.0, 2.0), (-5.0, 5.0), (10.0, -10.0), (3.0, 3.0)] {
+        for &s in &steps {
+            push(x, y, s);
+        }
+    }
+    let mut rng = SplitMix64(SEED);
+    for _ in 0..150 {
+        let x = rand_f64(&mut rng, -50.0, 50.0);
+        let y = rand_f64(&mut rng, -50.0, 50.0);
+        let s = steps[(rng.range(0, steps.len() as u64 - 1)) as usize];
+        push(x, y, s);
+    }
+    v
+}
+
 /// `streamed(deposit, start, stop, t)` — edge + safe + deliberate-overflow.
 pub fn streamed_vectors() -> Vec<Vector> {
     let mut v = Vec::new();

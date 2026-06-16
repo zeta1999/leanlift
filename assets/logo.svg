@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
+  <defs>
+    <linearGradient id="ll-code" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#f59e0b"/>
+      <stop offset="100%" stop-color="#ef4444"/>
+    </linearGradient>
+    <linearGradient id="ll-lean" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#60a5fa"/>
+      <stop offset="100%" stop-color="#a78bfa"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Dark circle -->
+  <circle cx="100" cy="100" r="96" fill="#0d1b2a"/>
+
+  <!-- Source (code) block, lower-left — orange/red -->
+  <rect x="34" y="118" width="52" height="40" rx="6" fill="url(#ll-code)" opacity="0.95"/>
+  <rect x="42" y="128" width="36" height="4" rx="2" fill="#0d1b2a" opacity="0.55"/>
+  <rect x="42" y="138" width="26" height="4" rx="2" fill="#0d1b2a" opacity="0.55"/>
+  <rect x="42" y="148" width="30" height="4" rx="2" fill="#0d1b2a" opacity="0.55"/>
+
+  <!-- Lean (λ) block, upper-right — blue/purple -->
+  <rect x="114" y="42" width="52" height="40" rx="6" fill="url(#ll-lean)" opacity="0.95"/>
+  <path d="M 128 74 L 138 50 L 142 50 L 154 74 M 134 62 L 148 62"
+        fill="none" stroke="#0d1b2a" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" opacity="0.7"/>
+
+  <!-- The lift: an arrow carrying code up into Lean -->
+  <path d="M 70 122 L 128 64" fill="none" stroke="#e5e7eb" stroke-width="4"
+        stroke-linecap="round" stroke-dasharray="2 9"/>
+  <path d="M 118 60 L 130 60 L 130 72" fill="none" stroke="#e5e7eb"
+        stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- Bit-exact equivalence: the ≡ at the centre -->
+  <g stroke="#72efdd" stroke-width="4.5" stroke-linecap="round">
+    <line x1="78" y1="96"  x2="122" y2="96"/>
+    <line x1="78" y1="106" x2="122" y2="106"/>
+    <line x1="78" y1="116" x2="122" y2="116"/>
+  </g>
+
+  <!-- Proof check mark, top-left -->
+  <path d="M 34 58 L 44 68 L 64 44"
+        fill="none" stroke="#72efdd" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

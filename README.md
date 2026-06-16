@@ -1,177 +1,165 @@
-# leanlift
+<p align="center">
+  <img src="assets/logo.svg" alt="leanlift" width="160"/>
+</p>
 
-Lift a function into a **Lean 4** model and **prove it's the same function** by
-**bit-exact differential execution**. See [`SPEC.md`](./SPEC.md) for the full
-design. The trust model: *LLM proposes, algorithm disposes* — a candidate Lean
-translation is never trusted; the differential oracle and the Lean kernel
-discharge or refute it.
+<h1 align="center">leanlift</h1>
 
-## Status — spine + sound Rust path + LLM C++ front-end
+<p align="center">
+  <strong>Lift a function into a Lean 4 model and prove it's the same function — by bit-exact differential execution.</strong>
+</p>
 
-The validation spine is complete end to end, the engine is generic over the
-signature (any arity / integer width), and **all three front-ends are wired**:
+<p align="center">
+  <img src="https://img.shields.io/badge/status-WIP-yellow.svg" alt="WIP">
+  <img src="https://img.shields.io/badge/Lean4-4.28-blueviolet.svg" alt="Lean4">
+  <img src="https://img.shields.io/badge/oracle-bit--exact-green.svg" alt="bit-exact">
+  <img src="https://img.shields.io/badge/sound%20path-Charon%2BAeneas-orange.svg" alt="Aeneas">
+  <img src="https://img.shields.io/badge/trust-LLM%20proposes%2C%20algorithm%20disposes-lightgrey.svg" alt="trust model">
+</p>
 
-```
-lift verify streamed       # C++    hand-written candidate, vs C++ oracle
-lift verify avg            # C++    (a+b)/2, the midpoint-overflow bug
-lift verify rust-streamed  # Rust   SOUND: Charon+Aeneas extract Lean from Rust
-lift verify cpp-streamed   # C++    LLM: claude -p translates streamed.cpp → Lean
-lift verify cpp-dot2       # C++    LLM: a fresh kernel (a*b + c*d), no reference
-lift verify go-avg         # Go     LLM: Go oracle (go build), Go also wraps
-lift verify sol-dot2       # Solidity LLM: EVM oracle (forge), unchecked overflow
-lift verify rust-isqrt     # Rust   LOOP kernel: isqrt; postcond checked at L1
-lift verify rust-bisect    # Rust   bisection METHOD (ε-termination); + cpp-* via LLM
-```
+> **⚠ Work in progress.** The validation spine is complete end to end; float kernels are L1 (testing) only — native `Float` is opaque, so float *proofs* are future work. See [`SPEC.md`](./SPEC.md) and [`docs/`](./docs) for the design and open tracks.
 
-Oracle per language (SPEC §6): **C++** `clang++` + typed runner; **Go**
-`go build` + typed runner; **Solidity** a `forge` script that replays vectors
-through forge's in-process EVM (calldata in, return data out; a revert becomes the
-`OVERFLOW` token). Go (installed) and Foundry (`forge`, installed) are needed for
-those two.
+---
 
-- **Sound Rust path** (`rust-streamed`): candidate Lean is extracted *from Rust*
-  by Charon+Aeneas (no hand-writing). Needs them built — run
-  `scripts/build_aeneas.sh` (~20–40 min, into `~/work/_verif-tools`; override
-  with `LEANLIFT_AENEAS`).
-- **LLM C++ path** (`cpp-*`): `claude -p` translates the C++ against the audited
-  `LeanLift.Checked` library; the engine runs the candidate, and on a typecheck
-  error or difftest mismatch feeds a *structured* failure (Lean error, or the
-  minimal counterexample) back for repair — bounded by `max_iters`. Responses are
-  content-addressed under `.leanlift-cache/`, so reproduced runs don't re-bill.
-  *LLM proposes, algorithm disposes.*
+The trust model is **"LLM proposes, algorithm disposes."** A candidate Lean
+translation is *never trusted*: the differential oracle and the Lean kernel
+discharge or refute it. A wrong candidate produces unexplained mismatches, drops
+to L0, and exits nonzero. See [`SPEC.md`](./SPEC.md) for the full design.
+
+## The validation ladder
 
 ```
-  level: L1 conformant/450  (bit-exact on the safe domain)
-  conform : 410   declared: 40   mismatch: 0
-  coverage: clamp-low=150 clamp-high=138 ramp=162
-  divergence (declared, overflow class):
-    lean: …561633 => OVERFLOW
-    cpp : …561633 => 30861823284991  (silently wrapped)
+L0  typechecks         the candidate elaborates and runs
+L1  conformant         bit-exact vs the source oracle on a deterministic vector set
+L3  proved             a theorem on the extracted model, certified sorry-free
 ```
 
-For `streamed` the 40/450 divergences are the **declared** `deposit*(t-start) ≥
-2^64` overflow class — C++ wraps, the checked Lean model fails — the same
-boundary the original spike found four independent ways. A wrong candidate is
-caught: it produces *unexplained* mismatches, drops to L0, and exits nonzero.
-`--lean <candidate.lean>` overrides an example's built-in candidate (the hook the
-LLM front-end writes to). Run `tests/run.sh` for the positive + negative suite.
+## Front-ends — how a candidate is obtained
 
-## The pieces (mapped to SPEC §4)
+| front-end | source | how the Lean candidate is produced | trust |
+|---|---|---|:-:|
+| **Prewritten** | C++ | hand-written model (ground truth for tests) | oracle-checked |
+| **Sound (Rust)** | Rust | **extracted** by Charon + Aeneas (no hand-writing) | by construction |
+| **LLM** | C++ / Go / Solidity | an agent translates it, then propose→difftest→repair | oracle-checked |
 
-| path | role |
-|---|---|
-| `examples/{streamed,avg}/*.cpp` | source kernels; `extern "C"` ABI for the oracle |
-| `examples/{streamed,avg}/*.lean` | the **candidate** models + vector runners (untrusted) |
-| `lean/LeanLift/Checked.lean` | audited support library: checked-`UInt` `Res` monad (the `wrap`-vs-`fail` semantics) |
-| `src/sig.rs` | machine-integer types + function signatures |
-| `src/lang.rs` | source languages (C++, Go, Solidity) |
-| `src/frontend.rs` | how a candidate is obtained: prewritten, Charon+Aeneas, or LLM |
-| `src/harness.rs` | LLM front-end: `claude -p` translate + propose→difftest→repair loop |
-| `src/vectors.rs` | deterministic vector generation (edge / safe / overflow) |
-| `src/oracle.rs` | C++/Go oracle: compile source + a generated typed runner |
-| `src/oracle_sol.rs` | Solidity oracle: a `forge` script over forge's in-process EVM |
-| `src/leanrt.rs` | run the candidate (support-lib `lean --run`, or Aeneas `lake env lean`) |
-| `src/compare.rs` | bit-exact comparator + profile-driven divergence classifier |
-| `src/report.rs` | L0/L1 verdict, human report, `report.json` |
-| `src/prove.rs` | L3 path: assemble model + theorems, certify sorry-free, recipe |
-| `src/examples.rs` | built-in example registry |
-| `src/main.rs` | the `lift` CLI |
-| `scripts/build_aeneas.sh` | build Charon+Aeneas from source (the sound Rust path) |
+## What it verifies
 
-## Build & run
+| domain | examples | the lesson |
+|---|---|---|
+| **Integer** (checked `UInt`) | `streamed`, `avg`, `dot2` | the unsigned-overflow `wrap` boundary — C++ wraps, the checked model fails |
+| **Integer loops / methods** | `isqrt`, `bisect` | a proven postcondition over a bounded loop / ε-bracket method |
+| **Low-precision** | `quant` | one parametric quantizer, fp8 → f64; `\|q−n\| ≤ ulp/2` |
+| **Float** (IEEE-754 binary64) | `fadd`, `opt-gss`, `opt-gd`, `opt-hj` | numerical **optimization**, bit-exact vs C++ `double` |
+
+### Float optimization kernels ([`lean-opt`](../numerical-algorithms/lean-opt))
+
+A ladder of `double` optimizers — Lean's native binary64 `Float` matches C++
+`double` **bit-for-bit** on `+ − × ÷ √` under `-ffp-contract=off`, so the oracle
+is exact (NaN/`-0.0` canonicalized):
+
+| kernel | algorithm | property checked (L1) |
+|---|---|---|
+| `opt-gss` | golden-section search (1D) | `a ≤ x ≤ b ∧ \|x−3\| ≤ ½·tol + √ε` |
+| `opt-gd`  | gradient descent (multi-D) | `0 ≤ f(x_K) ≤ f(x_0)` (descent, η ≤ 1) |
+| `opt-hj`  | Hooke–Jeeves (derivative-free, à la NLOpt) | `0 ≤ f(best) ≤ f(start)` |
+
+The `√ε` floor in the `opt-gss` bound is real: a derivative-free search on a
+quadratic can only locate the minimizer to ≈`1e-8` — the tool *measures* it.
+
+## Four C++→Lean translation lanes
+
+The LLM front-end is **agent-swappable** — any backend may propose; the oracle
+disposes identically. The lanes double as a model-quality comparison
+(`lift verify --lane <name> cpp-*`):
+
+| lane | backend | where |
+|---|---|---|
+| `claude` | `claude -p` (reference) | local |
+| `skill`  | same, driven from [`SKILL.md`](./SKILL.md) — proves the doc is self-sufficient | local |
+| `gemma`  | `gemma4:e4b` via ollama (16 GB class) | local |
+| `qwen`   | Qwen3 on an OpenAI-compatible endpoint | remote (env-configured, skipped until set) |
+
+Responses are content-addressed under `.leanlift-cache/`, keyed by lane + prompt,
+so reruns don't re-query. See [`SKILL.md`](./SKILL.md) for the portable skill the
+lanes follow.
+
+## Quick start
 
 ```bash
 cargo build --release
-./target/release/lift verify streamed --out report.json
-./target/release/lift verify rust-streamed   # sound path (needs Aeneas built)
-./tests/run.sh                               # positive + negative + sound suite
+
+./target/release/lift verify avg               # integer: the midpoint-overflow bug
+./target/release/lift verify opt-gss           # float: golden-section, bit-exact
+./target/release/lift verify cpp-opt-gss --lane gemma   # LLM translates it (local model)
+./target/release/lift prove  rust-isqrt        # L3: r·r ≤ n < (r+1)², sorry-free
+./tests/run.sh                                 # positive + negative + sound suite
+
+# the optimization ladder + lane-quality report:
+cd ../numerical-algorithms/lean-opt && ./ci.sh
 ```
 
-The engine compiles the Lean support library to `.olean` on first run.
+The engine compiles the Lean support libraries (`LeanLift.Checked`,
+`LeanLift.Float`) to `.olean` on first run. The **sound Rust path**
+(`rust-streamed`, `rust-isqrt`, `rust-bisect`) needs Charon + Aeneas built —
+`scripts/build_aeneas.sh`.
 
-## Proof: L3 (`lift prove`)
+## L3 — proof (`lift prove`)
 
-Beyond L1 conformance, `lift prove` discharges a theorem on the extracted model:
+Beyond L1 conformance, `lift prove` discharges a theorem on the *extracted* model
+and certifies it **sorry-free** (`#print axioms` shows no `sorryAx`):
 
 ```
-lift prove rust-streamed   # streamed_low/high/bounded/mono
-lift prove rust-isqrt       # isqrt_correct:  r·r ≤ n < (r+1)²            (a LOOP)
-lift prove rust-bisect      # bisect_correct: lo² ≤ n < (lo+eps+1)²  (bisection METHOD)
+lift prove rust-isqrt    # isqrt_correct: r·r ≤ n < (r+1)²              (a LOOP)
+lift prove rust-bisect   # bisect_correct: lo² ≤ n < (lo+eps+1)²   (bisection METHOD)
   → level: L3 proved  (Lean theorems closed, sorry-free)
-    axioms: propext, Classical.choice, Quot.sound   # no sorryAx → kernel-checked
+    axioms: propext, Classical.choice, Quot.sound
 ```
 
-The Rust sources live in-repo at `examples/rust-kernels/src/lib.rs`; the proof
-obligations are hand-written fragments wired per example via `proof_frag` in
-`src/examples.rs` (`examples/*/​*Proofs.lean`). `isqrt_correct` is proved over the
-Aeneas-extracted binary-search loop with `loop.spec_decr_nat` (measure `hi-lo`,
-invariant `lo²≤n ∧ n<(hi+1)² ∧ lo≤hi ∧ hi≤65535`).
-
-It runs Charon+Aeneas to extract the `Result Std.U64` model, prepends it to a
-proven theorem fragment (`examples/streamed/StreamedProofs.lean`), elaborates via
-`lake env lean`, and certifies the result is **sorry-free** (`#print axioms`
-shows no `sorryAx`). It emits a worked `*.recipe.md` (source → model → obligations
-→ certificate) and a `proof.json`. A false theorem fails to elaborate and exits
-nonzero — the Lean kernel is the gate (the agent-assisted *closing* of harder
-goals is the generalization).
-
-`streamed_bounded` is proved **under** the no-overflow hypothesis
-`deposit*(t-start) ≤ U64.max` — the exact side-condition the differential test
-discovered empirically. Same boundary, now a proof premise.
+A false theorem fails to elaborate and exits nonzero — the Lean kernel is the
+gate. (Float kernels stay at L1: native `Float` is `@[extern]`, opaque to the
+kernel; a certified rounding-bound track is in [`docs/float-formats.md`](docs/float-formats.md).)
 
 ## Behavioural models (`lift model`)
 
-A **dual axis** to the code→Lean path above: author one **behavioural model** in
-an easy text format and generate, from a single source of truth, a Lean proof
-(qualitative), a PRISM model (quantitative), and runnable code. Seven families,
-one auto-detected one-command path (no `--kind`). See
-[`docs/SPEC-models.md`](docs/SPEC-models.md) /
-[`docs/PLAN-models.md`](docs/PLAN-models.md), the authoring reference
-[`docs/FORMATS-models.md`](docs/FORMATS-models.md), the performance/real-time
-extensions [`docs/PLAN-perf-demo.md`](docs/PLAN-perf-demo.md) /
-[`docs/PLAN-qnet-rta.md`](docs/PLAN-qnet-rta.md), and the
-[tutorial](docs/TUTORIAL.md) / [testing manual](docs/TESTING.md).
+A **dual axis**: author one behavioural model and generate, from a single source
+of truth, a Lean proof (qualitative), a PRISM model (quantitative), and runnable
+code. Seven families (FSM, Petri, behaviour tree, coloured PN, stochastic GSPN,
+queueing net, real-time). See [`docs/SPEC-models.md`](docs/SPEC-models.md),
+[`docs/TUTORIAL.md`](docs/TUTORIAL.md), [`docs/TESTING.md`](docs/TESTING.md).
 
 ```
-lift model check    examples/models/dock.model.toml      # M1 BFS: reachability + safety
-lift model prove    examples/models/mcl.model.toml       # M3 Lean: safety theorem, sorry-free
-lift model prism    examples/models/link.model.toml      # M2 CTMC: throughput/delay/overflow + PRISM
-lift model simulate examples/models/link.model.toml      # empirical (SSA) cross-check of the CTMC
-lift model export   examples/models/mission.model.toml --lang rust --verify   # L1 loop closure
-#   flags: --set name=value (override a GSPN param) · --scale S (load knob: tasks/qnet)
+lift model check    examples/models/dock.model.toml    # M1 BFS: reachability + safety
+lift model prove    examples/models/mcl.model.toml      # M3 Lean: safety, sorry-free
+lift model prism    examples/models/link.model.toml     # M2 CTMC: throughput/delay/overflow
 ```
-
-| Family | Example | Lesson |
-|--------|---------|--------|
-| FSM | `mcl` | supervisor × belief product; "never navigate while delocalized" |
-| Petri + loss | `dock` | mutex *survives* token loss; the loss-induced deadlock |
-| Behaviour tree | `mission` | reactive tree → LTS; "never moving while lost" |
-| Coloured PN | `resource` | mutex via a place invariant; CPN→PT unfolding |
-| Stochastic GSPN | `link` / `dock-gspn` | queue throughput/delay/overflow; the loss **phase transition** at `p*` |
-| **Queueing net** | `qnet` | open Jackson network; traffic equations, **bottleneck** divergence |
-| **Real-time** | `tasks` | RM/EDF schedulability: utilization bound + exact **RTA** / demand-bound |
-
-**Performance + correctness, one tool.** Beyond proof, the model axis answers
-*how fast / how likely / does it ever miss* and shows designers a **safe
-operating region** with a sharp boundary: the stochastic **phase transition**
-(`link`/`qnet`, CTMC + simulation) and the deterministic **schedulability** step
-(`tasks`, RTA/EDF). The [shared-workload demo](examples/models/shared-workload.recipe.md)
-puts both on one workload — *provably-safe ⊊ probably-safe*. The analysis kernels
-are themselves proved: the Petri firing kernel and the RTA recurrence are
-certified sorry-free by Aeneas (`lift prove rta-kernel`) and Kani.
 
 The **M-ladder** mirrors the code ladder: M1 checked (native BFS), M2
-model-checked (PRISM/native CTMC), M3 proved (Lean, sorry-free). The same trust
-model applies — the exporter is mechanical and the kernel/checker disposes: a
-wrong model goes red in *both* the BFS checker and the Lean proof. `export
---verify` closes the loop by difftesting generated code against the model (the
-model-axis L1), joining the two halves of leanlift. Each example ships a
-`*.recipe.md`; all are exercised by `tests/run.sh`.
+model-checked (PRISM/CTMC), M3 proved (Lean). Each example ships a `*.recipe.md`;
+all are exercised by `tests/run.sh`.
+
+## Project structure
+
+```
+src/
+  sig.rs        machine value types (int + float) & signatures
+  oracle.rs     C++/Go oracle: compile source + a typed runner (float = bit-pattern)
+  harness.rs    the LLM front-end: 4 lanes + propose→difftest→repair loop
+  frontend.rs   how a candidate is obtained (prewritten / Charon+Aeneas / LLM)
+  compare.rs    bit-exact comparator + divergence classifier + postconditions
+  prove.rs      L3: assemble model + theorems, certify sorry-free
+  models/       the behavioural-model axis (lift model)
+lean/LeanLift/
+  Checked.lean  audited checked-integer library (the wrap-vs-fail semantics)
+  Float.lean    audited IEEE-754 float library (bounded iteration, bit-exact)
+examples/
+  {streamed,avg,dot2,isqrt,bisect,quant}/   integer + low-precision kernels
+  opt/{gss,gd,hj}.{cpp,lean}                float optimization kernels
+  rust-kernels/                             the sound Rust path + proof obligations
+SKILL.md        the portable C++→Lean translation skill (the lanes follow it)
+```
 
 ## Next
 
-The proof procedure and the path toward a numerical algorithm (isqrt → bisection
-→ float error-bounds) are planned in
-[`docs/PLAN-proofs.md`](docs/PLAN-proofs.md). Also pending: a proof kernel for the
-support library (so LLM/hand candidates carry proofs too), signed/float types,
-structs/arrays, annotation ingestion → Contract IR (SPEC §7).
+Signed/float L3 proofs (FloatSpec/Flean/FLoPS), a proof kernel for the support
+library, structs/arrays, annotation ingestion → Contract IR (SPEC §7). The path
+toward numerical algorithms (isqrt → bisection → float error-bounds → optimizers)
+is in [`docs/PLAN-proofs.md`](docs/PLAN-proofs.md).

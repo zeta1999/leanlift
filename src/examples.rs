@@ -5,7 +5,7 @@
 use crate::compare::Profile;
 use crate::frontend::Frontend;
 use crate::lang::Lang;
-use crate::sig::{IntType, Signature};
+use crate::sig::{FloatType, IntType, Signature, Ty};
 use crate::vectors::{self, Vector};
 use std::path::PathBuf;
 
@@ -25,6 +25,11 @@ pub const NAMES: &[&str] = &[
     "streamed", "avg", "rust-streamed", "cpp-streamed", "cpp-dot2", "go-avg", "sol-dot2",
     "rust-isqrt", "cpp-isqrt", "rust-bisect", "cpp-bisect", "quant", "cpp-quant", "models-fire",
     "link-buffer", "rta-kernel",
+    // float path (Phase 1 smoke + the optimization ladder)
+    "fadd", "cpp-fadd",
+    "opt-gss", "cpp-opt-gss",
+    "opt-gd", "cpp-opt-gd",
+    "opt-hj", "cpp-opt-hj",
 ];
 
 fn lean_lib() -> PathBuf {
@@ -33,7 +38,12 @@ fn lean_lib() -> PathBuf {
 
 
 fn u(width: IntType, n: usize) -> Signature {
-    Signature { args: vec![width; n], ret: width }
+    Signature { args: vec![Ty::Int(width); n], ret: Ty::Int(width) }
+}
+
+/// An all-`f64` signature of arity `n` (the float-kernel shape `f(x…) -> y`).
+fn f64s(n: usize) -> Signature {
+    Signature { args: vec![Ty::Float(FloatType::F64); n], ret: Ty::Float(FloatType::F64) }
 }
 
 pub fn lookup(name: &str) -> Option<Example> {
@@ -189,7 +199,10 @@ pub fn lookup(name: &str) -> Option<Example> {
             lang: Lang::Cpp,
             source: "examples/quant/quant.cpp".into(),
             fn_name: "quantize_rne",
-            signature: Signature { args: vec![IntType::U8, IntType::U64], ret: IntType::U64 },
+            signature: Signature {
+                args: vec![Ty::Int(IntType::U8), Ty::Int(IntType::U64)],
+                ret: Ty::Int(IntType::U64),
+            },
             profile: Profile::Quant,
             gen: vectors::quant_vectors,
             frontend: Frontend::Prewritten {
@@ -203,7 +216,10 @@ pub fn lookup(name: &str) -> Option<Example> {
             lang: Lang::Cpp,
             source: "examples/quant/quant.cpp".into(),
             fn_name: "quantize_rne",
-            signature: Signature { args: vec![IntType::U8, IntType::U64], ret: IntType::U64 },
+            signature: Signature {
+                args: vec![Ty::Int(IntType::U8), Ty::Int(IntType::U64)],
+                ret: Ty::Int(IntType::U64),
+            },
             profile: Profile::Quant,
             gen: vectors::quant_vectors,
             frontend: Frontend::Llm { max_iters: 4 },
@@ -264,6 +280,112 @@ pub fn lookup(name: &str) -> Option<Example> {
                 entrypoint: "rta_term".into(),
             },
             proof_frag: Some("examples/models/RtaProofs.lean".into()),
+        }),
+        // ── Float path ──────────────────────────────────────────────────────
+        // Phase-1 smoke: f64 addition, hand candidate vs the C++ `double` oracle.
+        "fadd" => Some(Example {
+            name: "fadd",
+            lang: Lang::Cpp,
+            source: "examples/fadd/fadd.cpp".into(),
+            fn_name: "fadd",
+            signature: f64s(2),
+            profile: Profile::Fadd,
+            gen: vectors::fadd_vectors,
+            frontend: Frontend::Prewritten {
+                runner: "examples/fadd/Fadd.lean".into(),
+                lean_path: lean_lib(),
+            },
+            proof_frag: None,
+        }),
+        "cpp-fadd" => Some(Example {
+            name: "cpp-fadd",
+            lang: Lang::Cpp,
+            source: "examples/fadd/fadd.cpp".into(),
+            fn_name: "fadd",
+            signature: f64s(2),
+            profile: Profile::Fadd,
+            gen: vectors::fadd_vectors,
+            frontend: Frontend::Llm { max_iters: 4 },
+            proof_frag: None,
+        }),
+        // 1D optimization: golden-section search (f64). Hand candidate + LLM.
+        "opt-gss" => Some(Example {
+            name: "opt-gss",
+            lang: Lang::Cpp,
+            source: "examples/opt/gss.cpp".into(),
+            fn_name: "gss",
+            signature: f64s(3),
+            profile: Profile::OptGss,
+            gen: vectors::gss_vectors,
+            frontend: Frontend::Prewritten {
+                runner: "examples/opt/Gss.lean".into(),
+                lean_path: lean_lib(),
+            },
+            proof_frag: None,
+        }),
+        "cpp-opt-gss" => Some(Example {
+            name: "cpp-opt-gss",
+            lang: Lang::Cpp,
+            source: "examples/opt/gss.cpp".into(),
+            fn_name: "gss",
+            signature: f64s(3),
+            profile: Profile::OptGss,
+            gen: vectors::gss_vectors,
+            frontend: Frontend::Llm { max_iters: 4 },
+            proof_frag: None,
+        }),
+        // multi-D WITH gradient: fixed-step gradient descent (f64).
+        "opt-gd" => Some(Example {
+            name: "opt-gd",
+            lang: Lang::Cpp,
+            source: "examples/opt/gd.cpp".into(),
+            fn_name: "gd",
+            signature: f64s(3),
+            profile: Profile::OptGd,
+            gen: vectors::gd_vectors,
+            frontend: Frontend::Prewritten {
+                runner: "examples/opt/Gd.lean".into(),
+                lean_path: lean_lib(),
+            },
+            proof_frag: None,
+        }),
+        "cpp-opt-gd" => Some(Example {
+            name: "cpp-opt-gd",
+            lang: Lang::Cpp,
+            source: "examples/opt/gd.cpp".into(),
+            fn_name: "gd",
+            signature: f64s(3),
+            profile: Profile::OptGd,
+            gen: vectors::gd_vectors,
+            frontend: Frontend::Llm { max_iters: 4 },
+            proof_frag: None,
+        }),
+        // derivative-free (à la NLOpt's local no-derivative family):
+        // Hooke–Jeeves pattern search (f64).
+        "opt-hj" => Some(Example {
+            name: "opt-hj",
+            lang: Lang::Cpp,
+            source: "examples/opt/hj.cpp".into(),
+            fn_name: "hooke_jeeves",
+            signature: f64s(3),
+            profile: Profile::OptHj,
+            gen: vectors::hj_vectors,
+            frontend: Frontend::Prewritten {
+                runner: "examples/opt/Hj.lean".into(),
+                lean_path: lean_lib(),
+            },
+            proof_frag: None,
+        }),
+        "cpp-opt-hj" => Some(Example {
+            name: "cpp-opt-hj",
+            lang: Lang::Cpp,
+            source: "examples/opt/hj.cpp".into(),
+            fn_name: "hooke_jeeves",
+            signature: f64s(3),
+            profile: Profile::OptHj,
+            gen: vectors::hj_vectors,
+            frontend: Frontend::Llm { max_iters: 4 },
+            proof_frag: None,
         }),
         _ => None,
     }
