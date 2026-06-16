@@ -123,17 +123,22 @@ discovered empirically. Same boundary, now a proof premise.
 
 A **dual axis** to the code→Lean path above: author one **behavioural model** in
 an easy text format and generate, from a single source of truth, a Lean proof
-(qualitative), a PRISM model (quantitative), and runnable code. Five families,
+(qualitative), a PRISM model (quantitative), and runnable code. Seven families,
 one auto-detected one-command path (no `--kind`). See
 [`docs/SPEC-models.md`](docs/SPEC-models.md) /
-[`docs/PLAN-models.md`](docs/PLAN-models.md) and the authoring reference
-[`docs/FORMATS-models.md`](docs/FORMATS-models.md).
+[`docs/PLAN-models.md`](docs/PLAN-models.md), the authoring reference
+[`docs/FORMATS-models.md`](docs/FORMATS-models.md), the performance/real-time
+extensions [`docs/PLAN-perf-demo.md`](docs/PLAN-perf-demo.md) /
+[`docs/PLAN-qnet-rta.md`](docs/PLAN-qnet-rta.md), and the
+[tutorial](docs/TUTORIAL.md) / [testing manual](docs/TESTING.md).
 
 ```
-lift model check  examples/models/dock.model.toml      # M1 BFS: reachability + safety
-lift model prove  examples/models/mcl.model.toml       # M3 Lean: safety theorem, sorry-free
-lift model prism  examples/models/dock-gspn.model.toml # M2 CTMC: P(freed), E[time], P(≤T) + PRISM
-lift model export examples/models/mission.model.toml --lang rust --verify   # L1 loop closure
+lift model check    examples/models/dock.model.toml      # M1 BFS: reachability + safety
+lift model prove    examples/models/mcl.model.toml       # M3 Lean: safety theorem, sorry-free
+lift model prism    examples/models/link.model.toml      # M2 CTMC: throughput/delay/overflow + PRISM
+lift model simulate examples/models/link.model.toml      # empirical (SSA) cross-check of the CTMC
+lift model export   examples/models/mission.model.toml --lang rust --verify   # L1 loop closure
+#   flags: --set name=value (override a GSPN param) · --scale S (load knob: tasks/qnet)
 ```
 
 | Family | Example | Lesson |
@@ -142,7 +147,18 @@ lift model export examples/models/mission.model.toml --lang rust --verify   # L1
 | Petri + loss | `dock` | mutex *survives* token loss; the loss-induced deadlock |
 | Behaviour tree | `mission` | reactive tree → LTS; "never moving while lost" |
 | Coloured PN | `resource` | mutex via a place invariant; CPN→PT unfolding |
-| Stochastic GSPN | `dock-gspn` | lease `P=1`, `E=1/μd`; giveup `1−p^(K+1)` |
+| Stochastic GSPN | `link` / `dock-gspn` | queue throughput/delay/overflow; the loss **phase transition** at `p*` |
+| **Queueing net** | `qnet` | open Jackson network; traffic equations, **bottleneck** divergence |
+| **Real-time** | `tasks` | RM/EDF schedulability: utilization bound + exact **RTA** / demand-bound |
+
+**Performance + correctness, one tool.** Beyond proof, the model axis answers
+*how fast / how likely / does it ever miss* and shows designers a **safe
+operating region** with a sharp boundary: the stochastic **phase transition**
+(`link`/`qnet`, CTMC + simulation) and the deterministic **schedulability** step
+(`tasks`, RTA/EDF). The [shared-workload demo](examples/models/shared-workload.recipe.md)
+puts both on one workload — *provably-safe ⊊ probably-safe*. The analysis kernels
+are themselves proved: the Petri firing kernel and the RTA recurrence are
+certified sorry-free by Aeneas (`lift prove rta-kernel`) and Kani.
 
 The **M-ladder** mirrors the code ladder: M1 checked (native BFS), M2
 model-checked (PRISM/native CTMC), M3 proved (Lean, sorry-free). The same trust
