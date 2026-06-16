@@ -1,0 +1,109 @@
+{
+  "schema": "aria-ir-json/v1",
+  "id": 0,
+  "name": "ip_checksum",
+  "ports": [
+    {"id": 0, "value": 0, "name": "word0", "ty": {"t": "uint", "n": 16}, "dir": "input", "clock_domain": null},
+    {"id": 1, "value": 1, "name": "word1", "ty": {"t": "uint", "n": 16}, "dir": "input", "clock_domain": null},
+    {"id": 2, "value": 2, "name": "word2", "ty": {"t": "uint", "n": 16}, "dir": "input", "clock_domain": null},
+    {"id": 3, "value": 3, "name": "word3", "ty": {"t": "uint", "n": 16}, "dir": "input", "clock_domain": null},
+    {"id": 4, "value": 9, "name": "__output", "ty": {"t": "uint", "n": 16}, "dir": "output", "clock_domain": null}
+  ],
+  "clock_domains": [
+  ],
+  "annotations": [
+  ],
+  "nodes": [
+    {"id": 4, "name": "sum", "kind": {"k": "wire", "ty": {"t": "uint", "n": 16}, "expr": {"e": "binop", "op": "add", "lhs": {"e": "binop", "op": "add", "lhs": {"e": "binop", "op": "add", "lhs": {"e": "ref", "value": 0}, "rhs": {"e": "ref", "value": 1}, "ty": {"t": "uint", "n": 16}}, "rhs": {"e": "ref", "value": 2}, "ty": {"t": "uint", "n": 16}}, "rhs": {"e": "ref", "value": 3}, "ty": {"t": "uint", "n": 16}}}},
+    {"id": 5, "name": "folded", "kind": {"k": "wire", "ty": {"t": "uint", "n": 16}, "expr": {"e": "binop", "op": "add", "lhs": {"e": "ref", "value": 4}, "rhs": {"e": "binop", "op": "shr", "lhs": {"e": "ref", "value": 4}, "rhs": {"e": "lit", "lit": {"l": "uint", "value": "16", "width": 16}}, "ty": {"t": "uint", "n": 16}}, "ty": {"t": "uint", "n": 16}}}},
+    {"id": 6, "name": "result", "kind": {"k": "wire", "ty": {"t": "uint", "n": 16}, "expr": {"e": "unop", "op": "bitnot", "operand": {"e": "ref", "value": 5}, "ty": {"t": "uint", "n": 16}}}},
+    {"id": 9, "name": "__output", "kind": {"k": "wire", "ty": {"t": "uint", "n": 16}, "expr": {"e": "ref", "value": 6}}},
+    {"id": 7, "name": "", "kind": {"k": "formal_property", "property": {"kind": "cover", "temporal": {"tt": "combinational"}, "expr": {"e": "binop", "op": "ne", "lhs": {"e": "ref", "value": 6}, "rhs": {"e": "lit", "lit": {"l": "uint", "value": "0", "width": 32}}, "ty": {"t": "bit"}}, "name": null}}},
+    {"id": 8, "name": "", "kind": {"k": "formal_property", "property": {"kind": "cover", "temporal": {"tt": "combinational"}, "expr": {"e": "binop", "op": "eq", "lhs": {"e": "ref", "value": 6}, "rhs": {"e": "lit", "lit": {"l": "uint", "value": "0", "width": 32}}, "ty": {"t": "bit"}}, "name": null}}}
+  ],
+  "pipeline": null,
+  "systolic": null,
+  "timing": {"c_slow_factor": 1, "target_period_ns": null, "critical_path_ns": 1, "retiming_weights": [{"producer": 0, "consumer": 4, "weight": 0, "is_feedback": false}, {"producer": 1, "consumer": 4, "weight": 0, "is_feedback": false}, {"producer": 2, "consumer": 4, "weight": 0, "is_feedback": false}, {"producer": 3, "consumer": 4, "weight": 0, "is_feedback": false}, {"producer": 4, "consumer": 5, "weight": 0, "is_feedback": false}, {"producer": 4, "consumer": 5, "weight": 0, "is_feedback": false}, {"producer": 5, "consumer": 6, "weight": 0, "is_feedback": false}, {"producer": 6, "consumer": 9, "weight": 0, "is_feedback": false}], "buffers": []}
+}
+{
+  "schema": "aria-ir-json/v1",
+  "id": 1,
+  "name": "eth_type_detect",
+  "ports": [
+    {"id": 0, "value": 10, "name": "ethertype", "ty": {"t": "uint", "n": 16}, "dir": "input", "clock_domain": null}
+  ],
+  "clock_domains": [
+  ],
+  "annotations": [
+  ],
+  "nodes": [
+    {"id": 11, "name": "is_ipv4", "kind": {"k": "wire", "ty": {"t": "bit"}, "expr": {"e": "binop", "op": "eq", "lhs": {"e": "ref", "value": 10}, "rhs": {"e": "lit", "lit": {"l": "uint", "value": "2048", "width": 16}}, "ty": {"t": "bit"}}}},
+    {"id": 12, "name": "is_arp", "kind": {"k": "wire", "ty": {"t": "bit"}, "expr": {"e": "binop", "op": "eq", "lhs": {"e": "ref", "value": 10}, "rhs": {"e": "lit", "lit": {"l": "uint", "value": "2054", "width": 16}}, "ty": {"t": "bit"}}}},
+    {"id": 13, "name": "is_ipv6", "kind": {"k": "wire", "ty": {"t": "bit"}, "expr": {"e": "binop", "op": "eq", "lhs": {"e": "ref", "value": 10}, "rhs": {"e": "lit", "lit": {"l": "uint", "value": "34525", "width": 16}}, "ty": {"t": "bit"}}}},
+    {"id": 14, "name": "", "kind": {"k": "formal_property", "property": {"kind": "assert", "temporal": {"tt": "combinational"}, "expr": {"e": "binop", "op": "logic_and", "lhs": {"e": "binop", "op": "logic_and", "lhs": {"e": "unop", "op": "not", "operand": {"e": "binop", "op": "logic_and", "lhs": {"e": "ref", "value": 11}, "rhs": {"e": "ref", "value": 12}, "ty": {"t": "bit"}}, "ty": {"t": "bit"}}, "rhs": {"e": "unop", "op": "not", "operand": {"e": "binop", "op": "logic_and", "lhs": {"e": "ref", "value": 11}, "rhs": {"e": "ref", "value": 13}, "ty": {"t": "bit"}}, "ty": {"t": "bit"}}, "ty": {"t": "bit"}}, "rhs": {"e": "unop", "op": "not", "operand": {"e": "binop", "op": "logic_and", "lhs": {"e": "ref", "value": 12}, "rhs": {"e": "ref", "value": 13}, "ty": {"t": "bit"}}, "ty": {"t": "bit"}}, "ty": {"t": "bit"}}, "name": null}}},
+    {"id": 15, "name": "", "kind": {"k": "formal_property", "property": {"kind": "cover", "temporal": {"tt": "combinational"}, "expr": {"e": "ref", "value": 11}, "name": null}}},
+    {"id": 16, "name": "", "kind": {"k": "formal_property", "property": {"kind": "cover", "temporal": {"tt": "combinational"}, "expr": {"e": "ref", "value": 12}, "name": null}}},
+    {"id": 17, "name": "", "kind": {"k": "formal_property", "property": {"kind": "cover", "temporal": {"tt": "combinational"}, "expr": {"e": "ref", "value": 11}, "name": null}}}
+  ],
+  "pipeline": null,
+  "systolic": null,
+  "timing": {"c_slow_factor": 1, "target_period_ns": null, "critical_path_ns": 1, "retiming_weights": [{"producer": 10, "consumer": 11, "weight": 0, "is_feedback": false}, {"producer": 10, "consumer": 12, "weight": 0, "is_feedback": false}, {"producer": 10, "consumer": 13, "weight": 0, "is_feedback": false}], "buffers": []}
+}
+{
+  "schema": "aria-ir-json/v1",
+  "id": 2,
+  "name": "tcp_fsm",
+  "ports": [
+    {"id": 0, "value": 20, "name": "syn_in", "ty": {"t": "bit"}, "dir": "input", "clock_domain": null},
+    {"id": 1, "value": 21, "name": "ack_in", "ty": {"t": "bit"}, "dir": "input", "clock_domain": null},
+    {"id": 2, "value": 22, "name": "fin_in", "ty": {"t": "bit"}, "dir": "input", "clock_domain": null},
+    {"id": 3, "value": 23, "name": "rst_in", "ty": {"t": "bit"}, "dir": "input", "clock_domain": null},
+    {"id": 4, "value": 24, "name": "send_syn", "ty": {"t": "bit"}, "dir": "input", "clock_domain": null},
+    {"id": 5, "value": 25, "name": "send_fin", "ty": {"t": "bit"}, "dir": "input", "clock_domain": null},
+    {"id": 6, "value": 30, "name": "__output", "ty": {"t": "uint", "n": 4}, "dir": "output", "clock_domain": null}
+  ],
+  "clock_domains": [
+    {"id": 0, "name": "default", "clock_signal": 18, "reset_signal": 19, "freq_hz": "125000000"}
+  ],
+  "annotations": [
+    {"kind": "clock_freq", "value": "125000000"}
+  ],
+  "nodes": [
+    {"id": 26, "name": "state", "kind": {"k": "register", "ty": {"t": "uint", "n": 4}, "clock_domain": 0, "reset_value": {"e": "lit", "lit": {"l": "uint", "value": "0", "width": 4}}, "enable": null, "next": {"e": "mux", "cond": {"e": "ref", "value": 23}, "true": {"e": "lit", "lit": {"l": "uint", "value": "0", "width": 4}}, "false": {"e": "mux", "cond": {"e": "binop", "op": "logic_and", "lhs": {"e": "binop", "op": "eq", "lhs": {"e": "ref", "value": 26}, "rhs": {"e": "lit", "lit": {"l": "uint", "value": "4", "width": 4}}, "ty": {"t": "bit"}}, "rhs": {"e": "ref", "value": 22}, "ty": {"t": "bit"}}, "true": {"e": "lit", "lit": {"l": "uint", "value": "7", "width": 4}}, "false": {"e": "mux", "cond": {"e": "binop", "op": "logic_and", "lhs": {"e": "binop", "op": "eq", "lhs": {"e": "ref", "value": 26}, "rhs": {"e": "lit", "lit": {"l": "uint", "value": "4", "width": 4}}, "ty": {"t": "bit"}}, "rhs": {"e": "ref", "value": 25}, "ty": {"t": "bit"}}, "true": {"e": "lit", "lit": {"l": "uint", "value": "5", "width": 4}}, "false": {"e": "mux", "cond": {"e": "binop", "op": "logic_and", "lhs": {"e": "binop", "op": "eq", "lhs": {"e": "ref", "value": 26}, "rhs": {"e": "lit", "lit": {"l": "uint", "value": "3", "width": 4}}, "ty": {"t": "bit"}}, "rhs": {"e": "ref", "value": 21}, "ty": {"t": "bit"}}, "true": {"e": "lit", "lit": {"l": "uint", "value": "4", "width": 4}}, "false": {"e": "mux", "cond": {"e": "binop", "op": "logic_and", "lhs": {"e": "binop", "op": "logic_and", "lhs": {"e": "binop", "op": "eq", "lhs": {"e": "ref", "value": 26}, "rhs": {"e": "lit", "lit": {"l": "uint", "value": "2", "width": 4}}, "ty": {"t": "bit"}}, "rhs": {"e": "ref", "value": 20}, "ty": {"t": "bit"}}, "rhs": {"e": "ref", "value": 21}, "ty": {"t": "bit"}}, "true": {"e": "lit", "lit": {"l": "uint", "value": "4", "width": 4}}, "false": {"e": "mux", "cond": {"e": "binop", "op": "logic_and", "lhs": {"e": "binop", "op": "eq", "lhs": {"e": "ref", "value": 26}, "rhs": {"e": "lit", "lit": {"l": "uint", "value": "1", "width": 4}}, "ty": {"t": "bit"}}, "rhs": {"e": "ref", "value": 20}, "ty": {"t": "bit"}}, "true": {"e": "lit", "lit": {"l": "uint", "value": "3", "width": 4}}, "false": {"e": "mux", "cond": {"e": "binop", "op": "logic_and", "lhs": {"e": "binop", "op": "eq", "lhs": {"e": "ref", "value": 26}, "rhs": {"e": "lit", "lit": {"l": "uint", "value": "0", "width": 4}}, "ty": {"t": "bit"}}, "rhs": {"e": "unop", "op": "not", "operand": {"e": "ref", "value": 24}, "ty": {"t": "bit"}}, "ty": {"t": "bit"}}, "true": {"e": "lit", "lit": {"l": "uint", "value": "1", "width": 4}}, "false": {"e": "mux", "cond": {"e": "binop", "op": "logic_and", "lhs": {"e": "binop", "op": "eq", "lhs": {"e": "ref", "value": 26}, "rhs": {"e": "lit", "lit": {"l": "uint", "value": "0", "width": 4}}, "ty": {"t": "bit"}}, "rhs": {"e": "ref", "value": 24}, "ty": {"t": "bit"}}, "true": {"e": "lit", "lit": {"l": "uint", "value": "2", "width": 4}}, "false": {"e": "ref", "value": 26}, "ty": {"t": "uint", "n": 4}}, "ty": {"t": "uint", "n": 4}}, "ty": {"t": "uint", "n": 4}}, "ty": {"t": "uint", "n": 4}}, "ty": {"t": "uint", "n": 4}}, "ty": {"t": "uint", "n": 4}}, "ty": {"t": "uint", "n": 4}}, "ty": {"t": "uint", "n": 4}}}},
+    {"id": 30, "name": "__output", "kind": {"k": "wire", "ty": {"t": "uint", "n": 4}, "expr": {"e": "ref", "value": 26}}},
+    {"id": 27, "name": "", "kind": {"k": "formal_property", "property": {"kind": "assert", "temporal": {"tt": "always"}, "expr": {"e": "binop", "op": "le", "lhs": {"e": "ref", "value": 26}, "rhs": {"e": "lit", "lit": {"l": "uint", "value": "10", "width": 32}}, "ty": {"t": "bit"}}, "name": null}}},
+    {"id": 28, "name": "", "kind": {"k": "formal_property", "property": {"kind": "assert", "temporal": {"tt": "always"}, "expr": {"e": "binop", "op": "logic_and", "lhs": {"e": "ref", "value": 23}, "rhs": {"e": "binop", "op": "ne", "lhs": {"e": "ref", "value": 26}, "rhs": {"e": "lit", "lit": {"l": "uint", "value": "0", "width": 32}}, "ty": {"t": "bit"}}, "ty": {"t": "bit"}}, "name": null}}},
+    {"id": 29, "name": "", "kind": {"k": "formal_property", "property": {"kind": "cover", "temporal": {"tt": "combinational"}, "expr": {"e": "binop", "op": "eq", "lhs": {"e": "ref", "value": 26}, "rhs": {"e": "lit", "lit": {"l": "uint", "value": "4", "width": 32}}, "ty": {"t": "bit"}}, "name": null}}}
+  ],
+  "pipeline": null,
+  "systolic": null,
+  "timing": {"c_slow_factor": 1, "target_period_ns": 8, "critical_path_ns": 0.8, "retiming_weights": [{"producer": 23, "consumer": 26, "weight": 1, "is_feedback": false}, {"producer": 26, "consumer": 26, "weight": 1, "is_feedback": true}, {"producer": 22, "consumer": 26, "weight": 1, "is_feedback": false}, {"producer": 26, "consumer": 26, "weight": 1, "is_feedback": true}, {"producer": 25, "consumer": 26, "weight": 1, "is_feedback": false}, {"producer": 26, "consumer": 26, "weight": 1, "is_feedback": true}, {"producer": 21, "consumer": 26, "weight": 1, "is_feedback": false}, {"producer": 26, "consumer": 26, "weight": 1, "is_feedback": true}, {"producer": 20, "consumer": 26, "weight": 1, "is_feedback": false}, {"producer": 21, "consumer": 26, "weight": 1, "is_feedback": false}, {"producer": 26, "consumer": 26, "weight": 1, "is_feedback": true}, {"producer": 20, "consumer": 26, "weight": 1, "is_feedback": false}, {"producer": 26, "consumer": 26, "weight": 1, "is_feedback": true}, {"producer": 24, "consumer": 26, "weight": 1, "is_feedback": false}, {"producer": 26, "consumer": 26, "weight": 1, "is_feedback": true}, {"producer": 24, "consumer": 26, "weight": 1, "is_feedback": false}, {"producer": 26, "consumer": 26, "weight": 1, "is_feedback": true}, {"producer": 26, "consumer": 30, "weight": 0, "is_feedback": false}], "buffers": []}
+}
+{
+  "schema": "aria-ir-json/v1",
+  "id": 3,
+  "name": "arp_cache",
+  "ports": [
+    {"id": 0, "value": 33, "name": "lookup_ip", "ty": {"t": "uint", "n": 32}, "dir": "input", "clock_domain": null},
+    {"id": 1, "value": 34, "name": "insert_ip", "ty": {"t": "uint", "n": 32}, "dir": "input", "clock_domain": null},
+    {"id": 2, "value": 35, "name": "insert_mac", "ty": {"t": "uint", "n": 48}, "dir": "input", "clock_domain": null},
+    {"id": 3, "value": 36, "name": "insert_en", "ty": {"t": "bit"}, "dir": "input", "clock_domain": null}
+  ],
+  "clock_domains": [
+    {"id": 1, "name": "default", "clock_signal": 31, "reset_signal": 32, "freq_hz": "125000000"}
+  ],
+  "annotations": [
+    {"kind": "clock_freq", "value": "125000000"}
+  ],
+  "nodes": [
+    {"id": 37, "name": "cached_ip", "kind": {"k": "register", "ty": {"t": "uint", "n": 32}, "clock_domain": 1, "reset_value": {"e": "lit", "lit": {"l": "uint", "value": "0", "width": 32}}, "enable": null, "next": {"e": "mux", "cond": {"e": "ref", "value": 36}, "true": {"e": "ref", "value": 34}, "false": {"e": "ref", "value": 37}, "ty": {"t": "uint", "n": 32}}}},
+    {"id": 38, "name": "cached_mac", "kind": {"k": "register", "ty": {"t": "uint", "n": 48}, "clock_domain": 1, "reset_value": {"e": "lit", "lit": {"l": "uint", "value": "0", "width": 48}}, "enable": null, "next": {"e": "mux", "cond": {"e": "ref", "value": 36}, "true": {"e": "ref", "value": 35}, "false": {"e": "ref", "value": 38}, "ty": {"t": "uint", "n": 48}}}},
+    {"id": 39, "name": "valid", "kind": {"k": "register", "ty": {"t": "bit"}, "clock_domain": 1, "reset_value": {"e": "lit", "lit": {"l": "uint", "value": "0", "width": 1}}, "enable": null, "next": {"e": "mux", "cond": {"e": "ref", "value": 36}, "true": {"e": "lit", "lit": {"l": "uint", "value": "1", "width": 1}}, "false": {"e": "ref", "value": 39}, "ty": {"t": "bit"}}}},
+    {"id": 40, "name": "hit", "kind": {"k": "wire", "ty": {"t": "bit"}, "expr": {"e": "binop", "op": "logic_and", "lhs": {"e": "ref", "value": 39}, "rhs": {"e": "binop", "op": "eq", "lhs": {"e": "ref", "value": 37}, "rhs": {"e": "ref", "value": 33}, "ty": {"t": "bit"}}, "ty": {"t": "bit"}}}},
+    {"id": 41, "name": "", "kind": {"k": "formal_property", "property": {"kind": "assert", "temporal": {"tt": "always"}, "expr": {"e": "binop", "op": "logic_and", "lhs": {"e": "ref", "value": 36}, "rhs": {"e": "binop", "op": "eq", "lhs": {"e": "ref", "value": 39}, "rhs": {"e": "lit", "lit": {"l": "uint", "value": "1", "width": 32}}, "ty": {"t": "bit"}}, "ty": {"t": "bit"}}, "name": null}}},
+    {"id": 42, "name": "", "kind": {"k": "formal_property", "property": {"kind": "cover", "temporal": {"tt": "combinational"}, "expr": {"e": "ref", "value": 38}, "name": null}}}
+  ],
+  "pipeline": null,
+  "systolic": null,
+  "timing": {"c_slow_factor": 1, "target_period_ns": 8, "critical_path_ns": 0.8, "retiming_weights": [{"producer": 36, "consumer": 37, "weight": 1, "is_feedback": false}, {"producer": 34, "consumer": 37, "weight": 1, "is_feedback": false}, {"producer": 37, "consumer": 37, "weight": 1, "is_feedback": true}, {"producer": 36, "consumer": 38, "weight": 1, "is_feedback": false}, {"producer": 35, "consumer": 38, "weight": 1, "is_feedback": false}, {"producer": 38, "consumer": 38, "weight": 1, "is_feedback": true}, {"producer": 36, "consumer": 39, "weight": 1, "is_feedback": false}, {"producer": 39, "consumer": 39, "weight": 1, "is_feedback": true}, {"producer": 39, "consumer": 40, "weight": 0, "is_feedback": false}, {"producer": 37, "consumer": 40, "weight": 0, "is_feedback": false}, {"producer": 33, "consumer": 40, "weight": 0, "is_feedback": false}], "buffers": []}
+}
