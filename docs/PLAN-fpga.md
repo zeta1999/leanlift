@@ -234,7 +234,11 @@ proved kernel is touched.
       value-cross-checked vs the critical-path stage; balanced fallback when Aria
       gives no per-stage delays. 21 fpga unit tests; ci.sh GREEN with bottleneck +
       saturation teeth; brutal-reviewed (tie-break false-reject + tautology fixed). `[CPU]` ★
-- [ ] T3 — hard-vs-soft sweep `scripts/fpga-pipeline-sweep.sh` (+`--check`). `[CPU]`/`[GPU]`
+- [x] T3 — `scripts/fpga-pipeline-sweep.sh`: sweep clock frequency, tabulate
+      timing closure (hard, `lift fpga timing`) vs queue stability (soft, `lift fpga
+      throughput`); both knees land on f* = 1/critical-path, the ≤-vs-< gap at f*
+      being the hard/soft boundary. `--check` self-test wired into ci.sh GREEN.
+      `[CPU]`; heavy Verilator II confirmation `[GPU]` (off-CI).
 
 ### Slice ② control-FSM safety
 - [ ] F1 — enum Register+Mux → Lts extraction. `[CPU]` ★

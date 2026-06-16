@@ -279,6 +279,15 @@ else
     || { bad "fpga throughput teeth: saturation not caught"; cat "$TMP/fqs"; }
 fi
 
+# T3 — the hard-vs-soft sweep self-test: both knees must land on the closed-form f*.
+if bash "$ROOT/scripts/fpga-pipeline-sweep.sh" --check >"$TMP/fsw" 2>&1; then
+  grep -q "both knees sit at the closed-form f\* = 250 MHz" "$TMP/fsw" \
+    && pass "fpga sweep  (hard/soft knees both at f*=250MHz)" \
+    || { bad "fpga sweep: knees off"; cat "$TMP/fsw"; }
+else
+  bad "fpga pipeline sweep --check failed"; cat "$TMP/fsw"
+fi
+
 # ---------------------------------------------------------------------------- #
 sect "M3 — prove (Lean, sorry-free)"
 if have lean; then
