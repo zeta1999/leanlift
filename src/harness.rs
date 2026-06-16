@@ -149,13 +149,14 @@ fn lean_sig(sig: &Signature) -> String {
 }
 
 fn lean_ty_name(t: crate::sig::Ty) -> &'static str {
-    use crate::sig::{IntType::*, Ty};
+    use crate::sig::{FloatType, IntType::*, Ty};
     match t {
         Ty::Int(U8) => "U8",
         Ty::Int(U16) => "U16",
         Ty::Int(U32) => "U32",
         Ty::Int(U64) => "U64",
-        Ty::Float(_) => "Float",
+        Ty::Float(FloatType::F64) => "Float",
+        Ty::Float(FloatType::F32) => "Float32",
     }
 }
 
@@ -320,19 +321,26 @@ fn extract_def(raw: &str) -> String {
 /// bit pattern, with NaN → `NAN` and `-0.0` → `0` to mirror the C++ oracle's
 /// canonicalization (so the comparison stays bit-exact and lossless).
 fn float_support_runner(def: &str, name: &str, sig: &Signature) -> String {
+    use crate::sig::FloatType;
     let n = sig.arity();
+    // The Lean float type + bit conversions differ by precision: native `Float`
+    // is binary64 (UInt64 bits), `Float32` is binary32 (UInt32 bits).
+    let (fty, of_bits, to_nat, sign) = match sig.float_ty() {
+        FloatType::F64 => ("Float", "Float.ofBits", "toUInt64", "0x8000000000000000 : UInt64"),
+        FloatType::F32 => ("Float32", "Float32.ofBits", "toUInt32", "0x80000000 : UInt32"),
+    };
     let pat = (0..n).map(|i| format!("a{i}")).collect::<Vec<_>>().join(", ");
     let echo = (0..n).map(|i| format!("{{a{i}}}")).collect::<Vec<_>>().join(" ");
     let call = (0..n)
-        .map(|i| format!("(Float.ofBits a{i}.toUInt64)"))
+        .map(|i| format!("({of_bits} a{i}.{to_nat})"))
         .collect::<Vec<_>>()
         .join(" ");
     format!(
         "import LeanLift.Float\nopen LeanLift\n\n\
          namespace Candidate\n{def}\nend Candidate\n\n\
-         def fmtF (x : Float) : String :=\n\
+         def fmtF (x : {fty}) : String :=\n\
          \x20 if x.isNaN then \"NAN\"\n\
-         \x20 else let b := x.toBits; if b == (0x8000000000000000 : UInt64) then \"0\" else toString b\n\n\
+         \x20 else let b := x.toBits; if b == ({sign}) then \"0\" else toString b\n\n\
          def main : IO Unit := do\n\
          \x20 let path := (← IO.getEnv \"LEANLIFT_VECTORS\").getD \"vectors.txt\"\n\
          \x20 for line in (← IO.FS.lines path) do\n\

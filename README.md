@@ -65,6 +65,21 @@ is exact (NaN/`-0.0` canonicalized):
 The `√ε` floor in the `opt-gss` bound is real: a derivative-free search on a
 quadratic can only locate the minimizer to ≈`1e-8` — the tool *measures* it.
 
+**Convergence is proved, not just tested.** Beyond L1 bit-exact faithfulness,
+[`lean-opt/proofs`](../numerical-algorithms/lean-opt/proofs) carries machine-checked
+(Lean 4 + Mathlib, **sorry-free**) convergence theory, in three honest layers:
+
+| layer | result |
+|---|---|
+| **ℝ** | `gd_converges` (geometric `(1-2η)^{2n}→0`), `gss_golden_converges` (bracket `→ x*`), `hj_converges` + `hj_stall` (monotone ↓, stalls only near-optimally) |
+| **float** | a parametric rounding model with a proven `\|fl(x)−x\| ≤ ½·ulp`, instantiated f32 (2⁻²³) vs f64 (2⁻⁵²) — `f64_finer_than_f32` |
+| **compose** | `perturbed_contraction` ⇒ `\|fl_xₙ − x*\| ≤ ρⁿ·\|e₀\| + ½ulp/(1−ρ)` (method error + a precision-shrinking rounding floor) |
+
+The **honesty seam**: native Lean `Float` is `@[extern]` (opaque), so the *native*
+kernel stays L1 bit-exact; the convergence/rounding theorems are proved for the
+idealized ℝ algorithm and a faithful parametric float model. The `Float32` path
+(`fadd32`) gives real binary32-vs-binary64 differential runs.
+
 ## Four C++→Lean translation lanes
 
 The LLM front-end is **agent-swappable** — any backend may propose; the oracle

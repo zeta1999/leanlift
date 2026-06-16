@@ -30,7 +30,7 @@ else
   bad "quant did not verify"; cat "$TMP/quant.out"
 fi
 # float path: f64 smoke + the optimization ladder (bit-exact vs C++ double)
-for fe in fadd opt-gss opt-gd opt-hj; do
+for fe in fadd fadd32 opt-gss opt-gd opt-hj; do
   if "$LIFT" verify "$fe" --out "$TMP/$fe.json" >"$TMP/$fe.out" 2>&1; then
     pass "$fe (f64)  ($(grep -o 'L1 conformant/[0-9]*' "$TMP/$fe.out"); $(grep -o 'postcond: [0-9]*/[0-9]* hold' "$TMP/$fe.out"))"
   else
