@@ -150,6 +150,25 @@ else
 fi
 
 # ---------------------------------------------------------------------------- #
+sect "QNET — open queueing network (traffic equations + bottleneck)"
+if "$LIFT" model check "$M/qnet.model.toml" >"$TMP/qn" 2>&1; then
+  if grep -q "worker" "$TMP/qn" && grep -q "◀ bottleneck" "$TMP/qn" && grep -q "level : STABLE" "$TMP/qn"; then
+    pass "qnet check  (feedback network STABLE, worker is the bottleneck)"
+  else
+    bad "qnet check: unexpected verdict"; cat "$TMP/qn"
+  fi
+else
+  bad "qnet check did not return stable (exit $?)"; cat "$TMP/qn"
+fi
+# teeth: an over-driven station (λ>μ) must be reported UNSTABLE (exit 1).
+printf 'kind="qnet"\n[[station]]\nname="x"\nmu="3.0"\nlambda="5.0"\n' >"$TMP/qover.toml"
+if "$LIFT" model check "$TMP/qover.toml" >"$TMP/qno" 2>&1; then
+  bad "over-driven station wrongly reported stable"; cat "$TMP/qno"
+else
+  pass "qnet teeth  (λ>μ saturation caught as UNSTABLE)"
+fi
+
+# ---------------------------------------------------------------------------- #
 sect "M3 — prove (Lean, sorry-free)"
 if have lean; then
   for f in mcl dock mission resource link; do
