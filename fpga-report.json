@@ -1,6 +1,0 @@
-{
-  "schema": "aria-ir-json/v1",
-  "modules": 4,
-  "names": ["ip_checksum", "eth_type_detect", "tcp_fsm", "arp_cache"],
-  "formal_properties": 11
-}
