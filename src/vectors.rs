@@ -62,6 +62,37 @@ fn rand_f64(rng: &mut SplitMix64, lo: f64, hi: f64) -> f64 {
     lo + u * (hi - lo)
 }
 
+/// Encode an `f32` as its 32-bit IEEE pattern, carried in the `u64` Vector arg.
+pub fn f32_bits(x: f32) -> u64 {
+    x.to_bits() as u64
+}
+
+/// `fadd32(a, b) = a + b` over **f32** — the float32 twin of `fadd`, proving the
+/// `Float32` path (Lean binary32 ≡ C++ `float`, bit-exact). Same logical inputs
+/// as `fadd` so a side-by-side run shows the real f32-vs-f64 divergence.
+pub fn fadd32_vectors() -> Vec<Vector> {
+    let mut v = Vec::new();
+    let mut push = |a: f32, b: f32| v.push(Vector::new(vec![f32_bits(a), f32_bits(b)]));
+    for (a, b) in [
+        (0.0f32, 0.0),
+        (1.0, 2.0),
+        (-1.0, 1.0),
+        (0.1, 0.2),       // f32 rounding differs from f64
+        (1e7, 1.0),       // 1.0 lost below the f32 ulp at 1e7
+        (3.1415927, 2.7182817),
+        (-0.0, 0.0),
+    ] {
+        push(a, b);
+    }
+    let mut rng = SplitMix64(SEED);
+    for _ in 0..200 {
+        let a = (rand_f64(&mut rng, -1e6, 1e6)) as f32;
+        let b = (rand_f64(&mut rng, -1e6, 1e6)) as f32;
+        push(a, b);
+    }
+    v
+}
+
 /// `fadd(a, b) = a + b` over f64 — the Phase-1 smoke test for the float path.
 /// Edge doubles (zeros, ±1, fractions, large/small) plus random finite pairs;
 /// the only point is that C++ `double` and Lean `Float` agree bit-for-bit.

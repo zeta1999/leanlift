@@ -122,3 +122,23 @@ Caveats (deliberately out of scope for this first test, tracked in §5): this is
 saturation are not yet modeled, and the comparison is integer bit-exact (the
 `ulp/rel/abs`/NaN comparator modes are still unimplemented). The L3 rounding-bound
 *proof* still needs one of the libraries in §2.
+
+## 7. Result (2026-06-16) — native f64/f32 path + convergence proofs
+
+The float track advanced on three fronts (see `../numerical-algorithms/lean-opt`):
+
+- **Native `Float`/`Float32` end-to-end.** `sig.rs` gained `FloatType` (F32/F64);
+  the oracle emits a bit-pattern runner (`-ffp-contract=off`, NaN/`-0.0`
+  canonical) and the Lean runner uses native `Float`/`Float32`. `lift verify`
+  `fadd`/`opt-gss`/`opt-gd`/`opt-hj` (f64) and `fadd32` (f32) are **bit-exact** —
+  Lean's native binary64/binary32 ≡ C++ `double`/`float`. This is L1 only:
+  native `Float` is `@[extern]`, opaque to the kernel (no theorem statable).
+- **Convergence proved over ℝ** (Mathlib, sorry-free): `gd_converges`,
+  `gss_golden_converges`, `hj_converges` + `hj_stall` — the §1 *method-error*
+  notion, finally machine-checked for the optimizer kernels.
+- **A parametric rounding model** (`Opt/Float/Fmt.lean`): the §1 *rounding-error*
+  notion — `roundTo_le_half : |fl(x)−x| ≤ ½·ulp`, f32 (2⁻²³) vs f64 (2⁻⁵²) —
+  composed with the ℝ rate (`perturbed_contraction`) into an end-to-end ε bound
+  `|fl_xₙ − x*| ≤ ρⁿ·|e₀| + ½ulp/(1−ρ)`. Built in-repo (offline, sorry-free) with
+  a documented **vendor seam** (`Opt/Float/Vendor.lean`) so FLoPS/Flean (§2) can
+  drop in behind the `RoundingModel` interface without touching the proofs.

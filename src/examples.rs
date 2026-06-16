@@ -30,6 +30,8 @@ pub const NAMES: &[&str] = &[
     "opt-gss", "cpp-opt-gss",
     "opt-gd", "cpp-opt-gd",
     "opt-hj", "cpp-opt-hj",
+    // float32 path (real binary32 vs binary64 differences)
+    "fadd32", "cpp-fadd32",
 ];
 
 fn lean_lib() -> PathBuf {
@@ -44,6 +46,11 @@ fn u(width: IntType, n: usize) -> Signature {
 /// An all-`f64` signature of arity `n` (the float-kernel shape `f(x…) -> y`).
 fn f64s(n: usize) -> Signature {
     Signature { args: vec![Ty::Float(FloatType::F64); n], ret: Ty::Float(FloatType::F64) }
+}
+
+/// An all-`f32` signature of arity `n`.
+fn f32s(n: usize) -> Signature {
+    Signature { args: vec![Ty::Float(FloatType::F32); n], ret: Ty::Float(FloatType::F32) }
 }
 
 pub fn lookup(name: &str) -> Option<Example> {
@@ -305,6 +312,32 @@ pub fn lookup(name: &str) -> Option<Example> {
             signature: f64s(2),
             profile: Profile::Fadd,
             gen: vectors::fadd_vectors,
+            frontend: Frontend::Llm { max_iters: 4 },
+            proof_frag: None,
+        }),
+        // float32 smoke: binary32 addition (Lean Float32 ≡ C++ float).
+        "fadd32" => Some(Example {
+            name: "fadd32",
+            lang: Lang::Cpp,
+            source: "examples/fadd/fadd32.cpp".into(),
+            fn_name: "fadd32",
+            signature: f32s(2),
+            profile: Profile::Fadd,
+            gen: vectors::fadd32_vectors,
+            frontend: Frontend::Prewritten {
+                runner: "examples/fadd/Fadd32.lean".into(),
+                lean_path: lean_lib(),
+            },
+            proof_frag: None,
+        }),
+        "cpp-fadd32" => Some(Example {
+            name: "cpp-fadd32",
+            lang: Lang::Cpp,
+            source: "examples/fadd/fadd32.cpp".into(),
+            fn_name: "fadd32",
+            signature: f32s(2),
+            profile: Profile::Fadd,
+            gen: vectors::fadd32_vectors,
             frontend: Frontend::Llm { max_iters: 4 },
             proof_frag: None,
         }),
