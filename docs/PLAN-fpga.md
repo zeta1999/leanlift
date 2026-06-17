@@ -279,9 +279,17 @@ proved kernel is touched.
       with EQUIVALENT + buggy-ref counterexample + sorry-free teeth. `[CPU]` ★
 
 ### Capstone
-- [ ] S1 — author `serial_link.ahdl` (TX/RX/lossy channel) + `serial-link.petri` + recipe. `[CPU]`
-- [ ] S2 — full ladder: Lean4+prove safety, equiv, RTA timing, GSPN loss phase-change, combined cert. `[CPU]`(+`[GPU]` PRISM) ★
-- [ ] S3 — `scripts/serial-link-sweep.sh` + TUTORIAL section. `[CPU]`(+`[M24]`/`[GPU]`)
+- [x] S1 — `../fpga-meta-compiler/examples/serial_link.ahdl` (TX/RX frame FSMs) +
+      golden (distinct source) + buggy variant + `serial-channel.model.toml` (lossy
+      GSPN) + `serial-link.recipe.md`. `[CPU]`
+- [x] S2 — `scripts/serial-link-certify.sh`: the full ladder in one certificate —
+      FSM safety (sorry-free) ∧ equivalence (bisimulation + discrimination) ∧ hard
+      timing (read from the verified FSM) ∧ channel loss (X(p), asymptotic p*) +
+      buffer-bound proof ⇒ CORRECT. `--check` self-test; ci.sh GREEN; brutal-reviewed
+      (channel math right; overclaim/vacuity fixed — distinct golden, non-vacuity
+      guard, honest roll-off + tick caveat). `[CPU]`(+`[GPU]` PRISM cross-check) ★
+- [x] S3 — `scripts/serial-link-sweep.sh`: the delivery roll-off vs loss `p`, knee
+      checked against the closed-form asymptotic `p* ≈ 0.882`; `--check` in ci.sh. `[CPU]`
 
 ### Finalize
 - [ ] X1 — docs (FORMATS-fpga, README, FORMATS-models, SPEC). `[CPU]`
