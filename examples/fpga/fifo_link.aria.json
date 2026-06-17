@@ -1,0 +1,22 @@
+{
+  "schema": "aria-ir-json/v1",
+  "id": 0,
+  "name": "cdc_link",
+  "ports": [
+    {"id": 0, "value": 10, "name": "wdata", "ty": {"t": "bits", "n": 8}, "dir": "input", "clock_domain": 0},
+    {"id": 1, "value": 11, "name": "wen", "ty": {"t": "bit"}, "dir": "input", "clock_domain": 0},
+    {"id": 2, "value": 12, "name": "ren", "ty": {"t": "bit"}, "dir": "input", "clock_domain": 1},
+    {"id": 3, "value": 13, "name": "rdata", "ty": {"t": "bits", "n": 8}, "dir": "output", "clock_domain": 1}
+  ],
+  "clock_domains": [
+    {"id": 0, "name": "wr", "clock_signal": 0, "reset_signal": null, "freq_hz": "125000000"},
+    {"id": 1, "name": "rd", "clock_signal": 1, "reset_signal": null, "freq_hz": "200000000"}
+  ],
+  "annotations": [],
+  "nodes": [
+    {"id": 20, "name": "q", "kind": {"k": "fifo", "data_ty": {"t": "bits", "n": 8}, "depth": 4, "src_clock": 0, "dst_clock": 1, "write_data": 10, "write_enable": 11, "read_enable": 12, "is_cdc": true}},
+    {"id": 21, "name": "rdata", "kind": {"k": "wire", "ty": {"t": "bits", "n": 8}, "expr": {"e": "ref", "value": 20}}}
+  ],
+  "systolic": null,
+  "timing": {"c_slow_factor": 1, "target_period_ns": null, "critical_path_ns": null, "retiming_weights": [], "buffers": []}
+}

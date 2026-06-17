@@ -310,7 +310,7 @@ fi
 # F2 — sorry-free Lean proof of FSM safety (needs the Lean toolchain).
 if have lean; then
   if "$LIFT" fpga prove "$M/../fpga/tcp_ip.aria.json" --emit "$TMP/tcp.gen.lean" >"$TMP/fp2" 2>&1; then
-    grep -q "M3 PROVED sorry-free" "$TMP/fp2" && grep -q "1/1 FSM(s) proved sorry-free" "$TMP/fp2" \
+    grep -q "M3 PROVED sorry-free" "$TMP/fp2" && grep -q "1/1 obligation(s) proved sorry-free" "$TMP/fp2" \
       && pass "fpga prove  (tcp_fsm safety, sorry-free M3)" \
       || { bad "fpga prove: not sorry-free"; cat "$TMP/fp2"; }
   else
@@ -323,8 +323,27 @@ if have lean; then
     grep -q "did NOT elaborate" "$TMP/fp2b" && pass "fpga prove teeth  (unsafe FSM → proof red, exit 1)" \
       || { bad "fpga prove teeth: wrong failure"; cat "$TMP/fp2b"; }
   fi
+  # D2 — FIFO occ ≤ depth proven sorry-free via emit_petri (survives pure loss).
+  if "$LIFT" fpga prove "$M/../fpga/fifo_link.aria.json" --emit "$TMP/fifo.gen.lean" >"$TMP/fp3" 2>&1; then
+    grep -q "occ ≤ depth 4 (survives the pure-loss leak)" "$TMP/fp3" \
+      && grep -q "1/1 obligation(s) proved sorry-free" "$TMP/fp3" \
+      && pass "fpga prove  (FIFO occ≤depth 4, sorry-free M3, survives loss)" \
+      || { bad "fpga prove: FIFO bound not proved"; cat "$TMP/fp3"; }
+  else
+    bad "fpga prove (fifo) failed (exit $?)"; cat "$TMP/fp3"
+  fi
 else
   skip "fpga prove  (no lean toolchain)"
+fi
+
+# D1 — FIFO flow-safety: occ ≤ depth holds in every reachable marking (M1).
+if "$LIFT" fpga check "$M/../fpga/fifo_link.aria.json" >"$TMP/fcf" 2>&1; then
+  grep -q "FIFO \`q\` (depth 4 CDC 0→1)" "$TMP/fcf" \
+    && grep -q "occ never exceeds 4" "$TMP/fcf" \
+    && pass "fpga check  (CDC FIFO depth 4, occ≤depth SAFE)" \
+    || { bad "fpga check: FIFO bound wrong"; cat "$TMP/fcf"; }
+else
+  bad "fpga check (fifo) failed (exit $?)"; cat "$TMP/fcf"
 fi
 
 # ---------------------------------------------------------------------------- #

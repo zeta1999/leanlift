@@ -191,8 +191,8 @@ modules + a **lossy channel** — proved correct on every axis at once.
 | T2 | pipeline → Jackson net (qnet) | yes | bottleneck value-cross-check vs critical-path stage; saturation teeth |
 | F1 | Register+priority-Mux → Lts (width-aware interp) | yes | exhaustive 2^k valuation; uint-wrap teeth; reach set |
 | F2 | Lts → Lean | yes (`emit_fsm`) | Lean kernel (sorry-free) |
-| D1 | Fifo/handshake → PtNet | yes | bound vs emulator depth |
-| D2 | PtNet → Lean invariant | yes (`emit_petri`) | Lean kernel (omega) |
+| D1 | Fifo → PtNet (occ/free + pure-loss leak) | yes | over-approx (sound for overflow); BFS vs closed-form markings |
+| D2 | PtNet → Lean `occ ≤ depth` | yes (`emit_petri`) | Lean kernel (omega); tight-bound teeth |
 | E1 | (Lts × PtNet) product | yes (BFS) | counterexample search |
 | E2 | bisim relation → Lean | yes | Lean kernel (sorry-free) |
 | S2.4 | channel → GSPN→CTMC | yes (`gspn.rs`) | closed form + PRISM `[GPU]` |
@@ -256,8 +256,16 @@ proved kernel is touched.
       red teeth; brutal-reviewed (vacuous-disclosure gap fixed). `[CPU]` ★
 
 ### Slice ③ FIFO flow-safety
-- [ ] D1 — Fifo/handshake → PtNet projection. `[CPU]` ★
-- [ ] D2 — prove FIFO bound invariant (survives loss) + deadlock check + teeth. `[CPU]` ★
+- [x] D1 — `src/models/fpga_fifo.rs`: each Aria `Fifo` node → a bounded `PtNet`
+      (places occ/free, occ+free=depth; enqueue/dequeue + a pure-loss `leak`),
+      over-approximating (enables unconstrained ⇒ sound for the overflow bound).
+      `lift fpga check` runs M1, sizing the BFS bound per FIFO (deep FIFOs deferred
+      to symbolic prove); reports the leaked-jam deadlock honestly. `[CPU]` ★
+- [x] D2 — `lift fpga prove` proves `occ ≤ depth` via the existing `emit_petri`
+      (conserved-mass upper bound, monotone under the pure-loss leak) — sorry-free
+      (axioms propext, Quot.sound). Teeth: a too-tight bound is caught (check
+      violation). 8 fifo unit tests; ci.sh GREEN (check SAFE + lean-gated prove);
+      brutal-reviewed (no false SAFE; bound/BFS-size + underflow-scope fixed). `[CPU]` ★
 
 ### Equivalence
 - [ ] E1 — `lift fpga equiv` product trace-equivalence (M1) + counterexample. `[CPU]` ★
