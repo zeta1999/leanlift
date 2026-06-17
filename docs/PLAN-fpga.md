@@ -248,7 +248,12 @@ proved kernel is touched.
       properties. `lift fpga check` reuses `check.rs` (M1, pure Rust). 29 fpga unit
       tests; ci.sh GREEN with SAFE + illegal-state teeth; brutal-reviewed (CRITICAL
       uint-wrap false-SAFE + exit-code + property-abort fixed). `[CPU]` ★
-- [ ] F2 — `lift fpga check`/`prove` (sorry-free) + teeth. `[CPU]` ★
+- [x] F2 — `lift fpga prove`: emit a sorry-free Lean safety proof per FSM via the
+      existing `lean::emit_fsm` and elaborate it (shared `elaborate_lean` helper);
+      the kernel re-derives what M1 checked. tcp_fsm proved sorry-free (axioms:
+      propext only). Vacuous proofs (no usable property) disclosed honestly, not
+      passed off as certificates. ci.sh (lean-gated) GREEN with sorry-free + unsafe
+      red teeth; brutal-reviewed (vacuous-disclosure gap fixed). `[CPU]` ★
 
 ### Slice ③ FIFO flow-safety
 - [ ] D1 — Fifo/handshake → PtNet projection. `[CPU]` ★
