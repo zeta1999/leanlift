@@ -288,6 +288,25 @@ else
   bad "fpga pipeline sweep --check failed"; cat "$TMP/fsw"
 fi
 
+# F1 — control-FSM extraction + M1 safety from the IR's own formal properties.
+if "$LIFT" fpga check "$M/../fpga/tcp_ip.aria.json" >"$TMP/fc" 2>&1; then
+  grep -q "FSM on register \`state\`" "$TMP/fc" \
+    && grep -q "7 reachable" "$TMP/fc" \
+    && grep -q "SAFE ✓" "$TMP/fc" \
+    && pass "fpga check  (tcp_fsm: 7 states, state<=10 SAFE)" \
+    || { bad "fpga check: wrong verdict"; cat "$TMP/fc"; }
+else
+  bad "fpga check failed (exit $?)"; cat "$TMP/fc"
+fi
+# teeth: an FSM that reaches an illegal state must be caught (VIOLATION, exit 1).
+printf '{"schema":"aria-ir-json/v1","id":0,"name":"toggle","ports":[{"id":0,"value":10,"name":"go","ty":{"t":"bit"},"dir":"input","clock_domain":0}],"clock_domains":[],"annotations":[],"nodes":[{"id":1,"name":"state","kind":{"k":"register","ty":{"t":"uint","n":2},"clock_domain":0,"reset_value":{"e":"lit","lit":{"l":"uint","value":"0","width":2}},"enable":null,"next":{"e":"mux","cond":{"e":"ref","value":10},"true":{"e":"lit","lit":{"l":"uint","value":"3","width":2}},"false":{"e":"lit","lit":{"l":"uint","value":"0","width":2}}}}},{"id":2,"name":"p","kind":{"k":"formal_property","property":{"kind":"assert","temporal":{"tt":"always"},"expr":{"e":"binop","op":"le","lhs":{"e":"ref","value":1},"rhs":{"e":"lit","lit":{"l":"uint","value":"1","width":32}},"ty":{"t":"bit"}},"name":"safe"}}}],"timing":{}}\n' >"$TMP/badfsm.json"
+if "$LIFT" fpga check "$TMP/badfsm.json" >"$TMP/fcb" 2>&1; then
+  bad "fpga check accepted an FSM that reaches an illegal state"; cat "$TMP/fcb"
+else
+  grep -q "VIOLATION" "$TMP/fcb" && pass "fpga check teeth  (illegal state reached → VIOLATION, exit 1)" \
+    || { bad "fpga check teeth: violation not caught"; cat "$TMP/fcb"; }
+fi
+
 # ---------------------------------------------------------------------------- #
 sect "M3 — prove (Lean, sorry-free)"
 if have lean; then

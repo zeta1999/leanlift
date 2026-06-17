@@ -791,7 +791,11 @@ fn usage() -> ! {
         \x20     sustainable rate, bottleneck stage (cross-checked vs critical\n\
         \x20     path), stability at the offered load, per-stage occupancy.\n\
         \x20     Exit 1 if a pipeline is unstable / the bottleneck disagrees.\n\
-        \x20 (planned: lift fpga check|prove|equiv — see docs/PLAN-fpga.md)\n"
+        \x20 lift fpga check <design.aria.json>\n\
+        \x20     extract each control FSM (state register + Mux next) → an LTS and\n\
+        \x20     run M1: reachable states, deadlocks, and safety from the IR's own\n\
+        \x20     `assert always` formal properties. Exit 1 on a safety violation.\n\
+        \x20 (planned: lift fpga prove|equiv — see docs/PLAN-fpga.md)\n"
     );
     exit(2);
 }
@@ -811,6 +815,10 @@ pub fn main(mut argv: Vec<String>) {
             argv.remove(0);
             "throughput"
         }
+        Some("check") => {
+            argv.remove(0);
+            "check"
+        }
         Some(s) if !s.starts_with('-') => "info",
         _ => usage(),
     };
@@ -818,6 +826,7 @@ pub fn main(mut argv: Vec<String>) {
         "info" => info_cmd(argv),
         "timing" => timing_cmd(argv),
         "throughput" => throughput_cmd(argv),
+        "check" => check_cmd(argv),
         _ => usage(),
     }
 }
@@ -1023,6 +1032,104 @@ fn throughput_cmd(a: Vec<String>) {
     println!();
     println!("{}/{} pipeline(s) certified", certs.iter().filter(|c| c.ok()).count(), certs.len());
     if !all_ok {
+        exit(1);
+    }
+}
+
+/// Load the raw parsed JSON modules (the FSM extractor needs the full node graph,
+/// not the typed summary `load` produces).
+fn load_raw(path: &str) -> Vec<Json> {
+    let src = std::fs::read_to_string(path).unwrap_or_else(|e| {
+        eprintln!("error reading {path}: {e}");
+        exit(2);
+    });
+    parse_stream(&src).unwrap_or_else(|e| {
+        eprintln!("error: {path}: {e}");
+        exit(1);
+    })
+}
+
+fn check_cmd(a: Vec<String>) {
+    use super::{check, fpga_fsm};
+    let path = one_file(a);
+    let modules = load_raw(&path);
+
+    println!("leanlift FPGA control-FSM check — {path}");
+    println!("════════════════════════════════════════════════════");
+    let mut fsm_count = 0;
+    let mut errors = 0;
+    let mut unsafe_found = false;
+    for m in &modules {
+        let name = m.str_field("name").unwrap_or("?");
+        match fpga_fsm::extract_fsm(m) {
+            Ok(None) => {
+                // Not a single-register control FSM. Leave a breadcrumb for the
+                // multi-register case so a skipped safety FSM isn't invisible.
+                let regs = m
+                    .get("nodes")
+                    .and_then(Json::as_arr)
+                    .map(|ns| ns.iter().filter(|n| n.get("kind").and_then(|k| k.str_field("k")) == Some("register")).count())
+                    .unwrap_or(0);
+                if regs > 1 {
+                    println!();
+                    println!("module `{name}` — skipped: {regs} registers (not a single-control-FSM; F handles one)");
+                }
+            }
+            Ok(Some(fsm)) => {
+                fsm_count += 1;
+                let r = check::check(&fsm.lts, check::DEFAULT_BOUND);
+                println!();
+                println!("module `{name}` — FSM on register `{}` (uint<{}>)", fsm.reg_name, fsm.reg_width);
+                println!(
+                    "  states: {} reachable, alphabet: {} event(s) (from {} input bit(s): {})",
+                    fsm.state_values.len(),
+                    fsm.lts.alphabet.len(),
+                    fsm.inputs.len(),
+                    if fsm.inputs.is_empty() { "—".into() } else { fsm.inputs.join(", ") }
+                );
+                println!("  reachable (BFS): {}{}", r.reachable, if r.truncated { " (TRUNCATED)" } else { "" });
+                if !r.deadlocks.is_empty() {
+                    println!("  deadlocks: {} (states with no enabled event)", r.deadlocks.len());
+                }
+                // Safety from the IR's own formal properties.
+                if fsm.safety_used == 0 {
+                    println!("  safety: no state-only `assert always` property to check");
+                } else {
+                    println!(
+                        "  safety: {} usable property/-ies ({} skipped: reference inputs), {} forbidden state value(s)",
+                        fsm.safety_used, fsm.safety_skipped, fsm.forbidden_values.len()
+                    );
+                }
+                if r.safe() {
+                    println!("  verdict: SAFE ✓ (all {} reachable states satisfy the property)", r.reachable);
+                } else if r.truncated {
+                    unsafe_found = true;
+                    println!("  verdict: INCONCLUSIVE — state space truncated at the BFS bound");
+                } else {
+                    unsafe_found = true;
+                    println!("  verdict: VIOLATION ✗ — {} reachable forbidden state(s):", r.violations.len());
+                    for (s, why) in r.violations.iter().take(8) {
+                        println!("    {s}: {why}");
+                    }
+                }
+            }
+            Err(e) => {
+                // A recognized single-register FSM we could not SOUNDLY project —
+                // fail-closed (refused), distinct from "unsafe".
+                errors += 1;
+                println!();
+                println!("module `{name}` — FSM refused (unsound to project): {e}");
+            }
+        }
+    }
+    println!();
+    if fsm_count == 0 && errors == 0 {
+        eprintln!("no control-FSM modules in {path} (nothing to check)");
+        exit(2);
+    }
+    println!("{fsm_count} FSM module(s) checked, {errors} refused");
+    // Exit 1 if any FSM is unsafe OR any recognized FSM was refused as unsound.
+    if unsafe_found || errors > 0 {
         exit(1);
     }
 }
