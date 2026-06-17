@@ -795,7 +795,11 @@ fn usage() -> ! {
         \x20     extract each control FSM (state register + Mux next) → an LTS and\n\
         \x20     run M1: reachable states, deadlocks, and safety from the IR's own\n\
         \x20     `assert always` formal properties. Exit 1 on a safety violation.\n\
-        \x20 (planned: lift fpga prove|equiv — see docs/PLAN-fpga.md)\n"
+        \x20 lift fpga prove <design.aria.json> [--emit <f.lean>] [--lean-path <dir>]\n\
+        \x20     emit a sorry-free Lean safety proof per control FSM and elaborate\n\
+        \x20     it (M3) — the kernel re-derives what M1 checked. Exit 1 if any\n\
+        \x20     proof fails to elaborate or is not sorry-free.\n\
+        \x20 (planned: lift fpga equiv — see docs/PLAN-fpga.md)\n"
     );
     exit(2);
 }
@@ -819,6 +823,10 @@ pub fn main(mut argv: Vec<String>) {
             argv.remove(0);
             "check"
         }
+        Some("prove") => {
+            argv.remove(0);
+            "prove"
+        }
         Some(s) if !s.starts_with('-') => "info",
         _ => usage(),
     };
@@ -827,6 +835,7 @@ pub fn main(mut argv: Vec<String>) {
         "timing" => timing_cmd(argv),
         "throughput" => throughput_cmd(argv),
         "check" => check_cmd(argv),
+        "prove" => prove_cmd(argv),
         _ => usage(),
     }
 }
@@ -1132,6 +1141,130 @@ fn check_cmd(a: Vec<String>) {
     if unsafe_found || errors > 0 {
         exit(1);
     }
+}
+
+/// A valid Lean namespace for a module FSM (`Fpga_<sanitized-name>`).
+fn lean_ns(name: &str) -> String {
+    let mut s = String::from("Fpga_");
+    for c in name.chars() {
+        s.push(if c.is_ascii_alphanumeric() || c == '_' { c } else { '_' });
+    }
+    s
+}
+
+fn prove_cmd(a: Vec<String>) {
+    use super::{fpga_fsm, lean, LeanOutcome};
+    let mut file: Option<String> = None;
+    let mut emit: Option<PathBuf> = None;
+    let mut lean_path = PathBuf::from("lean");
+    let mut i = 0;
+    while i < a.len() {
+        match a[i].as_str() {
+            "--emit" => {
+                i += 1;
+                emit = Some(PathBuf::from(a.get(i).cloned().unwrap_or_else(|| usage())));
+            }
+            "--lean-path" => {
+                i += 1;
+                lean_path = PathBuf::from(a.get(i).cloned().unwrap_or_else(|| usage()));
+            }
+            s if s.starts_with("--") => {
+                eprintln!("unknown flag: {s}");
+                usage();
+            }
+            _ => {
+                if file.is_some() {
+                    usage();
+                }
+                file = Some(a[i].clone());
+            }
+        }
+        i += 1;
+    }
+    let path = file.unwrap_or_else(|| usage());
+    let modules = load_raw(&path);
+
+    // Collect FSMs first; a refused (unsound) FSM fails the whole prove (fail-closed).
+    let mut fsms: Vec<(String, fpga_fsm::FsmExtract)> = Vec::new();
+    for m in &modules {
+        let name = m.str_field("name").unwrap_or("?").to_string();
+        match fpga_fsm::extract_fsm(m) {
+            Ok(Some(f)) => fsms.push((name, f)),
+            Ok(None) => {}
+            Err(e) => {
+                eprintln!("module `{name}`: FSM refused (unsound to project): {e}");
+                exit(1);
+            }
+        }
+    }
+    if fsms.is_empty() {
+        eprintln!("no control-FSM modules in {path} (nothing to prove)");
+        exit(2);
+    }
+    if emit.is_some() && fsms.len() > 1 {
+        eprintln!("--emit names a single file but {path} has {} FSMs; omit --emit to auto-name", fsms.len());
+        exit(2);
+    }
+    let stem = std::path::Path::new(&path)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("fpga")
+        .to_string();
+
+    println!("leanlift FPGA control-FSM prove (M3) — {path}");
+    println!("════════════════════════════════════════════════════");
+    let (mut proved, mut vacuous, mut failed) = (0, 0, 0);
+    for (name, f) in &fsms {
+        let ns = lean_ns(name);
+        let generated = lean::emit_fsm(&f.lts, &ns);
+        let emit_path = emit.clone().unwrap_or_else(|| PathBuf::from(format!("{stem}.{name}.gen.lean")));
+        match super::elaborate_lean(&generated, &emit_path, &lean_path) {
+            Ok(LeanOutcome::Elaborated { sorry_free, axioms }) if sorry_free => {
+                // A proof with no usable state-only safety property has `safeB ≡ true`,
+                // so the theorem is VACUOUS — it elaborates but certifies nothing.
+                // Disclose that (as `check` does), don't pass it off as a real proof.
+                if f.safety_used == 0 {
+                    vacuous += 1;
+                    println!(
+                        "  `{name}` → elaborated sorry-free but VACUOUS — no state-only `assert always` \
+                         property ({} skipped: reference inputs); certifies nothing",
+                        f.safety_skipped
+                    );
+                } else {
+                    proved += 1;
+                    println!(
+                        "  `{name}` → M3 PROVED sorry-free  (ns {ns}, {} states; {} usable propert(y/ies), \
+                         {} reachable violation(s); axioms: {})",
+                        f.state_values.len(),
+                        f.safety_used,
+                        f.forbidden_values.len(),
+                        if axioms.is_empty() { "(none)" } else { &axioms }
+                    );
+                }
+                eprintln!("    Lean: {}", emit_path.display());
+            }
+            Ok(LeanOutcome::Elaborated { .. }) => {
+                failed += 1;
+                println!("  `{name}` → elaborated but NOT sorry-free (M2)");
+                eprintln!("    Lean: {}", emit_path.display());
+            }
+            Ok(LeanOutcome::NotElaborated(err)) => {
+                failed += 1;
+                println!("  `{name}` → did NOT elaborate (M1):");
+                eprintln!("{err}");
+            }
+            Err(e) => {
+                eprintln!("infrastructure error: {e}");
+                exit(2);
+            }
+        }
+    }
+    println!();
+    println!("{}/{} FSM(s) proved sorry-free ({vacuous} vacuous, {failed} failed)", proved, fsms.len());
+    // Exit 1 on any genuine failure (not sorry-free / did not elaborate). A vacuous
+    // proof is elaborated (not a failure) but flagged above so it is never mistaken
+    // for a real certificate.
+    exit(if failed == 0 { 0 } else { 1 });
 }
 
 fn info_cmd(a: Vec<String>) {

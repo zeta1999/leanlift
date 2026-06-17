@@ -759,6 +759,37 @@ fn run_prism_and_diff(model: &Path, props: &Path, results: &[(String, f64)]) -> 
     Some(agree)
 }
 
+/// The result of elaborating a generated Lean proof.
+pub enum LeanOutcome {
+    /// `lean` rejected the file; carries the trimmed stderr.
+    NotElaborated(String),
+    /// Elaborated; `sorry_free` iff `#print axioms` showed no `sorryAx`.
+    Elaborated { sorry_free: bool, axioms: String },
+}
+
+/// Build the Models support theory under `lean_path`, write `generated` to
+/// `emit_path`, elaborate it with `lean`, and report whether it is sorry-free.
+/// Shared by `lift model prove` and `lift fpga prove`. `Err` only on
+/// infrastructure failure (support-lib build, file write, or `lean` spawn).
+pub fn elaborate_lean(generated: &str, emit_path: &Path, lean_path: &Path) -> Result<LeanOutcome, String> {
+    ensure_models_lib(lean_path)?;
+    std::fs::write(emit_path, generated).map_err(|e| format!("cannot write {}: {e}", emit_path.display()))?;
+    let abs_lean = std::fs::canonicalize(lean_path)
+        .map_err(|e| format!("cannot resolve lean-path {}: {e}", lean_path.display()))?;
+    let output = Command::new("lean")
+        .arg(emit_path)
+        .env("LEAN_PATH", &abs_lean)
+        .output()
+        .map_err(|e| format!("failed to invoke lean: {e}"))?;
+    if !output.status.success() {
+        return Ok(LeanOutcome::NotElaborated(String::from_utf8_lossy(&output.stderr).trim().to_string()));
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let sorry_free = !stdout.contains("sorryAx");
+    let axioms = stdout.lines().find(|l| l.contains("axioms")).unwrap_or("").trim().to_string();
+    Ok(LeanOutcome::Elaborated { sorry_free, axioms })
+}
+
 /// Compile `lean/LeanLift/Models/*.lean` → `.olean` if stale, so generated
 /// proofs can `import LeanLift.Models.Fsm`. Mirrors `main.rs::ensure_support_lib`
 /// for the Models subdirectory.

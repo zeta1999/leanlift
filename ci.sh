@@ -307,6 +307,26 @@ else
     || { bad "fpga check teeth: violation not caught"; cat "$TMP/fcb"; }
 fi
 
+# F2 — sorry-free Lean proof of FSM safety (needs the Lean toolchain).
+if have lean; then
+  if "$LIFT" fpga prove "$M/../fpga/tcp_ip.aria.json" --emit "$TMP/tcp.gen.lean" >"$TMP/fp2" 2>&1; then
+    grep -q "M3 PROVED sorry-free" "$TMP/fp2" && grep -q "1/1 FSM(s) proved sorry-free" "$TMP/fp2" \
+      && pass "fpga prove  (tcp_fsm safety, sorry-free M3)" \
+      || { bad "fpga prove: not sorry-free"; cat "$TMP/fp2"; }
+  else
+    bad "fpga prove failed (exit $?)"; cat "$TMP/fp2"
+  fi
+  # teeth: the unsafe FSM's safety theorem must NOT elaborate (M1, exit 1).
+  if "$LIFT" fpga prove "$TMP/badfsm.json" --emit "$TMP/bad.gen.lean" >"$TMP/fp2b" 2>&1; then
+    bad "fpga prove certified an unsafe FSM"; cat "$TMP/fp2b"
+  else
+    grep -q "did NOT elaborate" "$TMP/fp2b" && pass "fpga prove teeth  (unsafe FSM → proof red, exit 1)" \
+      || { bad "fpga prove teeth: wrong failure"; cat "$TMP/fp2b"; }
+  fi
+else
+  skip "fpga prove  (no lean toolchain)"
+fi
+
 # ---------------------------------------------------------------------------- #
 sect "M3 — prove (Lean, sorry-free)"
 if have lean; then

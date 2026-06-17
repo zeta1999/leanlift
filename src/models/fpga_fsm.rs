@@ -582,6 +582,19 @@ mod tests {
     }
 
     #[test]
+    fn emits_well_formed_lean_for_extracted_fsm() {
+        // F2: the extracted Lts feeds lean::emit_fsm unchanged — check the proof
+        // skeleton is present (full elaboration is the Lean-gated CI step).
+        use crate::models::lean;
+        let f = extract(&fsm(1, "bit")).unwrap();
+        let src = lean::emit_fsm(&f.lts, "Fpga_toggle");
+        assert!(src.contains("namespace Fpga_toggle"));
+        assert!(src.contains("inductive State"));
+        assert!(src.contains("theorem safety"));
+        assert!(src.contains("#print axioms Fpga_toggle.safety"));
+    }
+
+    #[test]
     fn real_tcp_fsm_extracts_and_dedups_events() {
         let src = std::fs::read_to_string("examples/fpga/tcp_ip.aria.json").unwrap();
         let m = parse_stream(&src).unwrap();
