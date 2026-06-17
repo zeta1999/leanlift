@@ -312,9 +312,21 @@ equiv) + the serial-link capstone ship on `main`; every verification transform i
 mechanical (no LLM), triple-checked (Lean kernel ∧ BFS ∧ closed form).
 
 ### Cross-machine validation runs (tagged, off-CI)
-- [ ] `[M24]` 24 GB Mac: Aria Metal emit+run; leanlift Kani (arm64); cached opt proofs.
+- [x] `[M24]` Apple-Silicon arm64 (16 GB) — **validated here**: leanlift **Kani** bounded
+      proofs GREEN (`fire_no_underflow`, `div_ceil_safe`, `term_monotone` — the Petri-fire
+      + RTA kernels the FIFO/timing projections reuse); the **cached optimization proofs**
+      (Fmt/Vendor/Gd/Gss/Hj/Bounds) compile **sorry-free**; Aria **Metal** emit+`xcrun
+      metal -c` of all 13 example designs compiles (serial_link links to a metallib).
+      The Metal compile surfaced + FIXED two Aria backend bugs (see note). Still needs
+      the on-GPU Metal *run* (host harness).
 - [ ] `[GPU]` RTX 6000 Pro: Aria CUDA/OpenCL emulation; Verilator co-sim of the link;
       PRISM/Storm cross-check of `p*`; `yosys` synthesis sanity.
+
+> **`[M24]` validation found two Aria codegen bugs** (fixed in `../fpga-meta-compiler`,
+> commit `c540161`, with regression tests): Metal didn't declare pipeline/retiming
+> registers (undeclared `retime_*`); Verilog duplicated `clk`/`rst` when a design
+> declared its own. Both surfaced by compiling every example's Metal + running the full
+> lint suite — exactly the cross-machine cross-check this row is for.
 
 > Reuse first: B/T/F/D/E add a thin `fpga.rs` projection layer; **all backends
 > (`check`/`prove`/`prism`/`simulate`, the RTA/qnet/Petri/CTMC engines, the Lean
