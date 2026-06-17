@@ -45,6 +45,7 @@ impl Verdict {
 pub fn print_human(cmp: &Comparison, v: &Verdict, fn_name: &str) {
     let conform = cmp.count(Class::Conform);
     let declared = cmp.count(Class::DeclaredOverflow);
+    let tolerance = cmp.count(Class::ToleranceDivergence);
     let mismatch = cmp.count(Class::Mismatch);
 
     println!();
@@ -59,6 +60,9 @@ pub fn print_human(cmp: &Comparison, v: &Verdict, fn_name: &str) {
     println!("  vectors : {}  (seed {:#018x})", v.vectors, v.seed);
     println!("  conform : {conform}  (Lean == C++, bit-exact)");
     println!("  declared: {declared}  (Lean OVERFLOW, C++ wraps — declared overflow class)");
+    if tolerance > 0 {
+        println!("  tol-div : {tolerance}  (float results differ but within --float-tol — benign rounding)");
+    }
     println!("  mismatch: {mismatch}  (unexplained — would be a real bug)");
 
     let cov = cmp.branch_coverage();
@@ -136,6 +140,7 @@ pub fn write_json(
     writeln!(s, "  \"counts\": {{").unwrap();
     writeln!(s, "    \"conform\": {},", cmp.count(Class::Conform)).unwrap();
     writeln!(s, "    \"declared_overflow\": {},", cmp.count(Class::DeclaredOverflow)).unwrap();
+    writeln!(s, "    \"tolerance_divergence\": {},", cmp.count(Class::ToleranceDivergence)).unwrap();
     writeln!(s, "    \"mismatch\": {}", cmp.count(Class::Mismatch)).unwrap();
     writeln!(s, "  }},").unwrap();
 
@@ -152,6 +157,7 @@ pub fn write_json(
     for (i, l) in div.iter().enumerate() {
         let cls = match l.class {
             Class::DeclaredOverflow => "declared_overflow",
+            Class::ToleranceDivergence => "tolerance_divergence",
             Class::Mismatch => "mismatch",
             Class::Conform => unreachable!(),
         };
