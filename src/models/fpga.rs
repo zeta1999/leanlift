@@ -793,12 +793,13 @@ fn usage() -> ! {
         \x20     Exit 1 if a pipeline is unstable / the bottleneck disagrees.\n\
         \x20 lift fpga check <design.aria.json>\n\
         \x20     extract each control FSM (state register + Mux next) → an LTS and\n\
-        \x20     run M1: reachable states, deadlocks, and safety from the IR's own\n\
-        \x20     `assert always` formal properties. Exit 1 on a safety violation.\n\
+        \x20     each FIFO → a bounded Petri net, and run M1: reachable states,\n\
+        \x20     deadlocks, FSM safety (IR `assert always`), FIFO overflow bound.\n\
+        \x20     Exit 1 on any safety violation / overflow.\n\
         \x20 lift fpga prove <design.aria.json> [--emit <f.lean>] [--lean-path <dir>]\n\
-        \x20     emit a sorry-free Lean safety proof per control FSM and elaborate\n\
-        \x20     it (M3) — the kernel re-derives what M1 checked. Exit 1 if any\n\
-        \x20     proof fails to elaborate or is not sorry-free.\n\
+        \x20     emit a sorry-free Lean proof per obligation (FSM safety via emit_fsm,\n\
+        \x20     FIFO `occ ≤ depth` via emit_petri) and elaborate it (M3) — the kernel\n\
+        \x20     re-derives what M1 checked. Exit 1 if any proof is not sorry-free.\n\
         \x20 (planned: lift fpga equiv — see docs/PLAN-fpga.md)\n"
     );
     exit(2);
@@ -1059,13 +1060,14 @@ fn load_raw(path: &str) -> Vec<Json> {
 }
 
 fn check_cmd(a: Vec<String>) {
-    use super::{check, fpga_fsm};
+    use super::{check, fpga_fifo, fpga_fsm};
     let path = one_file(a);
     let modules = load_raw(&path);
 
-    println!("leanlift FPGA control-FSM check — {path}");
+    println!("leanlift FPGA control-FSM + FIFO check — {path}");
     println!("════════════════════════════════════════════════════");
     let mut fsm_count = 0;
+    let mut fifo_count = 0;
     let mut errors = 0;
     let mut unsafe_found = false;
     for m in &modules {
@@ -1130,14 +1132,53 @@ fn check_cmd(a: Vec<String>) {
                 println!("module `{name}` — FSM refused (unsound to project): {e}");
             }
         }
+        // FIFO flow-safety (slice ③): every Fifo node → a bounded Petri obligation.
+        match fpga_fifo::extract_fifos(m) {
+            Ok(fifos) => {
+                for fifo in &fifos {
+                    fifo_count += 1;
+                    println!();
+                    let cdc = if fifo.is_cdc { format!(" CDC {}→{}", fifo.src_clock, fifo.dst_clock) } else { String::new() };
+                    println!("module `{name}` — FIFO `{}` (depth {}{cdc})", fifo.name, fifo.depth);
+                    println!("  occ ≤ depth: occ+free = {} conserved, monotone under loss (overflow bound; underflow out of scope)", fifo.depth);
+                    // Size the BFS bound to the FIFO's exact state space; defer a
+                    // very deep FIFO to `prove` (symbolic, any depth) rather than
+                    // truncate and fail-closed on a perfectly-safe net.
+                    let markings = fpga_fifo::reachable_markings(fifo.depth);
+                    const EXPLICIT_LIMIT: u64 = 500_000;
+                    if markings > EXPLICIT_LIMIT {
+                        println!(
+                            "  explicit check skipped: ~{markings} markings > {EXPLICIT_LIMIT} limit — `lift fpga prove` certifies it symbolically (any depth)"
+                        );
+                        continue;
+                    }
+                    let r = check::check(&fifo.net, (markings + 1) as usize);
+                    println!("  reachable (BFS): {}{}", r.reachable, if r.truncated { " (TRUNCATED)" } else { "" });
+                    if !r.deadlocks.is_empty() {
+                        println!("  deadlocks: {} (e.g. a fully-leaked FIFO with no free slot)", r.deadlocks.len());
+                    }
+                    if r.safe() {
+                        println!("  verdict: SAFE ✓ (occ never exceeds {})", fifo.depth);
+                    } else {
+                        unsafe_found = true;
+                        println!("  verdict: OVERFLOW ✗ — {} reachable violation(s)", r.violations.len());
+                    }
+                }
+            }
+            Err(e) => {
+                errors += 1;
+                println!();
+                println!("module `{name}` — FIFO refused (malformed): {e}");
+            }
+        }
     }
     println!();
-    if fsm_count == 0 && errors == 0 {
-        eprintln!("no control-FSM modules in {path} (nothing to check)");
+    if fsm_count == 0 && fifo_count == 0 && errors == 0 {
+        eprintln!("no control FSMs or FIFOs in {path} (nothing to check)");
         exit(2);
     }
-    println!("{fsm_count} FSM module(s) checked, {errors} refused");
-    // Exit 1 if any FSM is unsafe OR any recognized FSM was refused as unsound.
+    println!("{fsm_count} FSM + {fifo_count} FIFO obligation(s) checked, {errors} refused");
+    // Exit 1 if any obligation is unsafe OR anything was refused as unsound.
     if unsafe_found || errors > 0 {
         exit(1);
     }
@@ -1152,8 +1193,14 @@ fn lean_ns(name: &str) -> String {
     s
 }
 
+/// A single M3 proof obligation extracted from a module.
+enum Job {
+    Fsm(String, super::fpga_fsm::FsmExtract),
+    Fifo(String, super::fpga_fifo::FifoNet),
+}
+
 fn prove_cmd(a: Vec<String>) {
-    use super::{fpga_fsm, lean, LeanOutcome};
+    use super::{fpga_fifo, fpga_fsm, lean, LeanOutcome};
     let mut file: Option<String> = None;
     let mut emit: Option<PathBuf> = None;
     let mut lean_path = PathBuf::from("lean");
@@ -1184,25 +1231,33 @@ fn prove_cmd(a: Vec<String>) {
     let path = file.unwrap_or_else(|| usage());
     let modules = load_raw(&path);
 
-    // Collect FSMs first; a refused (unsound) FSM fails the whole prove (fail-closed).
-    let mut fsms: Vec<(String, fpga_fsm::FsmExtract)> = Vec::new();
+    // Collect every M3 obligation (FSMs + FIFOs). A refused (unsound) extraction
+    // fails the whole prove (fail-closed).
+    let mut jobs: Vec<Job> = Vec::new();
     for m in &modules {
         let name = m.str_field("name").unwrap_or("?").to_string();
         match fpga_fsm::extract_fsm(m) {
-            Ok(Some(f)) => fsms.push((name, f)),
+            Ok(Some(f)) => jobs.push(Job::Fsm(name.clone(), f)),
             Ok(None) => {}
             Err(e) => {
                 eprintln!("module `{name}`: FSM refused (unsound to project): {e}");
                 exit(1);
             }
         }
+        match fpga_fifo::extract_fifos(m) {
+            Ok(fifos) => jobs.extend(fifos.into_iter().map(|f| Job::Fifo(name.clone(), f))),
+            Err(e) => {
+                eprintln!("module `{name}`: FIFO refused (malformed): {e}");
+                exit(1);
+            }
+        }
     }
-    if fsms.is_empty() {
-        eprintln!("no control-FSM modules in {path} (nothing to prove)");
+    if jobs.is_empty() {
+        eprintln!("no control FSMs or FIFOs in {path} (nothing to prove)");
         exit(2);
     }
-    if emit.is_some() && fsms.len() > 1 {
-        eprintln!("--emit names a single file but {path} has {} FSMs; omit --emit to auto-name", fsms.len());
+    if emit.is_some() && jobs.len() > 1 {
+        eprintln!("--emit names a single file but {path} has {} obligations; omit --emit to auto-name", jobs.len());
         exit(2);
     }
     let stem = std::path::Path::new(&path)
@@ -1211,33 +1266,45 @@ fn prove_cmd(a: Vec<String>) {
         .unwrap_or("fpga")
         .to_string();
 
-    println!("leanlift FPGA control-FSM prove (M3) — {path}");
+    println!("leanlift FPGA prove (M3) — {path}");
     println!("════════════════════════════════════════════════════");
     let (mut proved, mut vacuous, mut failed) = (0, 0, 0);
-    for (name, f) in &fsms {
-        let ns = lean_ns(name);
-        let generated = lean::emit_fsm(&f.lts, &ns);
-        let emit_path = emit.clone().unwrap_or_else(|| PathBuf::from(format!("{stem}.{name}.gen.lean")));
+    for job in &jobs {
+        // Each obligation → a self-contained Lean file + namespace + label.
+        let (label, ns, generated, fname) = match job {
+            Job::Fsm(name, f) => (
+                format!("FSM `{name}`"),
+                lean_ns(name),
+                lean::emit_fsm(&f.lts, &lean_ns(name)),
+                format!("{stem}.{name}.fsm.gen.lean"),
+            ),
+            Job::Fifo(name, f) => {
+                let ns = lean_ns(&format!("{name}_{}", f.name));
+                (
+                    format!("FIFO `{}` (depth {})", f.name, f.depth),
+                    ns.clone(),
+                    lean::emit_petri(&f.net, &ns),
+                    format!("{stem}.{name}.{}.fifo.gen.lean", f.name),
+                )
+            }
+        };
+        let emit_path = emit.clone().unwrap_or_else(|| PathBuf::from(fname));
         match super::elaborate_lean(&generated, &emit_path, &lean_path) {
             Ok(LeanOutcome::Elaborated { sorry_free, axioms }) if sorry_free => {
-                // A proof with no usable state-only safety property has `safeB ≡ true`,
-                // so the theorem is VACUOUS — it elaborates but certifies nothing.
-                // Disclose that (as `check` does), don't pass it off as a real proof.
-                if f.safety_used == 0 {
+                // An FSM with no usable state-only property proves `safeB ≡ true` —
+                // VACUOUS (elaborates, certifies nothing); disclose, don't pass off.
+                let vacuous_fsm = matches!(job, Job::Fsm(_, f) if f.safety_used == 0);
+                if vacuous_fsm {
                     vacuous += 1;
-                    println!(
-                        "  `{name}` → elaborated sorry-free but VACUOUS — no state-only `assert always` \
-                         property ({} skipped: reference inputs); certifies nothing",
-                        f.safety_skipped
-                    );
+                    println!("  {label} → elaborated sorry-free but VACUOUS — no state-only property; certifies nothing");
                 } else {
                     proved += 1;
+                    let detail = match job {
+                        Job::Fsm(_, f) => format!("{} states, {} usable propert(y/ies)", f.state_values.len(), f.safety_used),
+                        Job::Fifo(_, f) => format!("occ ≤ depth {} (survives the pure-loss leak)", f.depth),
+                    };
                     println!(
-                        "  `{name}` → M3 PROVED sorry-free  (ns {ns}, {} states; {} usable propert(y/ies), \
-                         {} reachable violation(s); axioms: {})",
-                        f.state_values.len(),
-                        f.safety_used,
-                        f.forbidden_values.len(),
+                        "  {label} → M3 PROVED sorry-free  (ns {ns}; {detail}; axioms: {})",
                         if axioms.is_empty() { "(none)" } else { &axioms }
                     );
                 }
@@ -1245,12 +1312,12 @@ fn prove_cmd(a: Vec<String>) {
             }
             Ok(LeanOutcome::Elaborated { .. }) => {
                 failed += 1;
-                println!("  `{name}` → elaborated but NOT sorry-free (M2)");
+                println!("  {label} → elaborated but NOT sorry-free (M2)");
                 eprintln!("    Lean: {}", emit_path.display());
             }
             Ok(LeanOutcome::NotElaborated(err)) => {
                 failed += 1;
-                println!("  `{name}` → did NOT elaborate (M1):");
+                println!("  {label} → did NOT elaborate (M1):");
                 eprintln!("{err}");
             }
             Err(e) => {
@@ -1260,10 +1327,9 @@ fn prove_cmd(a: Vec<String>) {
         }
     }
     println!();
-    println!("{}/{} FSM(s) proved sorry-free ({vacuous} vacuous, {failed} failed)", proved, fsms.len());
-    // Exit 1 on any genuine failure (not sorry-free / did not elaborate). A vacuous
-    // proof is elaborated (not a failure) but flagged above so it is never mistaken
-    // for a real certificate.
+    println!("{}/{} obligation(s) proved sorry-free ({vacuous} vacuous, {failed} failed)", proved, jobs.len());
+    // Exit 1 on any genuine failure. A vacuous proof is elaborated (not a failure)
+    // but flagged so it is never mistaken for a real certificate.
     exit(if failed == 0 { 0 } else { 1 });
 }
 
