@@ -292,10 +292,24 @@ proved kernel is touched.
       checked against the closed-form asymptotic `p* ≈ 0.882`; `--check` in ci.sh. `[CPU]`
 
 ### Finalize
-- [ ] X1 — docs (FORMATS-fpga, README, FORMATS-models, SPEC). `[CPU]`
-- [ ] X2 — manual-test subagent over the `[CPU]` FPGA section; list `[M24]`/`[GPU]` steps. `[CPU]`
-- [ ] X3 — final brutal-review subagent over the FPGA diff. `[CPU]` ★
-- [ ] X4 — mini tutorial entry. `[CPU]`
+- [x] X1 — `docs/FORMATS-fpga.md` rewritten with the implemented verb table
+      (info/timing/throughput/check/prove/equiv — certifies / engine / exit-1) and
+      family-consumption table. `[CPU]`
+- [x] X2 — `docs/TESTING.md` §8: the full `[CPU]` FPGA check list (every verb +
+      teeth, expected verdicts/exit codes) + the `[M24]`/`[GPU]` tagged runs;
+      sample commands verified against live output. `[CPU]`
+- [x] X3 — final whole-diff brutal review (cross-cutting/seam level): verdict SHIP,
+      no false-PASS / no silent CI regression. Fixed the 3 MED integrity findings —
+      capstone timing axis now fails-closed, prove emit-path/namespace disambiguated
+      by obligation index, deep-FIFO reported DEFERRED not "checked". `[CPU]` ★
+- [x] X4 — `docs/TUTORIAL.md` §8: verify-an-FPGA-design via the serial-link capstone. `[CPU]`
+
+---
+
+**Plan complete.** B → T → F → D → E → S → X all done; every ★ gate CI-green and
+brutal-reviewed. The full `lift fpga` toolkit (info/timing/throughput/check/prove/
+equiv) + the serial-link capstone ship on `main`; every verification transform is
+mechanical (no LLM), triple-checked (Lean kernel ∧ BFS ∧ closed form).
 
 ### Cross-machine validation runs (tagged, off-CI)
 - [ ] `[M24]` 24 GB Mac: Aria Metal emit+run; leanlift Kani (arm64); cached opt proofs.
