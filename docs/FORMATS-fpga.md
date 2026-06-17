@@ -12,11 +12,28 @@ aria-hdl --emit-ir-json design.ahdl > design.aria.json   # Aria side (zero-dep e
 lift fpga info design.aria.json                           # leanlift side (ingest + echo)
 ```
 
-`lift fpga info` is the Phase-B **round-trip check**: it reads the export and
-echoes a faithful summary — modules, ports, clock domains, **annotations**,
-**formal properties**, pipeline, and timing. Exit `0` on a clean parse; `1` on a
-malformed or unsupported-schema document. The verbs `check` / `prove` / `timing`
-/ `equiv` land in later phases behind this same path.
+`lift fpga info` is the **round-trip check**: it reads the export and echoes a
+faithful summary — modules, ports, clock domains, **annotations**, **formal
+properties**, pipeline, and timing. Exit `0` on a clean parse; `1` on a malformed
+or unsupported-schema document.
+
+## Verbs
+
+Every projection is mechanical (no LLM) and triple-checked (Lean kernel ∧ BFS ∧
+the analytic closed form). All verbs read one or more `*.aria.json` exports.
+
+| Verb | Certifies | Reused engine | Exit 1 when |
+|---|---|---|---|
+| `info <d>` | faithful ingest echo | — | malformed/unknown schema |
+| `timing <d>` | hard latency + timing closure (dual cross-checked); C-slow fold | `rt.rs` | closure violated / cross-check disagrees |
+| `throughput <d>` | max sustainable rate, bottleneck stage, stability, occupancy | `qnet.rs` | a stage saturates / bottleneck disagrees |
+| `check <d>` | control-FSM reachability + safety (`assert always`); FIFO `occ ≤ depth` | `check.rs` | a safety violation / FIFO overflow |
+| `prove <d> [--emit f] [--lean-path p]` | sorry-free Lean: FSM safety (`emit_fsm`), FIFO bound (`emit_petri`) | Lean kernel | a proof is not sorry-free / does not elaborate |
+| `equiv <impl> <ref> [--prove]` | observational equivalence (Moore product) + Lean bisimulation | `check.rs` + `emit_fsm` | NOT equivalent (with counterexample) |
+
+The marquee is the **serial-link capstone** (`scripts/serial-link-certify.sh`),
+which runs the whole ladder — FSM safety ∧ equivalence ∧ timing ∧ channel-loss —
+into one certificate. See [`examples/fpga/serial-link.recipe.md`](../examples/fpga/serial-link.recipe.md).
 
 ## Schema `aria-ir-json/v1`
 
@@ -71,15 +88,15 @@ numeric string for those fields.
   `next`(+`n`), `until`(+`holding`/`release`), `implies`(+`antecedent`/
   `consequent`/`next_cycle`). **`kind`**: `assert` | `assume` | `cover`.
 
-## What each family will consume (later phases)
+## What each family consumes
 
-| Aria IR | → leanlift family | uses |
-|---|---|---|
-| enum-typed `register` + `mux`/`casemux` `next` | FSM | states, transitions, `assert`/`never` → `forbid` |
-| `fifo` / `pipeline_reg` / ready-valid | Petri | occupancy place, `depth` → bound, loss transition |
-| `pipeline` (`latency`, `initiation_interval`) + `clock_freq` | tasks | RTA latency bound |
-| streaming `pipeline` / backpressure | qnet | throughput, bottleneck stage |
-| channel loss | GSPN→CTMC | delivery probability, phase change |
+| Aria IR | → leanlift family | uses | verb |
+|---|---|---|---|
+| `register` + priority `mux`/`casemux` `next` | FSM (`Lts`) | states, transitions, `assert`/`never` → `forbid` | `check`/`prove`/`equiv` |
+| `fifo` (`depth`, `is_cdc`) | Petri (`PtNet`) | occupancy place, `depth` → bound, pure-loss leak | `check`/`prove` |
+| `pipeline` (`latency`, `initiation_interval`, stage `comb_delay_ns`) + `clock_freq` | tasks (`rt.rs`) | hard latency, closure, C-slow fold | `timing` |
+| streaming `pipeline` / backpressure | qnet | throughput, bottleneck stage, stability | `throughput` |
+| channel loss (a `*.model.toml` GSPN) | GSPN→CTMC | delivery probability, asymptotic `p*` | `model prism`/`prove` |
 
 The emitter is faithful by construction (`../fpga-meta-compiler/src/ir_json.rs`):
 every IR variant has a tag and all of its fields, and **nothing is dropped** —

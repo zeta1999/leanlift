@@ -124,3 +124,28 @@ Aeneas (`$LIFT prove rta-kernel`) and bounded-model-checked by Kani
 
 The complete, copy-pasteable check list with expected outputs is
 [`docs/TESTING.md`](TESTING.md).
+
+## 8. Verify an FPGA design (Aria-HDL)
+
+leanlift also verifies FPGA designs authored in **Aria-HDL** by ingesting its
+hardware IR (`aria-hdl --emit-ir-json`) and projecting it onto the same families —
+no new proof machinery. The whole ladder on the two-chip serial link:
+
+```sh
+./scripts/serial-link-certify.sh        # one combined certificate
+```
+
+```
+① FSM safety   — TX,RX frame state ≤ 3, sorry-free Lean
+② Equivalence  — TX ≡ golden (bisimulation) + a buggy TX correctly rejected
+③ Hard timing  — frame latency read from the verified FSM
+④ Channel loss — delivery X(p), asymptotic stability threshold p* ≈ 0.882
+⇒ safe ∧ equivalent ∧ (latency ≤ 40 ns) ∧ (loss p < p*) ⇒ CORRECT.
+```
+
+Each axis reuses an existing engine: control FSMs ride `check`/`emit_fsm`, FIFOs
+ride `PtNet`/`emit_petri`, pipeline timing rides `rt.rs`, throughput rides
+`qnet.rs`, and protocol equivalence is a synchronous product checked by the same
+BFS and proved by the same `emit_fsm`. The story and schema are in
+[`docs/FORMATS-fpga.md`](FORMATS-fpga.md) and
+[`examples/fpga/serial-link.recipe.md`](../examples/fpga/serial-link.recipe.md).

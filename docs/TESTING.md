@@ -80,3 +80,39 @@ output line). Executable by a person or an agent. `$?` is the shell exit code.
 All of §0–§4 and §7 must pass on any machine. §5–§6 pass where Aeneas / Kani are
 installed and SKIP cleanly otherwise — they must never produce a *wrong* result,
 only run-or-skip.
+
+## 8. FPGA (Aria-HDL bridge) — `[CPU]` unless tagged
+
+`$F = examples/fpga`. All `[CPU]`; `prove`/`equiv --prove` need `lean` on PATH
+(skip cleanly otherwise). Heavier cross-machine runs are tagged.
+
+| Step | Command | Expect |
+|---|---|---|
+| 8.1 ingest | `$LIFT fpga info $F/tcp_ip.aria.json` | `4 module(s)`, annotations + `assert always` echoed |
+| 8.2 timing | `$LIFT fpga timing $F/pipeline_demo.aria.json` | `mac`: 16 ns latency @125 MHz, closes 0.8 ≤ 8 ns |
+| 8.3 throughput | `$LIFT fpga throughput $F/pipeline_demo.aria.json` | `125 Mitems/s`, balanced (no per-stage delays) |
+| 8.4 FSM check | `$LIFT fpga check $F/tcp_ip.aria.json` | `tcp_fsm` 7 states, `state ≤ 10` **SAFE** |
+| 8.5 FSM prove | `$LIFT fpga prove $F/tcp_ip.aria.json` | `tcp_fsm` **M3 PROVED sorry-free** |
+| 8.6 FIFO check | `$LIFT fpga check $F/fifo_link.aria.json` | CDC FIFO depth 4, `occ ≤ depth` **SAFE** |
+| 8.7 FIFO prove | `$LIFT fpga prove $F/fifo_link.aria.json` | `occ ≤ depth 4` **sorry-free** (survives loss) |
+| 8.8 equiv | `$LIFT fpga equiv $F/protocol_impl.aria.json $F/protocol_golden.aria.json` | **EQUIVALENT ✓** |
+| 8.9 capstone | `./scripts/serial-link-certify.sh --check; echo $?` | `the serial protocol is CORRECT`, exit `0` |
+| 8.10 sweep | `./scripts/serial-link-sweep.sh --check; echo $?` | delivery roll-off, knee ≈ `p* 0.882`, exit `0` |
+
+### FPGA teeth — must go RED
+
+| Step | Command | Expect |
+|---|---|---|
+| 8.T1 timing | a stage slower than the clock (3 ns path, 2 ns clock) | `VIOLATED`, exit `1` |
+| 8.T2 throughput | offered rate > a stage rate | `SATURATED`, exit `1` |
+| 8.T3 FSM | an FSM that reaches an illegal state | `VIOLATION` (check) / proof red (prove), exit `1` |
+| 8.T4 FIFO | `occ ≤ depth-1` (too tight) | overflow violation (unit test `tight_bound_is_violated`) |
+| 8.T5 equiv | `$LIFT fpga equiv $F/protocol_impl.aria.json $F/protocol_bug.aria.json` | **NOT EQUIVALENT** + counterexample, exit `1` |
+
+All of §8 (and §8.T) runs in `ci.sh`.
+
+### Cross-machine (tagged, off-CI)
+
+- `[M24]` 24 GB Mac: Aria **Metal** emit+run of TX/RX; the Mathlib-cached proofs.
+- `[GPU]` RTX 6000 Pro: Aria **CUDA/OpenCL** kernels; **Verilator** co-sim of the
+  serial link; **PRISM/Storm** cross-check of the delivery `p*`; `yosys` sanity.
