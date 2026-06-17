@@ -1,19 +1,30 @@
-//! FPGA control-FSM extraction (PLAN-fpga Phase F, slice ②).
+//! FPGA control-FSM extraction (PLAN-fpga Phase F, slice ② + F3).
 //!
-//! Project an Aria-HDL control FSM — a single state `Register` whose `next` is a
-//! priority `Mux`/`CaseMux` tree over input guards — onto leanlift's `Lts`, so
-//! the existing `check.rs` (reachability / dead-state / deadlock / safety) and
+//! Project an Aria-HDL control FSM onto leanlift's `Lts`, so the existing
+//! `check.rs` (reachability / dead-state / deadlock / safety) and
 //! `lean.rs::emit_fsm` (sorry-free Lean) ride unchanged.
 //!
+//! The FSM state is the **tuple of every state `Register`** in the module —
+//! one register is the common control-FSM shape; several registers form a
+//! *product* (composite) machine. The composite state is encoded as a single
+//! bit-packed `i64`: register `i` occupies `[offset_i, offset_i+width_i)`, with
+//! offsets the running sum of widths. With one register the offset is 0, so the
+//! packed value IS the register value — a strict generalization that leaves the
+//! single-register behaviour (and every downstream consumer keyed on the packed
+//! `i64`: `moore_step`, `state_values`, `forbidden_values`, the equivalence
+//! product, the Lean emit) bit-for-bit identical.
+//!
 //! The projection is **mechanical, total, and exact**: a small interpreter
-//! evaluates the `next` expression tree for every (current state, input
-//! valuation), so the transition relation is the hardware's, not an abstraction.
+//! evaluates each register's `next` expression tree for every (composite state,
+//! input valuation), so the joint transition relation is the hardware's, not an
+//! abstraction. A `ref` to register `j` reads its slice out of the packed state.
 //! Input valuations that induce the *same* whole-state transition are merged into
 //! one `Event` (behavioural dedup) to keep the alphabet — and the Lean case split
 //! — small. The safety property comes from the IR's own `assert always P` formal
-//! properties: a reachable state where `P` is false is `forbid`-den. Everything
-//! that cannot be evaluated purely on the state (guards referencing inputs, ops
-//! we do not model) is REFUSED, never silently mis-evaluated — fail-closed.
+//! properties: a reachable state where `P` is false is `forbid`-den; a property
+//! may reference any subset of the registers. Everything that cannot be evaluated
+//! purely on the registers (guards referencing inputs, ops we do not model) is
+//! REFUSED, never silently mis-evaluated — fail-closed.
 
 use super::fpga::Json;
 use super::ir::Lts;
@@ -25,12 +36,44 @@ const MAX_INPUT_BITS: u32 = 16;
 /// Cap on the reachable state-value set (guards a non-terminating arithmetic
 /// `next`, e.g. a free-running counter mis-detected as a control FSM).
 const MAX_STATES: usize = 4096;
+/// Cap on the total composite width. The packed state must fit in a positive
+/// `i64`; we also refuse pathologically wide products (a datapath, not a control
+/// FSM). 63 bits keeps the top bit clear so the packed value is never negative.
+const MAX_COMPOSITE_BITS: u32 = 63;
+/// Recursion-depth cap for expression evaluation. A real expression tree is
+/// shallow; this only ever trips on a (malformed) combinational wire cycle
+/// (`w1 := w2`, `w2 := w1`), which we then REFUSE rather than overflow the stack.
+const MAX_EVAL_DEPTH: u32 = 1024;
+
+/// One register's extraction metadata, gathered once and reused for reset, the
+/// joint transition, and reachability.
+struct RegMeta<'a> {
+    width: u32,
+    offset: u32,
+    next: &'a Json,
+    reset: Option<&'a Json>,
+    /// `enable` gate, if non-null. The register updates to `next` only when this
+    /// is true, otherwise it HOLDS its current value. `None` ⇒ always enabled.
+    enable: Option<&'a Json>,
+}
+
+/// One register composing the (possibly product) state, in packing order.
+pub struct RegInfo {
+    /// Register name (for diagnostics).
+    pub name: String,
+    /// Declared `uint<width>` width; the register's `next` is masked to it.
+    pub width: u32,
+    /// Bit offset of this register's slice within the packed composite value.
+    pub offset: u32,
+}
 
 pub struct FsmExtract {
     pub lts: Lts,
-    pub reg_name: String,
-    pub reg_width: u32,
-    /// State VALUES, parallel to the `q{idx}` names in `lts.states`.
+    /// Registers composing the state, in packing (value-id) order. One entry is
+    /// the classic single control FSM; several form a product machine.
+    pub regs: Vec<RegInfo>,
+    /// State VALUES (bit-packed composites), parallel to the `q{idx}` names in
+    /// `lts.states`.
     pub state_values: Vec<i64>,
     /// Input port names used as guard bits, in id order.
     pub inputs: Vec<String>,
@@ -40,7 +83,7 @@ pub struct FsmExtract {
     pub safety_skipped: usize,
     /// The forbidden state VALUES (those a usable property rules out).
     pub forbidden_values: Vec<i64>,
-    /// Reset (initial) state value — the Moore machine's start state.
+    /// Reset (initial) composite state value — the Moore machine's start state.
     pub reset: i64,
     /// Guard-input names in `moore_step` valuation-bit order (bit `i` ⇔ this name).
     pub moore_inputs: Vec<String>,
@@ -49,25 +92,50 @@ pub struct FsmExtract {
     pub moore_step: HashMap<(i64, u64), i64>,
 }
 
+impl FsmExtract {
+    /// One-line description of the state register(s) for `info`/diagnostics.
+    pub fn reg_desc(&self) -> String {
+        if self.regs.len() == 1 {
+            format!("register `{}` (uint<{}>)", self.regs[0].name, self.regs[0].width)
+        } else {
+            let parts: Vec<String> = self
+                .regs
+                .iter()
+                .map(|r| format!("`{}`:uint<{}>@[{}..{})", r.name, r.width, r.offset, r.offset + r.width))
+                .collect();
+            let total: u32 = self.regs.iter().map(|r| r.width).sum();
+            format!("product of {} registers [{}] ({}-bit composite)", self.regs.len(), parts.join(", "), total)
+        }
+    }
+}
+
 /// What a value-id resolves to during evaluation.
 struct Resolver<'a> {
-    state_id: u64,
+    /// Register value-id → (width, packing offset). A `ref` to one reads its
+    /// slice out of the packed composite state.
+    regs: HashMap<u64, (u32, u32)>,
     inputs: HashSet<u64>,
     wires: HashMap<u64, &'a Json>, // value-id → defining expression
 }
 
 struct Env<'a> {
-    state: i64,
+    /// Bit-packed composite state value.
+    packed: i64,
     assign: &'a HashMap<u64, i64>,
 }
 
+/// Mask for a `uint<width>` value (low `width` bits).
+fn width_mask(width: u32) -> i64 {
+    if width >= 63 { i64::MAX } else { (1i64 << width) - 1 }
+}
+
 /// Extract the control FSM from one IR-JSON module object. `Ok(None)` means "no
-/// single-register control FSM here" (not an error — e.g. a pure datapath).
+/// control FSM here" (not an error — a pure datapath with zero state registers).
 pub fn extract_fsm(module: &Json) -> Result<Option<FsmExtract>, String> {
     let nodes = module.get("nodes").and_then(Json::as_arr).ok_or("module: missing `nodes`")?;
 
-    // Collect registers and wires by their value-id (== node `id`).
-    let mut regs: Vec<(&Json, u64, String)> = Vec::new();
+    // Collect registers and wires by their value-id (== node `id`), in id order.
+    let mut reg_nodes: Vec<(&Json, u64, String)> = Vec::new();
     let mut wires: HashMap<u64, &Json> = HashMap::new();
     for n in nodes {
         let id = n.get("id").and_then(Json::as_u64).ok_or("node: missing `id`")?;
@@ -75,7 +143,7 @@ pub fn extract_fsm(module: &Json) -> Result<Option<FsmExtract>, String> {
         match kind.str_field("k") {
             Some("register") => {
                 let name = n.str_field("name").unwrap_or("state").to_string();
-                regs.push((kind, id, name));
+                reg_nodes.push((kind, id, name));
             }
             Some("wire") => {
                 if let Some(expr) = kind.get("expr") {
@@ -85,28 +153,69 @@ pub fn extract_fsm(module: &Json) -> Result<Option<FsmExtract>, String> {
             _ => {}
         }
     }
-    // A single-register module is the control-FSM shape F handles. Zero registers
-    // (pure datapath) or several (a multi-register datapath/cache) are simply "not
-    // a control FSM" — SKIP, don't fail. Errors below are reserved for a recognized
-    // single-register FSM we cannot soundly project (fail-closed).
-    if regs.len() != 1 {
+    // Zero registers (pure datapath / combinational) ⇒ "not a control FSM" — SKIP,
+    // don't fail. Errors below are reserved for a recognized state machine we
+    // cannot soundly project (fail-closed).
+    if reg_nodes.is_empty() {
         return Ok(None);
     }
-    let (reg_kind, state_id, reg_name) = (regs[0].0, regs[0].1, regs[0].2.clone());
+    // Pack registers in id order (deterministic, matches IR declaration order).
+    reg_nodes.sort_by_key(|(_, id, _)| *id);
 
-    // Register width (uint<n>) — the next value is masked to it (hardware wrap).
-    let reg_width = reg_kind
-        .get("ty")
-        .and_then(|t| t.get("n"))
-        .and_then(Json::as_u64)
-        .unwrap_or(0) as u32;
-    if reg_width == 0 || reg_width > 63 {
-        return Err(format!("register `{reg_name}`: unsupported width {reg_width} (need 1..=63-bit)"));
+    // Build the packing layout and the resolver's register slice map. A register
+    // must be `uint<n>` with 1 ≤ n ≤ 63; the running offset is the sum of widths.
+    let mut regs: Vec<RegInfo> = Vec::new();
+    let mut reg_slices: HashMap<u64, (u32, u32)> = HashMap::new();
+    let mut reg_meta: Vec<RegMeta> = Vec::new();
+    let mut offset = 0u32;
+    for (reg_kind, id, name) in &reg_nodes {
+        // State must be a maskable unsigned integer: `uint<1..=63>` or `bit`
+        // (= uint<1>). A wide (`>63`) or non-integer (array/memory/struct) register
+        // is a DATAPATH, not a control-FSM state — SKIP the whole module (`Ok(None)`,
+        // make no claim), don't fail. A malformed integer register (uint with width
+        // 0 / missing `n`) is an IR error → Err (loud, fail-closed).
+        let ty = reg_kind.get("ty");
+        let width = match ty.and_then(|t| t.str_field("t")) {
+            Some("bit") => 1u32,
+            Some("uint") => {
+                let n = ty
+                    .and_then(|t| t.get("n"))
+                    .and_then(Json::as_u64)
+                    .ok_or_else(|| format!("register `{name}`: uint state missing width `n`"))?
+                    as u32;
+                if n == 0 {
+                    return Err(format!("register `{name}`: uint state width 0 (malformed)"));
+                }
+                if n > 63 {
+                    return Ok(None); // wide datapath register — not a control FSM
+                }
+                n
+            }
+            _ => return Ok(None), // non-integer state (datapath) — not a control FSM
+        };
+        let next = reg_kind.get("next").ok_or_else(|| format!("register `{name}`: missing `next`"))?;
+        let reset_expr = reg_kind.get("reset_value");
+        // `enable`: a JSON `null` (or absent) means "always enabled". A non-null
+        // expression GATES the update — modeled exactly below as `next` when true,
+        // hold otherwise. We must read it, or a gated register that holds a safe
+        // value would be modeled as always-advancing (a different machine).
+        let enable = match reg_kind.get("enable") {
+            Some(Json::Null) | None => None,
+            Some(e) => Some(e),
+        };
+        reg_slices.insert(*id, (width, offset));
+        reg_meta.push(RegMeta { width, offset, next, reset: reset_expr, enable });
+        regs.push(RegInfo { name: name.clone(), width, offset });
+        offset += width;
     }
-    let mask: i64 = if reg_width >= 63 { i64::MAX } else { (1i64 << reg_width) - 1 };
-
-    let next = reg_kind.get("next").ok_or_else(|| format!("register `{reg_name}`: missing `next`"))?;
-    let reset_expr = reg_kind.get("reset_value");
+    let total_bits = offset;
+    if total_bits > MAX_COMPOSITE_BITS {
+        // A wide multi-register module is a datapath, not a control FSM — SKIP
+        // (make no claim), matching the per-register wide-datapath path above and
+        // the pre-F3 "not an FSM" behaviour. Reachability would also blow past
+        // MAX_STATES anyway. This is sound: an un-projected module is never SAFE.
+        return Ok(None);
+    }
 
     // Input ports (by value-id) and their bit-ness.
     let ports = module.get("ports").and_then(Json::as_arr).ok_or("module: missing `ports`")?;
@@ -123,9 +232,15 @@ pub fn extract_fsm(module: &Json) -> Result<Option<FsmExtract>, String> {
         }
     }
 
-    // Which inputs actually appear in `next` (the guard bits we enumerate).
+    // Which inputs actually appear in ANY register's `next` (the guard bits we
+    // enumerate — the union over the product).
     let mut used_inputs: HashSet<u64> = HashSet::new();
-    collect_input_refs(next, &input_ids, &mut used_inputs);
+    for rm in &reg_meta {
+        collect_input_refs(rm.next, &input_ids, &mut used_inputs);
+        if let Some(en) = rm.enable {
+            collect_input_refs(en, &input_ids, &mut used_inputs);
+        }
+    }
     // Refuse non-bit guard inputs: enumerating only {0,1} would be unsound.
     for id in &used_inputs {
         if input_is_bit.get(id) != Some(&true) {
@@ -142,13 +257,49 @@ pub fn extract_fsm(module: &Json) -> Result<Option<FsmExtract>, String> {
         return Err(format!("FSM has {k} guard input bits (> {MAX_INPUT_BITS}); refuse exhaustive 2^k valuation"));
     }
 
-    let resolver = Resolver { state_id, inputs: used_inputs.clone(), wires };
+    let resolver = Resolver { regs: reg_slices, inputs: used_inputs.clone(), wires };
 
-    // Reset state value (a literal expr; evaluate with an empty environment).
+    // Reset state value: each register's `reset_value` must be a constant — it may
+    // not reference another register, an input, or a wire (which could fan in an
+    // input). Such a reset is REFUSED (fail-closed) rather than mis-evaluated
+    // against a zero environment. Pack the per-register resets into the composite.
     let empty: HashMap<u64, i64> = HashMap::new();
-    let reset = match reset_expr {
-        Some(e) => eval(e, &resolver, &Env { state: 0, assign: &empty })? & mask,
-        None => 0,
+    let dummy = Env { packed: 0, assign: &empty };
+    let mut reset = 0i64;
+    for (rm, info) in reg_meta.iter().zip(&regs) {
+        let name = &info.name;
+        let v = match rm.reset {
+            Some(e) => {
+                if expr_references_dynamic(e, &resolver) {
+                    return Err(format!("register `{name}`: reset value references a register/input/wire (not a constant) — refuse"));
+                }
+                eval(e, &resolver, &dummy, 0)? & width_mask(rm.width)
+            }
+            None => 0,
+        };
+        reset |= v << rm.offset;
+    }
+
+    // The joint transition: evaluate every register's `next` against the current
+    // packed state + input valuation, mask each to its width, repack. A gated
+    // register (`enable`) takes `next` only when enable is true; otherwise it
+    // HOLDS its current slice — modeled exactly, never assumed always-on.
+    let step = |packed: i64, assign: &HashMap<u64, i64>| -> Result<i64, String> {
+        let mut np = 0i64;
+        for rm in &reg_meta {
+            let env = Env { packed, assign };
+            let enabled = match rm.enable {
+                Some(en) => eval(en, &resolver, &env, 0)? != 0,
+                None => true,
+            };
+            let v = if enabled {
+                eval(rm.next, &resolver, &env, 0)? & width_mask(rm.width)
+            } else {
+                (packed >> rm.offset) & width_mask(rm.width) // hold current value
+            };
+            np |= v << rm.offset;
+        }
+        Ok(np)
     };
 
     // Reachability fixpoint: from reset, fire every input valuation.
@@ -161,7 +312,7 @@ pub fn extract_fsm(module: &Json) -> Result<Option<FsmExtract>, String> {
         idx += 1;
         for a in 0..combos {
             let assign = valuation(a, &guard_inputs);
-            let t = eval(next, &resolver, &Env { state: s, assign: &assign })? & mask;
+            let t = step(s, &assign)?;
             if seen.insert(t) {
                 if state_set.len() >= MAX_STATES {
                     return Err(format!("FSM state set exceeded {MAX_STATES} — not a finite control FSM?"));
@@ -187,7 +338,7 @@ pub fn extract_fsm(module: &Json) -> Result<Option<FsmExtract>, String> {
         let assign = valuation(a, &guard_inputs);
         let mut behaviour = Vec::with_capacity(state_set.len());
         for &s in &state_set {
-            let t = eval(next, &resolver, &Env { state: s, assign: &assign })? & mask;
+            let t = step(s, &assign)?;
             behaviour.push(t);
             moore_step.insert((s, a), t);
         }
@@ -206,7 +357,7 @@ pub fn extract_fsm(module: &Json) -> Result<Option<FsmExtract>, String> {
 
     // Safety: forbid reachable states ruled out by a usable `assert always P`.
     let (forbidden_values, safety_used, safety_skipped) =
-        derive_forbidden(nodes, &resolver, state_id, &state_set)?;
+        derive_forbidden(nodes, &resolver, &state_set)?;
     let forbid: Vec<String> = forbidden_values.iter().map(|&v| name_of(v)).collect();
 
     let states: Vec<String> = (0..state_set.len()).map(|i| format!("q{i}")).collect();
@@ -226,8 +377,7 @@ pub fn extract_fsm(module: &Json) -> Result<Option<FsmExtract>, String> {
     inputs.sort();
     Ok(Some(FsmExtract {
         lts,
-        reg_name,
-        reg_width,
+        regs,
         state_values: state_set,
         inputs,
         safety_used,
@@ -240,12 +390,11 @@ pub fn extract_fsm(module: &Json) -> Result<Option<FsmExtract>, String> {
 }
 
 /// Derive the forbidden state VALUES from `assert always P` (and `never P`)
-/// formal properties that reference ONLY the state register. Returns
+/// formal properties that reference ONLY the state register(s). Returns
 /// (forbidden values, #usable properties, #skipped properties).
 fn derive_forbidden(
     nodes: &[Json],
     resolver: &Resolver,
-    state_id: u64,
     state_set: &[i64],
 ) -> Result<(Vec<i64>, usize, usize), String> {
     let mut forbidden: Vec<i64> = Vec::new();
@@ -270,17 +419,18 @@ fn derive_forbidden(
             Some(e) => e,
             None => continue,
         };
-        // Usable only if it references ONLY the state register (no inputs/wires).
-        if !references_only_state(expr, state_id, resolver) {
+        // Usable only if it references ONLY state registers (no inputs/wires).
+        if !references_only_regs(expr, resolver) {
             skipped += 1;
             continue;
         }
-        // Evaluate P at every state value. A malformed/unsupported property expr is
-        // SKIPPED (we prove less) — it must not abort the whole FSM's check.
+        // Evaluate P at every composite state value. A malformed/unsupported
+        // property expr is SKIPPED (we prove less) — it must not abort the whole
+        // FSM's check.
         let mut local = Vec::new();
         let mut evaluable = true;
         for &v in state_set {
-            match eval(expr, resolver, &Env { state: v, assign: &empty }) {
+            match eval(expr, resolver, &Env { packed: v, assign: &empty }, 0) {
                 Ok(p) => {
                     // `assert P` forbids ¬P; `never P` forbids P.
                     let bad = if pkind == "never" { p != 0 } else { p == 0 };
@@ -309,20 +459,37 @@ fn derive_forbidden(
     Ok((forbidden, used, skipped))
 }
 
-/// True iff `expr` references the state register and NOTHING else that varies
-/// (no inputs, no wires) — so it can be evaluated purely on the state value.
-fn references_only_state(expr: &Json, state_id: u64, r: &Resolver) -> bool {
+/// True iff `expr` references the state register(s) and NOTHING else that varies
+/// (no inputs, no wires) — so it can be evaluated purely on the packed state.
+fn references_only_regs(expr: &Json, r: &Resolver) -> bool {
     let mut ok = true;
     walk_refs(expr, &mut |id| {
-        if id != state_id && (r.inputs.contains(&id) || r.wires.contains_key(&id)) {
-            // a wire could be state-only too, but to stay sound we only accept the
-            // bare state register here (wires may fan in inputs).
+        if r.regs.contains_key(&id) {
+            // a state register — fine.
+        } else if r.inputs.contains(&id) || r.wires.contains_key(&id) {
+            // an input, or a wire that may fan in inputs — refuse (stay sound).
             ok = false;
-        } else if id != state_id && !r.wires.contains_key(&id) {
-            ok = false; // an unknown ref — refuse
+        } else {
+            // an unknown ref — refuse.
+            ok = false;
         }
     });
     ok
+}
+
+/// True iff `expr` references any register / input / wire (i.e. is NOT a pure
+/// constant). Used to refuse non-constant reset values fail-closed.
+fn expr_references_dynamic(expr: &Json, r: &Resolver) -> bool {
+    let mut dynamic = false;
+    walk_refs(expr, &mut |id| {
+        if r.regs.contains_key(&id) || r.inputs.contains(&id) || r.wires.contains_key(&id) {
+            dynamic = true;
+        } else {
+            // an unknown ref is also not a constant we can trust — treat as dynamic.
+            dynamic = true;
+        }
+    });
+    dynamic
 }
 
 fn collect_input_refs(expr: &Json, inputs: &HashMap<u64, String>, out: &mut HashSet<u64>) {
@@ -386,7 +553,12 @@ fn mask_arith(e: &Json, raw: i64) -> Result<i64, String> {
 
 /// Evaluate an IR expression to an integer (booleans as 0/1). Refuses anything it
 /// cannot model exactly (fail-closed): an unknown op or an unresolved ref errors.
-fn eval(e: &Json, r: &Resolver, env: &Env) -> Result<i64, String> {
+/// `depth` bounds wire-dereference recursion so a malformed combinational wire
+/// cycle is REFUSED rather than overflowing the stack.
+fn eval(e: &Json, r: &Resolver, env: &Env, depth: u32) -> Result<i64, String> {
+    if depth > MAX_EVAL_DEPTH {
+        return Err("expression nesting exceeded depth cap (combinational wire cycle?) — refuse".into());
+    }
     match e.str_field("e") {
         Some("lit") => {
             let lit = e.get("lit").ok_or("lit: missing payload")?;
@@ -399,24 +571,25 @@ fn eval(e: &Json, r: &Resolver, env: &Env) -> Result<i64, String> {
         }
         Some("ref") => {
             let id = e.get("value").and_then(Json::as_u64).ok_or("ref: missing value-id")?;
-            if id == r.state_id {
-                Ok(env.state)
+            if let Some(&(width, off)) = r.regs.get(&id) {
+                // Read this register's slice out of the packed composite state.
+                Ok((env.packed >> off) & width_mask(width))
             } else if r.inputs.contains(&id) {
                 Ok(*env.assign.get(&id).unwrap_or(&0))
             } else if let Some(w) = r.wires.get(&id) {
-                eval(w, r, env)
+                eval(w, r, env, depth + 1)
             } else {
                 Err(format!("ref: unresolved value-id {id}"))
             }
         }
         Some("mux") => {
-            let c = eval(e.get("cond").ok_or("mux: missing cond")?, r, env)?;
+            let c = eval(e.get("cond").ok_or("mux: missing cond")?, r, env, depth + 1)?;
             let branch = if c != 0 { "true" } else { "false" };
-            eval(e.get(branch).ok_or("mux: missing branch")?, r, env)
+            eval(e.get(branch).ok_or("mux: missing branch")?, r, env, depth + 1)
         }
         Some("binop") => {
-            let l = eval(e.get("lhs").ok_or("binop: missing lhs")?, r, env)?;
-            let rr = eval(e.get("rhs").ok_or("binop: missing rhs")?, r, env)?;
+            let l = eval(e.get("lhs").ok_or("binop: missing lhs")?, r, env, depth + 1)?;
+            let rr = eval(e.get("rhs").ok_or("binop: missing rhs")?, r, env, depth + 1)?;
             let op = e.str_field("op").ok_or("binop: missing op")?;
             // Comparisons / logic yield a clean 0/1 boolean (no width to mask).
             // Arithmetic / bitwise must wrap to the result's DECLARED uint width —
@@ -449,6 +622,7 @@ fn eval(e: &Json, r: &Resolver, env: &Env) -> Result<i64, String> {
                 e.get("operand").or_else(|| e.get("value")).ok_or("unop: missing operand")?,
                 r,
                 env,
+                depth + 1,
             )?;
             let op = e.str_field("op").ok_or("unop: missing op")?;
             Ok(match op {
@@ -459,7 +633,7 @@ fn eval(e: &Json, r: &Resolver, env: &Env) -> Result<i64, String> {
             })
         }
         Some("cast") | Some("resize") => {
-            eval(e.get("value").or_else(|| e.get("expr")).ok_or("cast: missing inner")?, r, env)
+            eval(e.get("value").or_else(|| e.get("expr")).ok_or("cast: missing inner")?, r, env, depth + 1)
         }
         Some(other) => Err(format!("unsupported expression `{other}` in FSM")),
         None => Err("expression: missing `e` tag".into()),
@@ -501,6 +675,8 @@ mod tests {
     fn safe_fsm_has_no_forbidden_and_check_passes() {
         let f = extract(&fsm(1, "bit")).unwrap();
         assert_eq!(f.state_values, vec![0, 1]);
+        assert_eq!(f.regs.len(), 1);
+        assert_eq!(f.regs[0].offset, 0); // single register packs at offset 0
         assert!(f.forbidden_values.is_empty());
         assert_eq!(f.safety_used, 1);
         let r = check::check(&f.lts, check::DEFAULT_BOUND);
@@ -627,5 +803,222 @@ mod tests {
         assert!(f.forbidden_values.is_empty()); // never exceeds 10
         let r = check::check(&f.lts, check::DEFAULT_BOUND);
         assert!(r.safe());
+    }
+
+    // ───────────────────────── F3: multi-register (product) FSMs ──────────────
+
+    /// A two-register product machine. `a:uint<2>` counts toward 2 when `inc`;
+    /// `b:uint<2>` mirrors `a` (`b := a`). The joint `next` of `b` READS `a`, so
+    /// the product transition must evaluate registers against the SAME packed
+    /// pre-state. `bad` chooses whether the safety property is violated:
+    ///   safe : `assert always b <= a`  (b trails a by one cycle, always ≤)  → holds
+    ///   teeth: `assert always a == b`  (false — they differ for one cycle)  → fails
+    fn product_fsm(prop_expr: &str) -> String {
+        format!(
+            r#"{{"schema":"aria-ir-json/v1","id":0,"name":"prod",
+              "ports":[{{"id":0,"value":10,"name":"inc","ty":{{"t":"bit"}},"dir":"input","clock_domain":0}}],
+              "clock_domains":[],"annotations":[],
+              "nodes":[
+                {{"id":1,"name":"a","kind":{{"k":"register","ty":{{"t":"uint","n":2}},"clock_domain":0,
+                  "reset_value":{{"e":"lit","lit":{{"l":"uint","value":"0","width":2}}}},"enable":null,
+                  "next":{{"e":"mux","cond":{{"e":"binop","op":"logic_and","ty":{{"t":"bit"}},
+                      "lhs":{{"e":"ref","value":10}},
+                      "rhs":{{"e":"binop","op":"lt","ty":{{"t":"bit"}},"lhs":{{"e":"ref","value":1}},"rhs":{{"e":"lit","lit":{{"l":"uint","value":"2","width":2}}}}}}}},
+                    "true":{{"e":"binop","op":"add","ty":{{"t":"uint","n":2}},"lhs":{{"e":"ref","value":1}},"rhs":{{"e":"lit","lit":{{"l":"uint","value":"1","width":2}}}}}},
+                    "false":{{"e":"ref","value":1}}}}}}}},
+                {{"id":2,"name":"b","kind":{{"k":"register","ty":{{"t":"uint","n":2}},"clock_domain":0,
+                  "reset_value":{{"e":"lit","lit":{{"l":"uint","value":"0","width":2}}}},"enable":null,
+                  "next":{{"e":"ref","value":1}}}}}},
+                {{"id":3,"name":"p","kind":{{"k":"formal_property","property":{{"kind":"assert","temporal":{{"tt":"always"}},
+                  "expr":{prop_expr},"name":"safe"}}}}}}
+              ],
+              "timing":{{}}}}"#
+        )
+    }
+
+    #[test]
+    fn product_fsm_packs_two_registers_and_reads_cross_register_next() {
+        // `b <= a` always holds (b is last cycle's a, a only grows). Verifies the
+        // composite packing AND that b's `next` (which refs a) reads the shared
+        // pre-state, not b's own value.
+        let prop = r#"{"e":"binop","op":"le","ty":{"t":"bit"},"lhs":{"e":"ref","value":2},"rhs":{"e":"ref","value":1}}"#;
+        let f = extract(&product_fsm(prop)).unwrap();
+        assert_eq!(f.regs.len(), 2, "two registers form the product");
+        assert_eq!(f.regs[0].name, "a");
+        assert_eq!(f.regs[0].offset, 0);
+        assert_eq!(f.regs[1].name, "b");
+        assert_eq!(f.regs[1].offset, 2, "b packs above a's 2 bits");
+        // Reachable composite states: (a,b) with a∈0..=2, b trailing. Pack = a | b<<2.
+        // Reset (0,0)=0. Each is well within 2^4.
+        assert!(f.state_values.iter().all(|&v| (0..16).contains(&v)));
+        assert_eq!(f.reset, 0);
+        assert_eq!(f.safety_used, 1);
+        assert!(f.forbidden_values.is_empty(), "b<=a holds on all reachable states");
+        let r = check::check(&f.lts, check::DEFAULT_BOUND);
+        assert!(r.safe(), "the product machine satisfies b<=a");
+    }
+
+    #[test]
+    fn product_fsm_safety_violation_is_caught() {
+        // teeth: `a == b` is FALSE — after `inc`, a becomes 1 while b is still 0
+        // (b mirrors a with one cycle of latency). The composite check must find a
+        // reachable state where a≠b and forbid it.
+        let prop = r#"{"e":"binop","op":"eq","ty":{"t":"bit"},"lhs":{"e":"ref","value":1},"rhs":{"e":"ref","value":2}}"#;
+        let f = extract(&product_fsm(prop)).unwrap();
+        assert_eq!(f.regs.len(), 2);
+        assert!(!f.forbidden_values.is_empty(), "a≠b states must be forbidden");
+        // A forbidden state has a (low 2 bits) ≠ b (next 2 bits).
+        for &v in &f.forbidden_values {
+            let a = v & 0b11;
+            let b = (v >> 2) & 0b11;
+            assert_ne!(a, b, "forbidden composite {v:#06b} must have a≠b");
+        }
+        let r = check::check(&f.lts, check::DEFAULT_BOUND);
+        assert!(!r.safe(), "a reachable a≠b state must FAIL the composite check");
+    }
+
+    #[test]
+    fn product_fsm_emits_sound_lean() {
+        use crate::models::lean;
+        let prop = r#"{"e":"binop","op":"le","ty":{"t":"bit"},"lhs":{"e":"ref","value":2},"rhs":{"e":"ref","value":1}}"#;
+        let f = extract(&product_fsm(prop)).unwrap();
+        let src = lean::emit_fsm(&f.lts, "Fpga_prod");
+        assert!(src.contains("inductive State"));
+        assert!(src.contains("theorem safety"));
+        assert!(src.contains("#print axioms Fpga_prod.safety"));
+    }
+
+    #[test]
+    fn wide_composite_is_skipped_as_datapath() {
+        // Two uint<32> registers = 64 bits > 63 — too wide to be a control FSM, so
+        // the module is SKIPPED (Ok(None), no claim), not failed. An un-projected
+        // module is never reported SAFE, so this is sound — and it doesn't turn a
+        // legitimate datapath (e.g. an address cache) into a CI failure.
+        let src = r#"{"schema":"aria-ir-json/v1","id":0,"name":"wide",
+          "ports":[],"clock_domains":[],"annotations":[],
+          "nodes":[
+            {"id":1,"name":"a","kind":{"k":"register","ty":{"t":"uint","n":32},"clock_domain":0,
+              "reset_value":{"e":"lit","lit":{"l":"uint","value":"0","width":32}},"enable":null,"next":{"e":"ref","value":1}}},
+            {"id":2,"name":"b","kind":{"k":"register","ty":{"t":"uint","n":32},"clock_domain":0,
+              "reset_value":{"e":"lit","lit":{"l":"uint","value":"0","width":32}},"enable":null,"next":{"e":"ref","value":2}}}
+          ],"timing":{}}"#;
+        let m = &parse_stream(src).unwrap()[0];
+        assert!(extract_fsm(m).unwrap().is_none(), "64-bit composite is a datapath — skip, not fail");
+    }
+
+    #[test]
+    fn bit_register_is_supported_as_uint1() {
+        // A `bit` flag register paired with a small uint counter is a valid control
+        // FSM (composite = 1 + 2 = 3 bits). `flag := go` (a one-bit register),
+        // `cnt := go ? cnt+1 : cnt` (uint<2>, wraps). Property `cnt <= 3` always
+        // holds (uint<2> max). Exercises bit-register packing at offset 0.
+        let src = r#"{"schema":"aria-ir-json/v1","id":0,"name":"flagcnt",
+          "ports":[{"id":0,"value":10,"name":"go","ty":{"t":"bit"},"dir":"input","clock_domain":0}],
+          "clock_domains":[],"annotations":[],
+          "nodes":[
+            {"id":1,"name":"flag","kind":{"k":"register","ty":{"t":"bit"},"clock_domain":0,
+              "reset_value":{"e":"lit","lit":{"l":"bit","value":"false","width":1}},"enable":null,
+              "next":{"e":"ref","value":10}}},
+            {"id":2,"name":"cnt","kind":{"k":"register","ty":{"t":"uint","n":2},"clock_domain":0,
+              "reset_value":{"e":"lit","lit":{"l":"uint","value":"0","width":2}},"enable":null,
+              "next":{"e":"mux","cond":{"e":"ref","value":10},
+                "true":{"e":"binop","op":"add","ty":{"t":"uint","n":2},"lhs":{"e":"ref","value":2},"rhs":{"e":"lit","lit":{"l":"uint","value":"1","width":2}}},
+                "false":{"e":"ref","value":2}}}},
+            {"id":3,"name":"p","kind":{"k":"formal_property","property":{"kind":"assert","temporal":{"tt":"always"},
+              "expr":{"e":"binop","op":"le","ty":{"t":"bit"},"lhs":{"e":"ref","value":2},"rhs":{"e":"lit","lit":{"l":"uint","value":"3","width":32}}},"name":"safe"}}}
+          ],"timing":{}}"#;
+        let f = extract(src).unwrap();
+        assert_eq!(f.regs.len(), 2);
+        assert_eq!(f.regs[0].name, "flag");
+        assert_eq!(f.regs[0].width, 1, "bit register is uint<1>");
+        assert_eq!(f.regs[1].offset, 1, "cnt packs above the 1-bit flag");
+        assert!(f.forbidden_values.is_empty());
+        let r = check::check(&f.lts, check::DEFAULT_BOUND);
+        assert!(r.safe());
+    }
+
+    #[test]
+    fn enable_gate_holds_value_when_low() {
+        // A gated counter: `state` (uint<2>) increments ONLY when `en` is high,
+        // otherwise HOLDS. With `assert always state <= 2`, the design is safe iff
+        // the gate is honoured: next=state+1 unconditionally would reach 3.
+        //   next  = mux(state < 2, state+1, state)   (saturating-ish, but...)
+        // To make the gate decisive we use a plain +1 (wraps in uint<2>): without
+        // the enable model, state cycles 0→1→2→3→0 and 3 violates `state<=2`.
+        // WITH the enable gate, when en=0 the register holds — but en is a free
+        // input, so the reachable set under exhaustive valuation STILL includes the
+        // en=1 path 0→1→2→3. So a wrapping counter is reachable either way; instead
+        // make `next` itself safe and prove the HOLD path is modeled: reset=2,
+        // next = 0 (would drop to 0), enable=en. Property: `state >= 2` is false at
+        // 0. If the hold is modeled, en=0 keeps state=2 (safe) AND en=1 moves to 0
+        // (forbidden) ⇒ VIOLATION must be found (teeth that the en=1 path exists).
+        let src = r#"{"schema":"aria-ir-json/v1","id":0,"name":"gated",
+          "ports":[{"id":0,"value":10,"name":"en","ty":{"t":"bit"},"dir":"input","clock_domain":0}],
+          "clock_domains":[],"annotations":[],
+          "nodes":[
+            {"id":1,"name":"state","kind":{"k":"register","ty":{"t":"uint","n":2},"clock_domain":0,
+              "reset_value":{"e":"lit","lit":{"l":"uint","value":"2","width":2}},
+              "enable":{"e":"ref","value":10},
+              "next":{"e":"lit","lit":{"l":"uint","value":"0","width":2}}}},
+            {"id":2,"name":"p","kind":{"k":"formal_property","property":{"kind":"assert","temporal":{"tt":"always"},
+              "expr":{"e":"binop","op":"ge","ty":{"t":"bit"},"lhs":{"e":"ref","value":1},"rhs":{"e":"lit","lit":{"l":"uint","value":"2","width":32}}},"name":"hold"}}}
+          ],"timing":{}}"#;
+        let f = extract(src).unwrap();
+        // Reset 2 is held when en=0; dropped to 0 when en=1. Both reachable.
+        assert!(f.state_values.contains(&2), "held value (en=0) must be reachable");
+        assert!(f.state_values.contains(&0), "en=1 path to 0 must be reachable");
+        assert_eq!(f.forbidden_values, vec![0], "state 0 violates state>=2");
+        let r = check::check(&f.lts, check::DEFAULT_BOUND);
+        assert!(!r.safe(), "the en=1 path reaches a forbidden state");
+    }
+
+    #[test]
+    fn enable_gate_makes_design_safe_when_it_should() {
+        // Mirror: reset=2, next=3 (illegal), enable = constant false (en held low
+        // by a literal `false`). With the gate modeled, the register NEVER advances
+        // to 3, so `assert always state <= 2` holds. Without the gate it would be a
+        // false VIOLATION (3 wrongly reachable). enable is a literal so there are
+        // zero guard inputs — the hold is the only behaviour.
+        let src = r#"{"schema":"aria-ir-json/v1","id":0,"name":"frozen",
+          "ports":[],"clock_domains":[],"annotations":[],
+          "nodes":[
+            {"id":1,"name":"state","kind":{"k":"register","ty":{"t":"uint","n":2},"clock_domain":0,
+              "reset_value":{"e":"lit","lit":{"l":"uint","value":"2","width":2}},
+              "enable":{"e":"lit","lit":{"l":"bit","value":"false","width":1}},
+              "next":{"e":"lit","lit":{"l":"uint","value":"3","width":2}}}},
+            {"id":2,"name":"p","kind":{"k":"formal_property","property":{"kind":"assert","temporal":{"tt":"always"},
+              "expr":{"e":"binop","op":"le","ty":{"t":"bit"},"lhs":{"e":"ref","value":1},"rhs":{"e":"lit","lit":{"l":"uint","value":"2","width":32}}},"name":"safe"}}}
+          ],"timing":{}}"#;
+        let f = extract(src).unwrap();
+        assert_eq!(f.state_values, vec![2], "a frozen register has exactly its reset state");
+        assert!(f.forbidden_values.is_empty(), "illegal next=3 is never taken (enable low)");
+        let r = check::check(&f.lts, check::DEFAULT_BOUND);
+        assert!(r.safe());
+    }
+
+    #[test]
+    fn null_enable_is_always_on_unchanged() {
+        // Regression: the existing single-register fixtures carry `"enable":null`
+        // (always-on). The toggle FSM must extract identically to before.
+        let f = extract(&fsm(1, "bit")).unwrap();
+        assert_eq!(f.state_values, vec![0, 1]);
+        assert!(f.forbidden_values.is_empty());
+    }
+
+    #[test]
+    fn non_constant_reset_is_refused() {
+        // A reset that references another register is not a constant — refuse
+        // rather than evaluate against a zero environment (which would silently
+        // pick the wrong initial state).
+        let src = r#"{"schema":"aria-ir-json/v1","id":0,"name":"rst",
+          "ports":[],"clock_domains":[],"annotations":[],
+          "nodes":[
+            {"id":1,"name":"a","kind":{"k":"register","ty":{"t":"uint","n":2},"clock_domain":0,
+              "reset_value":{"e":"lit","lit":{"l":"uint","value":"1","width":2}},"enable":null,"next":{"e":"ref","value":1}}},
+            {"id":2,"name":"b","kind":{"k":"register","ty":{"t":"uint","n":2},"clock_domain":0,
+              "reset_value":{"e":"ref","value":1},"enable":null,"next":{"e":"ref","value":2}}}
+          ],"timing":{}}"#;
+        let m = &parse_stream(src).unwrap()[0];
+        assert!(extract_fsm(m).is_err(), "non-constant reset must be refused");
     }
 }

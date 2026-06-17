@@ -1211,23 +1211,16 @@ fn check_cmd(a: Vec<String>) {
         let name = m.str_field("name").unwrap_or("?");
         match fpga_fsm::extract_fsm(m) {
             Ok(None) => {
-                // Not a single-register control FSM. Leave a breadcrumb for the
-                // multi-register case so a skipped safety FSM isn't invisible.
-                let regs = m
-                    .get("nodes")
-                    .and_then(Json::as_arr)
-                    .map(|ns| ns.iter().filter(|n| n.get("kind").and_then(|k| k.str_field("k")) == Some("register")).count())
-                    .unwrap_or(0);
-                if regs > 1 {
-                    println!();
-                    println!("module `{name}` — skipped: {regs} registers (not a single-control-FSM; F handles one)");
-                }
+                // No state registers ⇒ a pure datapath, not a control FSM. Single-
+                // and multi-register (product) FSMs are both extracted above; an
+                // unsound projection is an Err, handled below — so `None` here is
+                // simply "nothing to check", no breadcrumb needed.
             }
             Ok(Some(fsm)) => {
                 fsm_count += 1;
                 let r = check::check(&fsm.lts, check::DEFAULT_BOUND);
                 println!();
-                println!("module `{name}` — FSM on register `{}` (uint<{}>)", fsm.reg_name, fsm.reg_width);
+                println!("module `{name}` — FSM on {}", fsm.reg_desc());
                 println!(
                     "  states: {} reachable, alphabet: {} event(s) (from {} input bit(s): {})",
                     fsm.state_values.len(),

@@ -307,6 +307,25 @@ else
     || { bad "fpga check teeth: violation not caught"; cat "$TMP/fcb"; }
 fi
 
+# F3 — multi-register (product) FSM: a two-flag mutex arbiter whose mutual-exclusion
+# safety is a CROSS-register property (`!(ns & ew)`). Exercises the bit-packed
+# composite state, joint transition, and cross-register property eval.
+if "$LIFT" fpga check "$M/../fpga/mutex_arbiter.aria.json" >"$TMP/f3" 2>&1; then
+  grep -q "product of 2 registers" "$TMP/f3" \
+    && grep -q "3 reachable" "$TMP/f3" \
+    && grep -q "SAFE ✓" "$TMP/f3" \
+    && pass "fpga check  (product FSM: ns/ew mutex, 3 states, never-both SAFE)" \
+    || { bad "fpga check: product FSM wrong verdict"; cat "$TMP/f3"; }
+else
+  bad "fpga check product FSM failed (exit $?)"; cat "$TMP/f3"
+fi
+# teeth: arp_cache (81-bit composite datapath) must be SKIPPED, never refused/errored.
+if grep -q "FSM refused" "$TMP/fc"; then
+  bad "tcp_ip check refused a module (wide datapath should skip silently)"; cat "$TMP/fc"
+else
+  pass "fpga check  (wide datapath arp_cache skipped, 0 refused)"
+fi
+
 # F2 — sorry-free Lean proof of FSM safety (needs the Lean toolchain).
 if have lean; then
   if "$LIFT" fpga prove "$M/../fpga/tcp_ip.aria.json" --emit "$TMP/tcp.gen.lean" >"$TMP/fp2" 2>&1; then
@@ -315,6 +334,14 @@ if have lean; then
       || { bad "fpga prove: not sorry-free"; cat "$TMP/fp2"; }
   else
     bad "fpga prove failed (exit $?)"; cat "$TMP/fp2"
+  fi
+  # F3 — the product (multi-register) FSM's cross-register safety proven sorry-free.
+  if "$LIFT" fpga prove "$M/../fpga/mutex_arbiter.aria.json" --emit "$TMP/mutex.gen.lean" >"$TMP/fp3f" 2>&1; then
+    grep -q "M3 PROVED sorry-free" "$TMP/fp3f" && grep -q "1/1 obligation(s) proved sorry-free" "$TMP/fp3f" \
+      && pass "fpga prove  (product FSM mutex, cross-register safety, sorry-free M3)" \
+      || { bad "fpga prove: product FSM not sorry-free"; cat "$TMP/fp3f"; }
+  else
+    bad "fpga prove product FSM failed (exit $?)"; cat "$TMP/fp3f"
   fi
   # teeth: the unsafe FSM's safety theorem must NOT elaborate (M1, exit 1).
   if "$LIFT" fpga prove "$TMP/badfsm.json" --emit "$TMP/bad.gen.lean" >"$TMP/fp2b" 2>&1; then

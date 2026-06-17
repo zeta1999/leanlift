@@ -1,0 +1,25 @@
+{"schema":"aria-ir-json/v1","id":0,"name":"mutex_arbiter",
+  "ports":[
+    {"id":0,"value":10,"name":"req_ns","ty":{"t":"bit"},"dir":"input","clock_domain":0},
+    {"id":1,"value":11,"name":"req_ew","ty":{"t":"bit"},"dir":"input","clock_domain":0}
+  ],
+  "clock_domains":[],"annotations":[],
+  "nodes":[
+    {"id":1,"name":"ns","kind":{"k":"register","ty":{"t":"bit"},"clock_domain":0,
+      "reset_value":{"e":"lit","lit":{"l":"bit","value":"false","width":1}},"enable":null,
+      "next":{"e":"binop","op":"logic_and","ty":{"t":"bit"},
+        "lhs":{"e":"ref","value":10},
+        "rhs":{"e":"unop","op":"logic_not","operand":{"e":"ref","value":2}}}}},
+    {"id":2,"name":"ew","kind":{"k":"register","ty":{"t":"bit"},"clock_domain":0,
+      "reset_value":{"e":"lit","lit":{"l":"bit","value":"false","width":1}},"enable":null,
+      "next":{"e":"binop","op":"logic_and","ty":{"t":"bit"},
+        "lhs":{"e":"binop","op":"logic_and","ty":{"t":"bit"},
+          "lhs":{"e":"ref","value":11},
+          "rhs":{"e":"unop","op":"logic_not","operand":{"e":"ref","value":1}}},
+        "rhs":{"e":"unop","op":"logic_not","operand":{"e":"ref","value":10}}}}},
+    {"id":3,"name":"mutual_exclusion","kind":{"k":"formal_property","property":{"kind":"assert","temporal":{"tt":"always"},
+      "expr":{"e":"binop","op":"eq","ty":{"t":"bit"},
+        "lhs":{"e":"binop","op":"and","ty":{"t":"bit"},"lhs":{"e":"ref","value":1},"rhs":{"e":"ref","value":2}},
+        "rhs":{"e":"lit","lit":{"l":"uint","value":"0","width":32}}},"name":"never_both_green"}}}
+  ],
+  "timing":{}}
