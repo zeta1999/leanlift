@@ -115,6 +115,19 @@ Each test/step is tagged for where it must run. CI (`ci.sh`) runs only `[CPU]`.
   leanlift `forbid`). `lift fpga prove` → **sorry-free Lean** via `emit_fsm` — strictly
   stronger than Aria's emitted obligations (we *certify*, not just *state*). Cross-check
   reachable set vs the emulator; teeth (mutate a transition ⇒ checker ∧ proof both red). `[CPU]`
+- **F3 — multi-register FSM (future).** Today `extract_fsm` handles exactly ONE
+  state register; modules with several are SKIPPED with a breadcrumb (honest, but a
+  real coverage gap — e.g. `arp_cache`, datapaths with auxiliary state). Extend to a
+  **product/composite state**: the FSM state is the tuple of all register values; the
+  transition function jointly evaluates every register's `next` over the shared input
+  valuations (the existing `eval` already resolves inter-register refs); the
+  reachability fixpoint runs over the product space under the existing `MAX_STATES`
+  guard, and the `q{idx}`/event/`forbid`/Moore machinery is unchanged once the tuple
+  `Lts` is built. State names become `q{idx}` over sorted reachable tuples; the Moore
+  output (for `equiv`) is the value tuple. **Soundness-critical** (a wrong joint
+  transition relation = a false SAFE — the F1 lesson): keep the per-register
+  width-aware masking, fail-closed on unresolved refs, and bound the product blow-up.
+  Reuses `check.rs` / `emit_fsm` / `fpga_equiv` verbatim. ★ (brutal-reviewed). `[CPU]`
 
 ## Phase D — slice ③ FIFO / dataflow flow-safety (reuse `PtNet` + `Petri.lean`)
 
@@ -248,6 +261,10 @@ proved kernel is touched.
       properties. `lift fpga check` reuses `check.rs` (M1, pure Rust). 29 fpga unit
       tests; ci.sh GREEN with SAFE + illegal-state teeth; brutal-reviewed (CRITICAL
       uint-wrap false-SAFE + exit-code + property-abort fixed). `[CPU]` ★
+- [ ] F3 — multi-register FSM: product/composite state from ≥2 registers (today
+      skipped with a breadcrumb). Tuple state, joint `next` evaluation over shared
+      valuations, product reachability under `MAX_STATES`; reuses check/prove/equiv.
+      Soundness-critical (false-SAFE risk) — width-aware masking + fail-closed. `[CPU]` ★
 - [x] F2 — `lift fpga prove`: emit a sorry-free Lean safety proof per FSM via the
       existing `lean::emit_fsm` and elaborate it (shared `elaborate_lean` helper);
       the kernel re-derives what M1 checked. tcp_fsm proved sorry-free (axioms:
