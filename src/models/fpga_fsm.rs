@@ -40,6 +40,13 @@ pub struct FsmExtract {
     pub safety_skipped: usize,
     /// The forbidden state VALUES (those a usable property rules out).
     pub forbidden_values: Vec<i64>,
+    /// Reset (initial) state value — the Moore machine's start state.
+    pub reset: i64,
+    /// Guard-input names in `moore_step` valuation-bit order (bit `i` ⇔ this name).
+    pub moore_inputs: Vec<String>,
+    /// The full Moore step table: `(state value, valuation index over moore_inputs)
+    /// → next state value`. The observable output of a state IS its value.
+    pub moore_step: HashMap<(i64, u64), i64>,
 }
 
 /// What a value-id resolves to during evaluation.
@@ -169,14 +176,20 @@ pub fn extract_fsm(module: &Json) -> Result<Option<FsmExtract>, String> {
 
     // Behavioural dedup of input valuations: two valuations that map EVERY state
     // to the same successor are one Event. Behaviour = the successor vector.
+    // The full (state, valuation) → next table is ALSO captured (`moore_step`) for
+    // the equivalence engine (Phase E), keyed by the raw valuation index `a` over
+    // `guard_inputs` (id order = `moore_inputs`).
     let mut behaviour_to_event: HashMap<Vec<i64>, String> = HashMap::new();
     let mut events: Vec<String> = Vec::new();
     let mut transitions: HashMap<(String, String), String> = HashMap::new();
+    let mut moore_step: HashMap<(i64, u64), i64> = HashMap::new();
     for a in 0..combos {
         let assign = valuation(a, &guard_inputs);
         let mut behaviour = Vec::with_capacity(state_set.len());
         for &s in &state_set {
-            behaviour.push(eval(next, &resolver, &Env { state: s, assign: &assign })? & mask);
+            let t = eval(next, &resolver, &Env { state: s, assign: &assign })? & mask;
+            behaviour.push(t);
+            moore_step.insert((s, a), t);
         }
         let ev = behaviour_to_event
             .entry(behaviour.clone())
@@ -206,7 +219,10 @@ pub fn extract_fsm(module: &Json) -> Result<Option<FsmExtract>, String> {
         forbid,
     };
 
-    let mut inputs: Vec<String> = guard_inputs.iter().map(|id| input_ids[id].clone()).collect();
+    // Guard-input names in valuation-bit order (id order) — the key order for
+    // `moore_step`'s valuation index.
+    let moore_inputs: Vec<String> = guard_inputs.iter().map(|id| input_ids[id].clone()).collect();
+    let mut inputs = moore_inputs.clone();
     inputs.sort();
     Ok(Some(FsmExtract {
         lts,
@@ -217,6 +233,9 @@ pub fn extract_fsm(module: &Json) -> Result<Option<FsmExtract>, String> {
         safety_used,
         safety_skipped,
         forbidden_values,
+        reset,
+        moore_inputs,
+        moore_step,
     }))
 }
 

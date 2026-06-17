@@ -193,8 +193,8 @@ modules + a **lossy channel** — proved correct on every axis at once.
 | F2 | Lts → Lean | yes (`emit_fsm`) | Lean kernel (sorry-free) |
 | D1 | Fifo → PtNet (occ/free + pure-loss leak) | yes | over-approx (sound for overflow); BFS vs closed-form markings |
 | D2 | PtNet → Lean `occ ≤ depth` | yes (`emit_petri`) | Lean kernel (omega); tight-bound teeth |
-| E1 | (Lts × PtNet) product | yes (BFS) | counterexample search |
-| E2 | bisim relation → Lean | yes | Lean kernel (sorry-free) |
+| E1 | (Moore × Moore) product → Lts | yes (BFS) | exhaustive product; diverging-pair counterexample |
+| E2 | product non-divergence → Lean (`emit_fsm`) | yes | Lean kernel (sorry-free) |
 | S2.4 | channel → GSPN→CTMC | yes (`gspn.rs`) | closed form + PRISM `[GPU]` |
 
 **Zero LLM-tagged steps on the verification path.** Aria's `--emit-lean4` and
@@ -268,8 +268,15 @@ proved kernel is touched.
       brutal-reviewed (no false SAFE; bound/BFS-size + underflow-scope fixed). `[CPU]` ★
 
 ### Equivalence
-- [ ] E1 — `lift fpga equiv` product trace-equivalence (M1) + counterexample. `[CPU]` ★
-- [ ] E2 — Lean bisimulation certificate (M3), sorry-free. `[CPU]` ★
+- [x] E1 — `src/models/fpga_equiv.rs` + `lift fpga equiv <impl> <ref>`: synchronous
+      product of two extracted Moore FSMs over the shared input space, `forbid =
+      {(a,b): output a ≠ output b}`; REUSE `check.rs` → EQUIVALENT or a diverging-pair
+      counterexample. Sound bisimulation for deterministic single-register machines;
+      bit-projection + fail-closed caps brutal-reviewed (no false EQUIVALENT). `[CPU]` ★
+- [x] E2 — `lift fpga equiv --prove`: the product never diverges, proved sorry-free
+      via the SAME `emit_fsm` (no new proof machinery) — a Lean bisimulation
+      certificate (impl ≟ golden, axioms propext). 4 equiv unit tests; ci.sh GREEN
+      with EQUIVALENT + buggy-ref counterexample + sorry-free teeth. `[CPU]` ★
 
 ### Capstone
 - [ ] S1 — author `serial_link.ahdl` (TX/RX/lossy channel) + `serial-link.petri` + recipe. `[CPU]`

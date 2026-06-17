@@ -800,7 +800,11 @@ fn usage() -> ! {
         \x20     emit a sorry-free Lean proof per obligation (FSM safety via emit_fsm,\n\
         \x20     FIFO `occ ≤ depth` via emit_petri) and elaborate it (M3) — the kernel\n\
         \x20     re-derives what M1 checked. Exit 1 if any proof is not sorry-free.\n\
-        \x20 (planned: lift fpga equiv — see docs/PLAN-fpga.md)\n"
+        \x20 lift fpga equiv <impl.aria.json> <reference.aria.json> [--prove]\n\
+        \x20     synchronous product of the two control FSMs over the shared input\n\
+        \x20     space; assert observational equivalence (every reachable pair\n\
+        \x20     agrees on its output). Counterexample on divergence; --prove emits\n\
+        \x20     a sorry-free Lean bisimulation certificate. Exit 1 if not equivalent.\n"
     );
     exit(2);
 }
@@ -828,6 +832,10 @@ pub fn main(mut argv: Vec<String>) {
             argv.remove(0);
             "prove"
         }
+        Some("equiv") => {
+            argv.remove(0);
+            "equiv"
+        }
         Some(s) if !s.starts_with('-') => "info",
         _ => usage(),
     };
@@ -837,8 +845,136 @@ pub fn main(mut argv: Vec<String>) {
         "throughput" => throughput_cmd(argv),
         "check" => check_cmd(argv),
         "prove" => prove_cmd(argv),
+        "equiv" => equiv_cmd(argv),
         _ => usage(),
     }
+}
+
+/// Extract the (single) control FSM from a design file, or fail with a clear
+/// message — the equivalence engine needs exactly one FSM per side.
+fn one_fsm(path: &str) -> super::fpga_fsm::FsmExtract {
+    use super::fpga_fsm;
+    let modules = load_raw(path);
+    let mut found = None;
+    for m in &modules {
+        match fpga_fsm::extract_fsm(m) {
+            Ok(Some(f)) => {
+                if found.is_some() {
+                    eprintln!("error: {path} has more than one control FSM; equiv compares a single FSM per side");
+                    exit(2);
+                }
+                found = Some(f);
+            }
+            Ok(None) => {}
+            Err(e) => {
+                eprintln!("error: {path}: FSM refused (unsound to project): {e}");
+                exit(1);
+            }
+        }
+    }
+    found.unwrap_or_else(|| {
+        eprintln!("error: {path} has no control FSM to compare");
+        exit(2);
+    })
+}
+
+fn equiv_cmd(a: Vec<String>) {
+    use super::{check, fpga_equiv, lean, LeanOutcome};
+    let mut files: Vec<String> = Vec::new();
+    let mut prove = false;
+    let mut emit: Option<PathBuf> = None;
+    let mut lean_path = PathBuf::from("lean");
+    let mut i = 0;
+    while i < a.len() {
+        match a[i].as_str() {
+            "--prove" => prove = true,
+            "--emit" => {
+                i += 1;
+                emit = Some(PathBuf::from(a.get(i).cloned().unwrap_or_else(|| usage())));
+            }
+            "--lean-path" => {
+                i += 1;
+                lean_path = PathBuf::from(a.get(i).cloned().unwrap_or_else(|| usage()));
+            }
+            s if s.starts_with("--") => {
+                eprintln!("unknown flag: {s}");
+                usage();
+            }
+            _ => files.push(a[i].clone()),
+        }
+        i += 1;
+    }
+    if files.len() != 2 {
+        eprintln!("usage: lift fpga equiv <impl.aria.json> <reference.aria.json> [--prove]");
+        exit(2);
+    }
+    let (impl_fsm, ref_fsm) = (one_fsm(&files[0]), one_fsm(&files[1]));
+    let product = fpga_equiv::build_product(&impl_fsm, &ref_fsm).unwrap_or_else(|e| {
+        eprintln!("error building product: {e}");
+        exit(2);
+    });
+
+    println!("leanlift FPGA protocol equivalence — {} ≟ {}", files[0], files[1]);
+    println!("════════════════════════════════════════════════════");
+    println!("  shared inputs: [{}]", product.union_inputs.join(", "));
+    println!("  product: {} reachable pair(s)", product.pairs.len());
+
+    let r = check::check(&product.lts, check::DEFAULT_BOUND);
+    if r.truncated {
+        eprintln!("  INCONCLUSIVE: product state space truncated at the BFS bound");
+        exit(1);
+    }
+    if product.diverging.is_empty() && r.safe() {
+        println!("  verdict: EQUIVALENT ✓ (every reachable pair agrees on its output)");
+    } else {
+        // Report the diverging pairs (impl output ≠ reference output).
+        println!("  verdict: NOT EQUIVALENT ✗ — {} diverging pair(s):", product.diverging.len());
+        for &(x, y) in product.diverging.iter().take(8) {
+            println!("    impl state {x} vs reference state {y}");
+        }
+        exit(1);
+    }
+
+    if prove {
+        // E2: the product never diverges ⇒ a sorry-free bisimulation certificate
+        // via the SAME emit_fsm used for FSM safety (forbid = diverging pairs).
+        let ns = lean_ns(&format!("equiv_{}", path_stem(&files[0])));
+        let generated = lean::emit_fsm(&product.lts, &ns);
+        let emit_path = emit.unwrap_or_else(|| PathBuf::from(format!("{}.equiv.gen.lean", path_stem(&files[0]))));
+        match super::elaborate_lean(&generated, &emit_path, &lean_path) {
+            Ok(LeanOutcome::Elaborated { sorry_free, axioms }) if sorry_free => {
+                println!(
+                    "  bisimulation: M3 PROVED sorry-free (ns {ns}; the product never reaches a diverging pair; axioms: {})",
+                    if axioms.is_empty() { "(none)" } else { &axioms }
+                );
+                eprintln!("    Lean: {}", emit_path.display());
+            }
+            Ok(LeanOutcome::NotElaborated(e)) => {
+                eprintln!("  bisimulation proof did not elaborate:\n{e}");
+                exit(1);
+            }
+            Ok(LeanOutcome::Elaborated { .. }) => {
+                eprintln!("  bisimulation proof elaborated but is NOT sorry-free");
+                exit(1);
+            }
+            Err(e) => {
+                eprintln!("infrastructure error: {e}");
+                exit(2);
+            }
+        }
+    }
+}
+
+/// File stem (no dir, no extension) sanitized for use in a Lean namespace seed.
+fn path_stem(p: &str) -> String {
+    std::path::Path::new(p)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("design")
+        .split('.')
+        .next()
+        .unwrap_or("design")
+        .to_string()
 }
 
 /// Shared positional-file argument parsing for the single-file verbs.
