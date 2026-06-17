@@ -14,6 +14,7 @@ mod check;
 mod codegen;
 mod cpn;
 pub mod fpga;
+pub mod fpga_fsm;
 mod format;
 mod gspn;
 mod ir;

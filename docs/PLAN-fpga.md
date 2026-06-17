@@ -189,7 +189,7 @@ modules + a **lossy channel** — proved correct on every axis at once.
 | B3 | IR-JSON → AriaIr | yes (parser) | round-trip echo |
 | T1 | PipelineInfo → latency/closure + C-slow fold→TaskSet | yes | dual-source cross-check (stage-delay↔critical-path, freq↔period) + RTA over-fold |
 | T2 | pipeline → Jackson net (qnet) | yes | bottleneck value-cross-check vs critical-path stage; saturation teeth |
-| F1 | enum Register+Mux → Lts | yes | reach set vs emulator |
+| F1 | Register+priority-Mux → Lts (width-aware interp) | yes | exhaustive 2^k valuation; uint-wrap teeth; reach set |
 | F2 | Lts → Lean | yes (`emit_fsm`) | Lean kernel (sorry-free) |
 | D1 | Fifo/handshake → PtNet | yes | bound vs emulator depth |
 | D2 | PtNet → Lean invariant | yes (`emit_petri`) | Lean kernel (omega) |
@@ -241,7 +241,13 @@ proved kernel is touched.
       `[CPU]`; heavy Verilator II confirmation `[GPU]` (off-CI).
 
 ### Slice ② control-FSM safety
-- [ ] F1 — enum Register+Mux → Lts extraction. `[CPU]` ★
+- [x] F1 — `src/models/fpga_fsm.rs`: extract a control FSM (single state Register +
+      priority-Mux `next`) → an `Lts` via a width-aware IR interpreter + reachability
+      fixpoint + behavioural event-dedup (2^k valuations → distinct successor
+      vectors); safety forbid from the IR's own `assert always P` state-only formal
+      properties. `lift fpga check` reuses `check.rs` (M1, pure Rust). 29 fpga unit
+      tests; ci.sh GREEN with SAFE + illegal-state teeth; brutal-reviewed (CRITICAL
+      uint-wrap false-SAFE + exit-code + property-abort fixed). `[CPU]` ★
 - [ ] F2 — `lift fpga check`/`prove` (sorry-free) + teeth. `[CPU]` ★
 
 ### Slice ③ FIFO flow-safety
