@@ -79,13 +79,21 @@ fi
 
 # 3. Hard timing: derive the frame depth from axis ① (the verified reachable-state
 #    count of serial_tx), so this is a real read of the checked FSM, not a constant.
+#    A failed read FAILS the certificate (ok=0) — this axis is not decorative.
 echo "③ Hard timing  (frame latency)"
-FRAME_CYCLES=$("$LIFT" fpga check "$F/serial_tx.aria.json" 2>/dev/null | awk -F'[ ,]+' '/states:/{print $3; exit}')
-FRAME_CYCLES=${FRAME_CYCLES:-4}
 FCLK_MHZ=100
-LAT_NS=$(awk -v c=$FRAME_CYCLES -v f=$FCLK_MHZ 'BEGIN{printf "%.1f", c*1000.0/f}')
-note "frame = $FRAME_CYCLES frame states ⇒ $LAT_NS ns @ $FCLK_MHZ MHz, ASSUMING tick every cycle"
-note "(with a baud strobe the frame takes 1 + (states-1)/tick-rate cycles — still bounded)"
+if "$LIFT" fpga check "$F/serial_tx.aria.json" >/tmp/sl_tx.out 2>&1 && ! grep -q "VIOLATION" /tmp/sl_tx.out; then
+  FRAME_CYCLES=$(awk -F'[ ,]+' '/states:/{print $3; exit}' /tmp/sl_tx.out)
+  if [ -n "${FRAME_CYCLES:-}" ] && [ "$FRAME_CYCLES" -ge 1 ] 2>/dev/null; then
+    LAT_NS=$(awk -v c=$FRAME_CYCLES -v f=$FCLK_MHZ 'BEGIN{printf "%.1f", c*1000.0/f}')
+    note "frame = $FRAME_CYCLES frame states ⇒ $LAT_NS ns @ $FCLK_MHZ MHz, ASSUMING tick every cycle"
+    note "(with a baud strobe the frame takes 1 + (states-1)/tick-rate cycles — still bounded)"
+  else
+    note "timing FAILED: could not read the frame-state count from the verified FSM"; ok=0; LAT_NS="?"
+  fi
+else
+  note "timing FAILED: serial_tx did not check clean"; cat /tmp/sl_tx.out; ok=0; LAT_NS="?"
+fi
 
 # 4. Channel loss: delivery throughput and the phase-transition threshold p*.
 echo "④ Channel loss  (lift model prism — GSPN→CTMC)"

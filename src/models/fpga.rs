@@ -1204,6 +1204,7 @@ fn check_cmd(a: Vec<String>) {
     println!("════════════════════════════════════════════════════");
     let mut fsm_count = 0;
     let mut fifo_count = 0;
+    let mut fifo_deferred = 0;
     let mut errors = 0;
     let mut unsafe_found = false;
     for m in &modules {
@@ -1283,8 +1284,9 @@ fn check_cmd(a: Vec<String>) {
                     let markings = fpga_fifo::reachable_markings(fifo.depth);
                     const EXPLICIT_LIMIT: u64 = 500_000;
                     if markings > EXPLICIT_LIMIT {
+                        fifo_deferred += 1;
                         println!(
-                            "  explicit check skipped: ~{markings} markings > {EXPLICIT_LIMIT} limit — `lift fpga prove` certifies it symbolically (any depth)"
+                            "  verdict: DEFERRED — ~{markings} markings > {EXPLICIT_LIMIT} explicit-check limit; `lift fpga prove` certifies it symbolically (any depth)"
                         );
                         continue;
                     }
@@ -1313,7 +1315,9 @@ fn check_cmd(a: Vec<String>) {
         eprintln!("no control FSMs or FIFOs in {path} (nothing to check)");
         exit(2);
     }
-    println!("{fsm_count} FSM + {fifo_count} FIFO obligation(s) checked, {errors} refused");
+    let fifo_checked = fifo_count - fifo_deferred;
+    let deferred = if fifo_deferred > 0 { format!(", {fifo_deferred} FIFO deferred to prove") } else { String::new() };
+    println!("{fsm_count} FSM + {fifo_checked} FIFO obligation(s) checked{deferred}, {errors} refused");
     // Exit 1 if any obligation is unsafe OR anything was refused as unsound.
     if unsafe_found || errors > 0 {
         exit(1);
@@ -1405,22 +1409,22 @@ fn prove_cmd(a: Vec<String>) {
     println!("leanlift FPGA prove (M3) — {path}");
     println!("════════════════════════════════════════════════════");
     let (mut proved, mut vacuous, mut failed) = (0, 0, 0);
-    for job in &jobs {
-        // Each obligation → a self-contained Lean file + namespace + label.
+    for (ji, job) in jobs.iter().enumerate() {
+        // Each obligation → a self-contained Lean file + namespace + label. The
+        // obligation index `ji` disambiguates the auto-named file AND namespace so
+        // two same-named obligations in one module can't clobber each other.
         let (label, ns, generated, fname) = match job {
-            Job::Fsm(name, f) => (
-                format!("FSM `{name}`"),
-                lean_ns(name),
-                lean::emit_fsm(&f.lts, &lean_ns(name)),
-                format!("{stem}.{name}.fsm.gen.lean"),
-            ),
+            Job::Fsm(name, f) => {
+                let ns = lean_ns(&format!("{name}_{ji}"));
+                (format!("FSM `{name}`"), ns.clone(), lean::emit_fsm(&f.lts, &ns), format!("{stem}.{ji}.{name}.fsm.gen.lean"))
+            }
             Job::Fifo(name, f) => {
-                let ns = lean_ns(&format!("{name}_{}", f.name));
+                let ns = lean_ns(&format!("{name}_{}_{ji}", f.name));
                 (
                     format!("FIFO `{}` (depth {})", f.name, f.depth),
                     ns.clone(),
                     lean::emit_petri(&f.net, &ns),
-                    format!("{stem}.{name}.{}.fifo.gen.lean", f.name),
+                    format!("{stem}.{ji}.{name}.{}.fifo.gen.lean", f.name),
                 )
             }
         };
