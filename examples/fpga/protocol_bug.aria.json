@@ -1,0 +1,25 @@
+{
+  "schema": "aria-ir-json/v1",
+  "id": 0,
+  "name": "proto",
+  "ports": [
+    {"id": 0, "value": 2, "name": "req", "ty": {"t": "bit"}, "dir": "input", "clock_domain": null},
+    {"id": 1, "value": 3, "name": "ack", "ty": {"t": "bit"}, "dir": "input", "clock_domain": null},
+    {"id": 2, "value": 4, "name": "rst", "ty": {"t": "bit"}, "dir": "input", "clock_domain": null},
+    {"id": 3, "value": 7, "name": "__output", "ty": {"t": "uint", "n": 2}, "dir": "output", "clock_domain": null}
+  ],
+  "clock_domains": [
+    {"id": 0, "name": "default", "clock_signal": 0, "reset_signal": 1, "freq_hz": "100000000"}
+  ],
+  "annotations": [
+    {"kind": "clock_freq", "value": "100000000"}
+  ],
+  "nodes": [
+    {"id": 5, "name": "state", "kind": {"k": "register", "ty": {"t": "uint", "n": 2}, "clock_domain": 0, "reset_value": {"e": "lit", "lit": {"l": "uint", "value": "0", "width": 2}}, "enable": null, "next": {"e": "mux", "cond": {"e": "ref", "value": 4}, "true": {"e": "lit", "lit": {"l": "uint", "value": "0", "width": 2}}, "false": {"e": "mux", "cond": {"e": "binop", "op": "eq", "lhs": {"e": "ref", "value": 5}, "rhs": {"e": "lit", "lit": {"l": "uint", "value": "2", "width": 2}}, "ty": {"t": "bit"}}, "true": {"e": "lit", "lit": {"l": "uint", "value": "1", "width": 2}}, "false": {"e": "mux", "cond": {"e": "binop", "op": "logic_and", "lhs": {"e": "binop", "op": "eq", "lhs": {"e": "ref", "value": 5}, "rhs": {"e": "lit", "lit": {"l": "uint", "value": "1", "width": 2}}, "ty": {"t": "bit"}}, "rhs": {"e": "ref", "value": 3}, "ty": {"t": "bit"}}, "true": {"e": "lit", "lit": {"l": "uint", "value": "2", "width": 2}}, "false": {"e": "mux", "cond": {"e": "binop", "op": "logic_and", "lhs": {"e": "binop", "op": "eq", "lhs": {"e": "ref", "value": 5}, "rhs": {"e": "lit", "lit": {"l": "uint", "value": "0", "width": 2}}, "ty": {"t": "bit"}}, "rhs": {"e": "ref", "value": 2}, "ty": {"t": "bit"}}, "true": {"e": "lit", "lit": {"l": "uint", "value": "1", "width": 2}}, "false": {"e": "ref", "value": 5}, "ty": {"t": "uint", "n": 2}}, "ty": {"t": "uint", "n": 2}}, "ty": {"t": "uint", "n": 2}}, "ty": {"t": "uint", "n": 2}}}},
+    {"id": 7, "name": "__output", "kind": {"k": "wire", "ty": {"t": "uint", "n": 2}, "expr": {"e": "ref", "value": 5}}},
+    {"id": 6, "name": "", "kind": {"k": "formal_property", "property": {"kind": "assert", "temporal": {"tt": "always"}, "expr": {"e": "binop", "op": "le", "lhs": {"e": "ref", "value": 5}, "rhs": {"e": "lit", "lit": {"l": "uint", "value": "2", "width": 32}}, "ty": {"t": "bit"}}, "name": null}}}
+  ],
+  "pipeline": null,
+  "systolic": null,
+  "timing": {"c_slow_factor": 1, "target_period_ns": 10, "critical_path_ns": 1, "retiming_weights": [{"producer": 4, "consumer": 5, "weight": 1, "is_feedback": false}, {"producer": 5, "consumer": 5, "weight": 1, "is_feedback": true}, {"producer": 5, "consumer": 5, "weight": 1, "is_feedback": true}, {"producer": 3, "consumer": 5, "weight": 1, "is_feedback": false}, {"producer": 5, "consumer": 5, "weight": 1, "is_feedback": true}, {"producer": 2, "consumer": 5, "weight": 1, "is_feedback": false}, {"producer": 5, "consumer": 5, "weight": 1, "is_feedback": true}, {"producer": 5, "consumer": 7, "weight": 0, "is_feedback": false}], "buffers": []}
+}

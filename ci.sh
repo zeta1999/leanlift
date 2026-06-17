@@ -346,6 +346,33 @@ else
   bad "fpga check (fifo) failed (exit $?)"; cat "$TMP/fcf"
 fi
 
+# E1 — protocol equivalence: impl ≟ golden → EQUIVALENT (M1 product).
+if "$LIFT" fpga equiv "$M/../fpga/protocol_impl.aria.json" "$M/../fpga/protocol_golden.aria.json" >"$TMP/fe" 2>&1; then
+  grep -q "EQUIVALENT ✓" "$TMP/fe" && pass "fpga equiv  (impl ≟ golden → EQUIVALENT)" \
+    || { bad "fpga equiv: wrong verdict"; cat "$TMP/fe"; }
+else
+  bad "fpga equiv (equivalent) failed (exit $?)"; cat "$TMP/fe"
+fi
+# teeth: a buggy reference (done→busy) must be caught as NOT EQUIVALENT (exit 1).
+if "$LIFT" fpga equiv "$M/../fpga/protocol_impl.aria.json" "$M/../fpga/protocol_bug.aria.json" >"$TMP/feb" 2>&1; then
+  bad "fpga equiv accepted a behaviourally-different design"; cat "$TMP/feb"
+else
+  grep -q "NOT EQUIVALENT" "$TMP/feb" && pass "fpga equiv teeth  (buggy ref → NOT EQUIVALENT + counterexample, exit 1)" \
+    || { bad "fpga equiv teeth: divergence not caught"; cat "$TMP/feb"; }
+fi
+# E2 — the bisimulation certificate is sorry-free (needs the Lean toolchain).
+if have lean; then
+  if "$LIFT" fpga equiv "$M/../fpga/protocol_impl.aria.json" "$M/../fpga/protocol_golden.aria.json" --prove --emit "$TMP/eq.gen.lean" >"$TMP/fep" 2>&1; then
+    grep -q "bisimulation: M3 PROVED sorry-free" "$TMP/fep" \
+      && pass "fpga equiv --prove  (bisimulation certificate, sorry-free M3)" \
+      || { bad "fpga equiv --prove: not sorry-free"; cat "$TMP/fep"; }
+  else
+    bad "fpga equiv --prove failed (exit $?)"; cat "$TMP/fep"
+  fi
+else
+  skip "fpga equiv --prove  (no lean toolchain)"
+fi
+
 # ---------------------------------------------------------------------------- #
 sect "M3 — prove (Lean, sorry-free)"
 if have lean; then
