@@ -1,0 +1,98 @@
+# serial-channel — the lossy channel BETWEEN the two FPGA chips of the serial-link
+# capstone (PLAN-fpga Phase S, step 4). A stop-and-wait framed link with a bounded
+# sender buffer and a per-attempt frame-loss probability `p`. Modelled as an
+# ergodic GSPN so the steady-state DELIVERY behaviour is defined.
+#
+# The story: as the loss probability `p` rises, the delivered-frame throughput X
+# stays ≈ the offered rate until `p` crosses a PHASE-TRANSITION threshold
+#   p* = 1 - lam / mu_eff
+# beyond which retransmissions saturate the link and X collapses (the delivery
+# cliff). `scripts/serial-link-sweep.sh` draws that curve; `lift model prism`
+# computes X / L / P(buffer full) at a given `p`.
+#
+# Qualitative safety (proved sorry-free by `lift model prove`): the frame buffer
+# never overflows — it rides the conserved mass frames+slot = K, so frames ≤ K in
+# every reachable marking, and it SURVIVES the lossy transitions.
+kind = "gspn"
+places = ["frames", "slot", "tx", "wait", "idle"]
+initial = "slot:4, idle:1"          # K=4 buffered frames; channel idle; none in flight
+
+conserved = ["frames", "slot"]
+[[bound]]
+name = "frame_buffer"
+max = "4"
+places = ["frames"]
+
+[[param]]
+name = "lam"
+value = "0.4"                        # offered frame rate
+[[param]]
+name = "mu_d"
+value = "1.0"                        # delivery rate (one frame time)
+[[param]]
+name = "p"
+value = "0.3"                        # per-attempt frame-loss probability
+[[param]]
+name = "mu_l"
+value = "mu_d * p / (1 - p)"         # loss rate ⇒ per-attempt P(loss) = p
+[[param]]
+name = "mu_r"
+value = "5.0"                        # retransmit rate ≈ 1/timeout
+
+# a new frame arrives and takes a free buffer slot (blocked when the buffer is full)
+[[transition]]
+name = "arrive"
+kind = "timed"
+rate = "lam"
+pre = "slot:1"
+post = "frames:1"
+
+# start sending when the channel is idle (stop-and-wait: one frame in flight); the
+# frame leaves the buffer, freeing its slot
+[[transition]]
+name = "start"
+kind = "immediate"
+weight = "1.0"
+pre = "frames:1, idle:1"
+post = "tx:1, slot:1"
+
+# successful delivery to the far chip: channel returns idle
+[[transition]]
+name = "deliver"
+kind = "timed"
+rate = "mu_d"
+pre = "tx:1"
+post = "idle:1"
+
+# the frame is LOST in the channel → awaiting retransmit
+[[transition]]
+name = "lose"
+kind = "timed"
+rate = "mu_l"
+pre = "tx:1"
+post = "wait:1"
+
+# retransmit after timeout
+[[transition]]
+name = "resend"
+kind = "timed"
+rate = "mu_r"
+pre = "wait:1"
+post = "tx:1"
+
+# --- steady-state delivery metrics ----------------------------------------- #
+[[query]]
+name = "L"
+compute = "mean"
+target = "frames"        # mean frames waiting in the sender buffer
+
+[[query]]
+name = "X"
+compute = "throughput"
+transition = "deliver"   # delivered-frame throughput (the cliff variable)
+
+[[query]]
+name = "Pblock"
+compute = "full"
+target = "frames"
+time = "4"               # P(buffer full = K): arriving frames blocked

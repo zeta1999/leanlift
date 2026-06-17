@@ -373,6 +373,24 @@ else
   skip "fpga equiv --prove  (no lean toolchain)"
 fi
 
+# S — the capstone: the WHOLE ladder on the two-chip serial link, one certificate.
+if bash "$ROOT/scripts/serial-link-certify.sh" --check >"$TMP/scap" 2>&1; then
+  grep -q "the serial protocol is CORRECT" "$TMP/scap" \
+    && grep -q "PASS: all capstone axes certified" "$TMP/scap" \
+    && pass "serial-link capstone  (safety ∧ equivalence ∧ timing ∧ loss → CORRECT)" \
+    || { bad "serial-link capstone: incomplete"; cat "$TMP/scap"; }
+else
+  bad "serial-link capstone --check failed"; cat "$TMP/scap"
+fi
+# S3 — the delivery-cliff sweep: empirical knee must match the closed-form p*.
+if bash "$ROOT/scripts/serial-link-sweep.sh" --check >"$TMP/ssw" 2>&1; then
+  grep -q "empirical delivery cliff ≈ closed-form p\*" "$TMP/ssw" \
+    && pass "serial-link sweep  (delivery roll-off toward p* ≈ 0.882)" \
+    || { bad "serial-link sweep: knee off"; cat "$TMP/ssw"; }
+else
+  bad "serial-link sweep --check failed"; cat "$TMP/ssw"
+fi
+
 # ---------------------------------------------------------------------------- #
 sect "M3 — prove (Lean, sorry-free)"
 if have lean; then
