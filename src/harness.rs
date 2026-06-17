@@ -75,6 +75,7 @@ pub fn run_llm(
     vectors: &[Vector],
     cpp: &HashMap<String, String>,
     profile: Profile,
+    float: Option<compare::FloatCompare>,
     lean_lib: &Path,
     work_dir: &Path,
     max_iters: usize,
@@ -110,7 +111,7 @@ pub fn run_llm(
                 last_candidate = None;
             }
             Ok(lean_map) => {
-                let cmp = compare::compare(vectors, cpp, &lean_map, profile);
+                let cmp = compare::compare(vectors, cpp, &lean_map, profile, float);
                 if cmp.conformant() {
                     eprintln!("  harness: iter {iter} — conformant ✔");
                     return Ok(LlmOutcome { candidate, iters: iter, conformant: true });

@@ -75,20 +75,39 @@ Takeaways:
 
 - [ ] Evaluate **FLoPS** and **Flean** as a lake dependency; check Lean/Mathlib
       version compatibility against our 4.28 + Aeneas pin (isolate if needed).
+      *Partial (§7): a vendor seam `Opt/Float/Vendor.lean` with a `RoundingModel`
+      interface is built so FLoPS/Flean drop in behind it; the actual dep eval /
+      drop-in is still pending.*
 - [ ] Add a parametric `FloatFmt` to `sig.rs` and instantiate **f32, f64, bf16,
       fp16, fp8-e4m3, fp8-e5m2, fp4** (+ the P3109 params: signedness, domain).
-- [ ] Implement comparator float modes (`ulp` / `rel` / `abs`, NaN canonicalization,
-      signed-zero, rounding-mode divergence reporting) — SPEC §6.
+      *Partial: `sig.rs` has native `FloatType` F32/F64 (§7) and the §6 parametric
+      `quantize_rne(prec, ·)` covers the significand for fp8/bf16/fp16/f32/f64; the
+      full `FloatFmt{exp_bits,prec,bias,rounding,saturating}` config + fp8/fp4
+      exponent/bias/subnormal instances are not yet in `sig.rs`.*
+- [x] **Implement comparator float modes** (`ulp` / `rel` / `abs`, NaN
+      canonicalization, signed-zero, rounding-mode divergence reporting) — SPEC §6.
+      Done in `compare.rs` (`FloatTol`, `float_match`, `Class::ToleranceDivergence`),
+      wired through `lift verify --float-tol exact|ulp:N|rel:E|abs:E` (float kernels
+      only; default exact preserves every bit-exact path). 14 comparator unit tests
+      + brutal review (fixed a Rel/Abs overflow-to-Inf false-CONFORM). See §8.
 - [ ] Float **oracle** per format: native for f32/f64; library/bit-twiddle for the
       low-precision ones; pin the rounding/saturation profile (SPEC §11), forbid
       `-ffast-math` / FMA-contraction unless modeled.
+      *Partial (§7): native f32/f64 oracle with `-ffp-contract=off` + NaN/−0
+      canonicalization; low-precision (fp8/fp4) library oracle still TODO.*
 - [ ] First float example end-to-end at **L1** (testing): e.g. an fp8 dot-product /
       GEMM tile vs the model under `ulp`/`rel`.
-- [ ] First float **L3**: a per-op rounding bound (`fl(a+b)` within `u·|a+b|`) from
-      the chosen library; then a method-error bound (trapezoidal) over ℝ in Mathlib;
-      then compose for an end-to-end "implementation within ε of the true value".
-- [ ] Honesty gate: keep the Mathlib-heavy float track isolated from the light,
-      fast integer track; never report a `sorry`-backed bound as proven.
+      *Partial: §6 did per-element fp8 `quantize_rne` (894 vectors, bit-exact) and §7
+      `fadd`/`fadd32`/`opt-*`; a low-precision dot-product/GEMM tile exercising the new
+      `--float-tol ulp/rel` modes is the natural next step now that the comparator
+      supports them.*
+- [x] First float **L3**: a per-op rounding bound (`fl(a+b)` within `u·|a+b|`) — done
+      in §7 (`Opt/Float/Fmt.lean::roundTo_le_half`, f32 2⁻²³ / f64 2⁻⁵²), composed with
+      the Mathlib ℝ convergence rate into an end-to-end ε bound, sorry-free.
+- [x] Honesty gate: the Mathlib-heavy float track lives in a separate offline lake
+      project (`../numerical-algorithms/lean-opt`), built sorry-free with a documented
+      vendor seam; native `Float` results are labelled **L1 only** (kernel-opaque, no
+      theorem stated). Never report a `sorry`-backed bound as proven.
 
 ## Sources
 
@@ -142,3 +161,40 @@ The float track advanced on three fronts (see `../numerical-algorithms/lean-opt`
   `|fl_xₙ − x*| ≤ ρⁿ·|e₀| + ½ulp/(1−ρ)`. Built in-repo (offline, sorry-free) with
   a documented **vendor seam** (`Opt/Float/Vendor.lean`) so FLoPS/Flean (§2) can
   drop in behind the `RoundingModel` interface without touching the proofs.
+
+## 8. Result (2026-06-17) — comparator float modes (SPEC §6, TODO item 3)
+
+The difftest comparator was integer/bit-exact only: `lean_val == cpp_val` string
+equality. That is exactly right for native f32/f64 (Lean's binary64/binary32 ≡ C++
+`double`/`float` bit-for-bit) but cannot express the **bounded** divergence a
+low-precision or vendor-pinned oracle legitimately produces. Now implemented in
+`src/compare.rs`:
+
+- **`FloatTol`** = `Exact | Ulp(n) | Rel(eps) | Abs(eps)`, parsed from the CLI spec
+  `exact | ulp:N | rel:E | abs:E`.
+- **`float_match(a_bits, b_bits, {tol,width})`** decodes the result bit patterns at
+  the kernel's float width and classifies `BitExact / WithinTolerance / Diverge`
+  with **NaN canonicalization** (any NaN ≡ any NaN; NaN vs finite always diverges),
+  **signed-zero** (−0 ≡ +0), **Inf-by-sign**, and a sign-magnitude → monotone-order
+  transform for exact integer ULP distance.
+- **`Class::ToleranceDivergence`** — a within-tolerance float difference is REPORTED
+  (human `tol-div:` line + `report.json` `tolerance_divergence` count + a
+  per-divergence record) and counts as conformant; an out-of-tolerance one is a
+  `Mismatch` (real bug), exactly as before.
+- Wired through **`lift verify <kernel> --float-tol <spec>`**; the flag is rejected
+  on a non-float example (fail-closed), and `None` (the default) leaves every
+  existing bit-exact path byte-identical. `fadd --float-tol ulp:2` stays
+  209/209 Conform (native f64 is already bit-exact).
+
+**Soundness.** `Exact` accepts only bit-identical-or-canonical pairs, so it can
+never mask a divergence; the tolerance modes only ever *widen* (and report) the
+accepted set. A brutal review found and fixed one false-CONFORM: in `Rel`/`Abs`
+mode the difference of two far-apart finite values can overflow to `±Inf`, and
+`Inf ≤ Inf` would have conformed the *maximal* divergence (`+MAX` vs `−MAX`) — now
+guarded by requiring a finite difference. 14 comparator unit tests (ULP across the
+sign/zero boundary, NaN/±0/Inf, rel/abs, f32 width, the overflow teeth, and the
+`compare()` classification path). `ci.sh` GREEN.
+
+Still on the integer/bit-exact default until a low-precision kernel (item 5) ships
+that needs a non-`exact` tolerance against its vendor oracle — the comparator is now
+ready for it.

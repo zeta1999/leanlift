@@ -34,13 +34,17 @@ struct Args {
     out: PathBuf,
     candidate: Option<PathBuf>,
     lane: String,
+    /// Float comparison tolerance (`--float-tol`); `None` ⇒ bit-exact (the default).
+    float_tol: Option<compare::FloatTol>,
 }
 
 fn usage() -> ! {
     eprintln!(
         "usage:\n\
-        \x20 lift verify <example> [--lean <candidate.lean>] [--lean-path <dir>] [--lane <name>] [--out <report.json>]\n\
+        \x20 lift verify <example> [--lean <candidate.lean>] [--lean-path <dir>] [--lane <name>] [--out <report.json>] [--float-tol <spec>]\n\
         \x20     bit-exact differential validation (L1). --lean overrides the example's candidate.\n\
+        \x20     --float-tol relaxes float comparison (float kernels only): exact|ulp:N|rel:E|abs:E\n\
+        \x20     (default exact; within-tolerance rounding divergences are reported, not failed).\n\
         \x20     --lane selects the C++→Lean backend for cpp-* examples: claude|skill|gemma|qwen\n\
         \x20     (env LEANLIFT_LANE; default claude). qwen needs LEANLIFT_QWEN_URL or it is skipped.\n\
         \x20 lift prove  <example> [--out <proof.json>]\n\
@@ -64,6 +68,7 @@ fn parse_verify_args(a: Vec<String>) -> Args {
     // The LLM lane (cpp-* examples); flag overrides LEANLIFT_LANE, default claude.
     let mut lane = std::env::var("LEANLIFT_LANE").ok().filter(|s| !s.is_empty())
         .unwrap_or_else(|| "claude".into());
+    let mut float_tol: Option<compare::FloatTol> = None;
 
     let mut i = 0;
     while i < a.len() {
@@ -73,6 +78,12 @@ fn parse_verify_args(a: Vec<String>) -> Args {
             "--lean-path" => lean_path = PathBuf::from(take(&a, &mut i)),
             "--lane" => lane = take(&a, &mut i),
             "--out" => out = PathBuf::from(take(&a, &mut i)),
+            "--float-tol" => {
+                float_tol = Some(compare::FloatTol::parse(&take(&a, &mut i)).unwrap_or_else(|e| {
+                    eprintln!("error: {e}");
+                    exit(2);
+                }))
+            }
             s if s.starts_with("--") => {
                 eprintln!("unknown flag: {s}");
                 usage();
@@ -87,7 +98,7 @@ fn parse_verify_args(a: Vec<String>) -> Args {
         i += 1;
     }
 
-    Args { example: example.unwrap_or_else(|| usage()), lean_path, out, candidate, lane }
+    Args { example: example.unwrap_or_else(|| usage()), lean_path, out, candidate, lane, float_tol }
 }
 
 fn take(a: &[String], i: &mut usize) -> String {
@@ -275,6 +286,20 @@ fn verify_cmd(args: Args) {
     let work = std::env::temp_dir().join("leanlift-work");
     let _ = std::fs::create_dir_all(&work);
 
+    // A `--float-tol` is meaningful only for a float example; reject it otherwise
+    // (fail-closed — silently ignoring it would be a confusing no-op). When set,
+    // the result patterns are decoded at the signature's float width.
+    let float = match args.float_tol {
+        Some(tol) => {
+            if !ex.signature.is_float() {
+                eprintln!("error: --float-tol given but example `{}` is not a float kernel", ex.name);
+                exit(2);
+            }
+            Some(compare::FloatCompare { tol, width: ex.signature.float_ty().bits() })
+        }
+        None => None,
+    };
+
     // 1. audited Lean support library.
     if let Err(e) = ensure_support_lib(&args.lean_path) {
         eprintln!("error: {e}");
@@ -319,7 +344,7 @@ fn verify_cmd(args: Args) {
                 }
             };
             match harness::run_llm(
-                ex.lang, &ex.source, ex.fn_name, &ex.signature, &vecs, &cpp, ex.profile,
+                ex.lang, &ex.source, ex.fn_name, &ex.signature, &vecs, &cpp, ex.profile, float,
                 &args.lean_path, &work, *max_iters, &lane,
             ) {
                 Ok(o) => {
@@ -350,7 +375,7 @@ fn verify_cmd(args: Args) {
     };
 
     // 5. compare + classify.
-    let cmp = compare::compare(&vecs, &cpp, &lean, ex.profile);
+    let cmp = compare::compare(&vecs, &cpp, &lean, ex.profile, float);
     let verdict = report::Verdict::assess(&cmp, vectors::SEED);
 
     // 6. report.
