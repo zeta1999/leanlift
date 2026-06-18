@@ -65,13 +65,13 @@ Model gd over `ℝ` and prove (★ closed form) and its consequences:
 - **A1 (closed form):** `f_real K x₀ y₀ η = ρ^(2K) · f_real 0 x₀ y₀ η`, `ρ = 1−2η`.
   Proof: induction on `K`, one `ring` step per layer (the per-step identity
   `u_{k+1} = ρ·u_k` is polynomial).
-- **A2 (descent):** `η ∈ (0,1] → f_real K ≤ f_real 0` (`ρ² ≤ 1`).
+- **A2 (descent):** `η ∈ [0,1] → f_real K ≤ f_real 0` (`ρ² ≤ 1`).
 - **A3 (convergence):** `η ∈ (0,1) → Tendsto (fun K => f_real K) atTop (𝓝 0)`
   (`|ρ| < 1 ⇒ ρ^{2K} → 0`, Mathlib `tendsto_pow_atTop_nhds_zero_of_lt_one`).
 
-Deliverable: `lean-proofs/Convergence/GdReal.lean`, sorry-free. **A3 needs Mathlib**
+Deliverable: `leanproofs/Leanproofs/GdReal.lean`, sorry-free. **A3 needs Mathlib**
 (ℝ, limits, `ring`/`nlinarith`) — so the proofs live in a **separate lake project**
-`lean-proofs/` with a Mathlib dependency, *not* in the Mathlib-free runtime `lean/`
+`leanproofs/` with a Mathlib dependency, *not* in the Mathlib-free runtime `lean/`
 (which must stay fast for `lean --run`). **Reuse check:** the Aeneas backend
 (`backends/lean`) already pins Mathlib; if its `.olean` cache is usable we ride it
 and avoid a fresh ~45-min Mathlib build (Phase 0).
@@ -79,7 +79,7 @@ and avoid a fresh ~45-min Mathlib build (Phase 0).
 ### Phase B — transport to f64 through a rounding model  ★ (axiom-gated)
 
 Introduce the **standard IEEE-754 model** (Higham, *Accuracy and Stability*, §2.2)
-as **explicitly trusted axioms** in `lean-proofs/Convergence/FloatModel.lean`:
+as **explicitly trusted axioms** in `leanproofs/Leanproofs/FloatModel.lean`:
 
 ```
 -- u = 2⁻⁵³ (f64 unit roundoff), η_sub = 2⁻¹⁰⁷⁴ (subnormal abs floor)
@@ -109,7 +109,7 @@ Then prove, under the **conditions** `η ∈ [η_lo, η_hi] ⊂ (0,1)` and
   and in particular `f_K^fl ≤ f₀·(1+ε)`, `ε = O(Ku)` — the descent postcondition,
   now *proven* (with an explicit rounding slack) rather than vector-tested.
 
-Deliverable: `lean-proofs/Convergence/GdFloat.lean`, sorry-free, importing the
+Deliverable: `leanproofs/Leanproofs/GdFloat.lean`, sorry-free, importing the
 axioms. **Numeric cross-check:** evaluate the `(1+cu)^{2K}` slack at `K=200`
 (`≈ 1 + 1600u ≈ 1 + 1.8e-13`) and confirm it bounds the *observed* L1 residuals
 across the 190 conformant vectors (they must all sit inside the proven envelope).
@@ -134,7 +134,7 @@ directed (outward) rounding**:
 - **D3:** the certificate: the output interval's `hi ≤` the input `f₀` interval's
   `lo` over the box ⇒ `f(best) ≤ f₀` for *every* start in the box, machine-checked.
 
-Deliverable: `lean-proofs/Convergence/GdInterval.lean`, sorry-free. **D corroborates
+Deliverable: `leanproofs/Leanproofs/GdInterval.lean`, sorry-free. **D corroborates
 B:** B's analytic envelope and D's computed enclosure bound the *same* `f_K^fl`; the
 plan asserts and checks `D's hi ≤ B's envelope` at the box corners. Disagreement =
 a bug in one of them (the cross-check the quality bar demands).
@@ -145,7 +145,7 @@ a bug in one of them (the cross-check the quality bar demands).
 
 - **New float-prove backend.** `lift prove` is **Aeneas-only** today
   (`src/main.rs:204`). Add a dispatch: for `Profile::OptGd`, `prove` emits/realizes
-  the `lean-proofs/Convergence/*.lean` obligations and certifies them sorry-free via
+  the `leanproofs/Leanproofs/*.lean` obligations and certifies them sorry-free via
   `lake env lean` (the proofs project), reporting `L3 proved, axioms: [list], N
   obligations`. The **axiom list is surfaced in the report** — trusted base is never
   hidden.
@@ -153,13 +153,13 @@ a bug in one of them (the cross-check the quality bar demands).
   the Track-3 box certificate; add **teeth** — perturb a theorem (wrong `ρ`, or drop
   the `η<1` hypothesis) and assert the proof *fails* (no vacuous green).
 - The runtime `lean/` stays Mathlib-free; all heavy proving is isolated in
-  `lean-proofs/`.
+  `leanproofs/`.
 
 ## Phasing & gates
 
 | Phase | Deliverable | Gate |
 |---|---|---|
-| **0** | `lean-proofs/` lake project; Mathlib available (reuse Aeneas cache if possible) | `lake build` green |
+| **0** | `leanproofs/` lake project; Mathlib available (reuse Aeneas cache if possible) | `lake build` green |
 | **A** | `GdReal.lean` — A1/A2/A3 sorry-free | ci + review |
 | **B** | `FloatModel.lean` axioms + `GdFloat.lean` B1/B2/B3 | ci + review (**axiom audit**) |
 | **D** | `GdInterval.lean` D1/D2/D3 + B↔D cross-check | ci + review |
