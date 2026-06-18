@@ -510,8 +510,16 @@ fn run_ollama(model: &str, prompt: &str) -> Result<String, String> {
         .ok()
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| "http://localhost:11434".into());
+    // The context window is the one knob that silently corrupts a translation:
+    // past `num_ctx`, ollama drops the *oldest* tokens (the C++ source, the spec)
+    // with no error. We set it explicitly so a run is reproducible, and report
+    // the *effective* context used (prompt_eval_count) against it below.
+    let num_ctx: u64 = std::env::var("LEANLIFT_NUM_CTX")
+        .ok()
+        .and_then(|s| s.trim().parse().ok())
+        .unwrap_or(32768);
     let body = format!(
-        "{{\"model\":{},\"prompt\":{},\"stream\":false,\"think\":false}}",
+        "{{\"model\":{},\"prompt\":{},\"stream\":false,\"think\":false,\"options\":{{\"num_ctx\":{num_ctx}}}}}",
         json_string(model),
         json_string(prompt)
     );
@@ -527,6 +535,26 @@ fn run_ollama(model: &str, prompt: &str) -> Result<String, String> {
         return Err(format!("curl to ollama at {url} exited with {}", out.status));
     }
     let resp = String::from_utf8_lossy(&out.stdout);
+    // Effective-context accounting: ollama returns the token counts it actually
+    // ran. `prompt_eval_count` is the input that fit in the window; if it equals
+    // `num_ctx` the prompt was truncated to fit and the translation saw a
+    // mangled source — flag it loudly so the sweep can record a TRUNCATED cell.
+    let pin = extract_json_int(&resp, "prompt_eval_count");
+    let pout = extract_json_int(&resp, "eval_count");
+    match (pin, pout) {
+        (Some(i), Some(o)) => {
+            eprintln!(
+                "  harness: ctx model={model} num_ctx={num_ctx} prompt_tokens={i} output_tokens={o} ({}% of window)",
+                i * 100 / num_ctx.max(1)
+            );
+            if i >= num_ctx {
+                eprintln!(
+                    "  harness: WARNING ctx TRUNCATED — prompt_tokens={i} >= num_ctx={num_ctx}; raise LEANLIFT_NUM_CTX"
+                );
+            }
+        }
+        _ => eprintln!("  harness: ctx model={model} num_ctx={num_ctx} (token counts unavailable)"),
+    }
     extract_json_field(&resp, "response")
         .ok_or_else(|| format!("could not parse ollama response: {resp:.400}"))
 }
@@ -571,6 +599,23 @@ fn json_string(s: &str) -> String {
     }
     o.push('"');
     o
+}
+
+/// Pull the first `"<key>": <number>` JSON integer value out of a response.
+/// Used for ollama's token-count fields (`prompt_eval_count`, `eval_count`) so
+/// we can report the effective context a translation actually consumed.
+fn extract_json_int(resp: &str, key: &str) -> Option<u64> {
+    let needle = format!("\"{key}\"");
+    let i = resp.find(&needle)?;
+    let rest = &resp[i + needle.len()..];
+    let colon = rest.find(':')?;
+    rest[colon + 1..]
+        .trim_start()
+        .chars()
+        .take_while(|c| c.is_ascii_digit())
+        .collect::<String>()
+        .parse()
+        .ok()
 }
 
 /// Pull the first `"<key>":"…"` JSON string value out of a response, decoding
