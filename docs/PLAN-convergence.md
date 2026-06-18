@@ -157,13 +157,14 @@ a bug in one of them (the cross-check the quality bar demands).
 
 ## Phasing & gates
 
-| Phase | Deliverable | Gate |
-|---|---|---|
-| **0** | `leanproofs/` lake project; Mathlib available (reuse Aeneas cache if possible) | `lake build` green |
-| **A** | `GdReal.lean` — A1/A2/A3 sorry-free | ci + review |
-| **B** | `FloatModel.lean` axioms + `GdFloat.lean` B1/B2/B3 | ci + review (**axiom audit**) |
-| **D** | `GdInterval.lean` D1/D2/D3 + B↔D cross-check | ci + review |
-| **H** | `lift prove opt-gd` float backend + `ci.sh` regressions + teeth | ci + review |
+| Phase | Deliverable | Gate | Status |
+|---|---|---|---|
+| **0** | `leanproofs/` lake project; Mathlib available (reuse Aeneas cache if possible) | `lake build` green | ✅ done (`466e3e2`) |
+| **A** | `GdReal.lean` — A1/A2/A3 sorry-free | ci + review | ✅ done — proven, reviewed (no CRITICAL), axioms = {propext, Classical.choice, Quot.sound} |
+| **B-core** | `GdFloatCore.lean` — perturbed-iteration envelope (B2/B3 analytic backbone), **axiom-free** | review | ✅ done — proven, axioms = standard three |
+| **B-bridge** | `FloatModel.lean` axioms + `GdFloat.lean` instantiating B-core for the actual f64 gd trajectory (`Float ⇄ ℝ`) | ci + review (**axiom audit**) | ⏳ next — the trusted-axiom layer |
+| **D** | `GdInterval.lean` D1/D2/D3 + B↔D cross-check | ci + review | ⬜ todo |
+| **H** | `lift prove opt-gd` float backend + `ci.sh` regressions + teeth | ci + review | ⬜ todo |
 
 ## Trusted base (must stay this short)
 
