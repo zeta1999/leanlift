@@ -98,9 +98,11 @@ Takeaways:
 - [ ] First float example end-to-end at **L1** (testing): e.g. an fp8 dot-product /
       GEMM tile vs the model under `ulp`/`rel`.
       *Partial: §6 did per-element fp8 `quantize_rne` (894 vectors, bit-exact) and §7
-      `fadd`/`fadd32`/`opt-*`; a low-precision dot-product/GEMM tile exercising the new
-      `--float-tol ulp/rel` modes is the natural next step now that the comparator
-      supports them.*
+      `fadd`/`fadd32`/`opt-*`. §9 adds `fdot4` — a 4-term **f32 dot product** whose
+      model sums the products pairwise while the oracle sums them serially: it FAILS
+      bit-exact and CONFORMS under `--float-tol ulp:2` (≤1 ULP actual), the first
+      example exercising the new comparator modes. The remaining gap is the
+      **fp8-typed** dot product, which needs the `FloatFmt` instances (item 2).*
 - [x] First float **L3**: a per-op rounding bound (`fl(a+b)` within `u·|a+b|`) — done
       in §7 (`Opt/Float/Fmt.lean::roundTo_le_half`, f32 2⁻²³ / f64 2⁻⁵²), composed with
       the Mathlib ℝ convergence rate into an end-to-end ε bound, sorry-free.
@@ -198,3 +200,26 @@ sign/zero boundary, NaN/±0/Inf, rel/abs, f32 width, the overflow teeth, and the
 Still on the integer/bit-exact default until a low-precision kernel (item 5) ships
 that needs a non-`exact` tolerance against its vendor oracle — the comparator is now
 ready for it.
+
+## 9. Result (2026-06-18) — `fdot4`: first kernel exercising the tolerance modes
+
+A new built-in example `fdot4` (a 4-term **f32 dot product**) is the first kernel
+that conforms only under a `--float-tol`. The C++ oracle sums the four products
+left-to-right; the Lean model (`examples/fdot/Fdot4.lean`) sums the **same** four
+rounded products **pairwise** (tree order). Reassociating a float reduction changes
+the rounding, so on the all-positive, well-scaled vectors the two are bit-exact on
+190/245 inputs and differ by **at most 1 ULP** on the other 55.
+
+- `lift verify fdot4` (default `exact`) → **L0, 55 mismatches** — honest: the
+  reorder is not bit-identical.
+- `lift verify fdot4 --float-tol ulp:2` (or `rel:1e-6`) → **L1 conformant/245**,
+  the 55 reported as `tolerance_divergence`, `mismatch: 0`.
+- The profile's postcondition — the standard dot-product bound
+  `|fl·dot − Σaᵢbᵢ| ≤ 8u·Σ|aᵢbᵢ|`, u = 2⁻²⁴ — holds **245/245**, a real per-result
+  rounding-error estimate at L1.
+
+This is the canonical "validate a reordered / vectorized reduction against a serial
+oracle" use of the comparator modes. It uses native `Float32` (no new format type),
+so it is L1-only; the **fp8-typed** dot product still awaits the `FloatFmt` work
+(item 2). Regression in `tests/run.sh` (conforms under `ulp:2` with tol-div > 0,
+fails under `exact`).

@@ -32,6 +32,8 @@ pub const NAMES: &[&str] = &[
     "opt-hj", "cpp-opt-hj",
     // float32 path (real binary32 vs binary64 differences)
     "fadd32", "cpp-fadd32",
+    // f32 reordered-reduction validation (exercises --float-tol ulp/rel)
+    "fdot4",
 ];
 
 fn lean_lib() -> PathBuf {
@@ -339,6 +341,24 @@ pub fn lookup(name: &str) -> Option<Example> {
             profile: Profile::Fadd,
             gen: vectors::fadd32_vectors,
             frontend: Frontend::Llm { max_iters: 4 },
+            proof_frag: None,
+        }),
+        // f32 4-term dot product: the model sums the four products PAIRWISE while
+        // the C++ oracle sums them left-to-right. Reassociation ⇒ not bit-exact, so
+        // it conforms only under `--float-tol` — the canonical reordered-reduction
+        // validation. Run: `lift verify fdot4 --float-tol rel:1e-6`.
+        "fdot4" => Some(Example {
+            name: "fdot4",
+            lang: Lang::Cpp,
+            source: "examples/fdot/fdot4.cpp".into(),
+            fn_name: "fdot4",
+            signature: f32s(8),
+            profile: Profile::Fdot4,
+            gen: vectors::fdot4_vectors,
+            frontend: Frontend::Prewritten {
+                runner: "examples/fdot/Fdot4.lean".into(),
+                lean_path: lean_lib(),
+            },
             proof_frag: None,
         }),
         // 1D optimization: golden-section search (f64). Hand candidate + LLM.
