@@ -29,6 +29,10 @@ pub enum Profile {
     OptHj,
     /// Phase-1 float smoke (`a + b`): no postcondition, no divergence class.
     Fadd,
+    /// 4-term f32 dot product (oracle sums left-to-right, model pairwise). The
+    /// postcondition is the standard dot-product rounding-error bound; the two
+    /// summation orders agree only within a `--float-tol` tolerance.
+    Fdot4,
 }
 
 impl Profile {
@@ -45,6 +49,7 @@ impl Profile {
             Profile::OptGd => &["gd"],
             Profile::OptHj => &["hj"],
             Profile::Fadd => &["fadd"],
+            Profile::Fdot4 => &["fdot4"],
         }
     }
 
@@ -122,6 +127,22 @@ impl Profile {
                 let eps = 1e-9 * (1.0 + f0.abs());
                 Some(fr >= 0.0 && fr <= f0 + eps)
             }
+            // The standard dot-product rounding-error bound: a real per-result error
+            // estimate (L1 "analysis"). |fl(Σaᵢbᵢ) − Σaᵢbᵢ| ≤ γ·Σ|aᵢbᵢ| with the
+            // f32 unit roundoff u = 2⁻²⁴; γ = 8u is a comfortable bound on the
+            // 4-product, 3-addition reduction (and on either summation order).
+            Profile::Fdot4 => {
+                let f = |i: usize| f32::from_bits(args[i] as u32) as f64;
+                let (mut dot, mut mag) = (0.0f64, 0.0f64);
+                for i in 0..4 {
+                    let t = f(i) * f(i + 4);
+                    dot += t;
+                    mag += t.abs();
+                }
+                let r = f32::from_bits(result as u32) as f64;
+                let u = 2f64.powi(-24);
+                Some((r - dot).abs() <= 8.0 * u * mag + 1e-7)
+            }
             _ => None,
         }
     }
@@ -135,6 +156,7 @@ impl Profile {
             Profile::OptGss => Some("a ≤ x ≤ b ∧ |x − 3| ≤ ½·tol + √ε"),
             Profile::OptGd => Some("0 ≤ f(x_K) ≤ f(x_0)  (descent)"),
             Profile::OptHj => Some("0 ≤ f(best) ≤ f(start)  (no worse than start)"),
+            Profile::Fdot4 => Some("|fl·dot − Σaᵢbᵢ| ≤ 8u·Σ|aᵢbᵢ|  (u = 2⁻²⁴)"),
             _ => None,
         }
     }
@@ -161,6 +183,7 @@ impl Profile {
             Profile::OptGd => "gd",
             Profile::OptHj => "hj",
             Profile::Fadd => "fadd",
+            Profile::Fdot4 => "fdot4",
         }
     }
 
@@ -182,7 +205,7 @@ impl Profile {
             // bounded / deterministic, or float (NaN/Inf canonicalized, not a
             // declared `wrap` class): no overflow-divergence.
             Profile::Isqrt | Profile::Bisect | Profile::Quant => false,
-            Profile::OptGss | Profile::OptGd | Profile::OptHj | Profile::Fadd => false,
+            Profile::OptGss | Profile::OptGd | Profile::OptHj | Profile::Fadd | Profile::Fdot4 => false,
         }
     }
 }

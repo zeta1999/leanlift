@@ -37,6 +37,26 @@ for fe in fadd fadd32 opt-gss opt-gd opt-hj; do
     bad "$fe did not verify"; cat "$TMP/$fe.out"
   fi
 done
+# fdot4: a reordered f32 reduction (pairwise model vs serial oracle). It is NOT
+# bit-exact, so it conforms ONLY under a --float-tol tolerance — exercising the
+# new comparator float modes (SPEC §6). Under ulp:2 it must conform with some
+# reported tolerance divergences; under the default `exact` it must FAIL.
+if "$LIFT" verify fdot4 --float-tol ulp:2 --out "$TMP/fdot4.json" >"$TMP/fdot4.out" 2>&1; then
+  td=$(grep -oE 'tol-div : [0-9]+' "$TMP/fdot4.out" | grep -oE '[0-9]+')
+  if [ "${td:-0}" -gt 0 ]; then
+    pass "fdot4 (f32 reorder, --float-tol ulp:2)  ($(grep -o 'L1 conformant/[0-9]*' "$TMP/fdot4.out"); tol-div=$td; $(grep -o 'postcond: [0-9]*/[0-9]* hold' "$TMP/fdot4.out"))"
+  else
+    bad "fdot4: conformant but no tolerance divergences exercised"; cat "$TMP/fdot4.out"
+  fi
+else
+  bad "fdot4 did not verify under --float-tol ulp:2"; cat "$TMP/fdot4.out"
+fi
+# teeth: the same reordered reduction must NOT pass bit-exact (default `exact`).
+if "$LIFT" verify fdot4 --out "$TMP/fdot4x.json" >"$TMP/fdot4x.out" 2>&1; then
+  bad "fdot4 wrongly conformant under exact (reorder is not bit-exact)"; cat "$TMP/fdot4x.out"
+else
+  pass "fdot4 teeth  (reordered reduction fails bit-exact, needs --float-tol)"
+fi
 
 echo "== sound path: Rust → Aeneas extraction (if built) =="
 AENEAS="${LEANLIFT_AENEAS:-$HOME/work/_verif-tools/aeneas}"

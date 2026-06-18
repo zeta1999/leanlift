@@ -93,6 +93,40 @@ pub fn fadd32_vectors() -> Vec<Vector> {
     v
 }
 
+/// `fdot4(a0..a3, b0..b3)` — a 4-term f32 dot product. Args travel as the eight
+/// f32 bit patterns a0 a1 a2 a3 b0 b1 b2 b3. The vectors are **all-positive and
+/// well-scaled** (factors in [0.1, 10]), so the products are positive and the
+/// reassociation error between the oracle's left-to-right sum and the model's
+/// pairwise sum is bounded by a few ULPs — bit-exact on many inputs, a small
+/// `--float-tol` divergence on the rest, never catastrophic cancellation.
+pub fn fdot4_vectors() -> Vec<Vector> {
+    let mut v = Vec::new();
+    let mut push = |a: [f32; 4], b: [f32; 4]| {
+        let mut bits = Vec::with_capacity(8);
+        bits.extend(a.iter().map(|&x| f32_bits(x)));
+        bits.extend(b.iter().map(|&x| f32_bits(x)));
+        v.push(Vector::new(bits));
+    };
+    // Hand vectors: small integers are exact (bit-exact, Conform); fractional and
+    // wide-magnitude (still positive) exercise the reassociation rounding.
+    push([1.0, 2.0, 3.0, 4.0], [1.0, 1.0, 1.0, 1.0]); // = 10, exact both orders
+    push([0.1, 0.2, 0.3, 0.4], [0.5, 0.5, 0.5, 0.5]);
+    push([1.5, 2.5, 3.5, 4.5], [2.5, 1.5, 0.5, 3.5]);
+    push([100.0, 0.001, 100.0, 0.001], [1.0, 1.0, 1.0, 1.0]); // wide, all positive
+    push([9.9, 9.9, 9.9, 9.9], [9.9, 9.9, 9.9, 9.9]);
+    let mut rng = SplitMix64(SEED);
+    for _ in 0..240 {
+        let mut a = [0f32; 4];
+        let mut b = [0f32; 4];
+        for i in 0..4 {
+            a[i] = rand_f64(&mut rng, 0.1, 10.0) as f32;
+            b[i] = rand_f64(&mut rng, 0.1, 10.0) as f32;
+        }
+        push(a, b);
+    }
+    v
+}
+
 /// `fadd(a, b) = a + b` over f64 — the Phase-1 smoke test for the float path.
 /// Edge doubles (zeros, ±1, fractions, large/small) plus random finite pairs;
 /// the only point is that C++ `double` and Lean `Float` agree bit-for-bit.
