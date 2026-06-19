@@ -6,7 +6,7 @@ on the path). One story, one combined certificate.
 
 ## The design (Aria-HDL)
 
-`../fpga-meta-compiler/examples/serial_link.ahdl` — two control FSMs at 100 MHz:
+`../fpga-meta-compiler-public/examples/serial_link.ahdl` — two control FSMs at 100 MHz:
 
 - **`serial_tx`** — frames a byte: `idle → start → data → stop → idle` (`state : uint<2>`).
 - **`serial_rx`** — mirrors the frame on the receive side.
