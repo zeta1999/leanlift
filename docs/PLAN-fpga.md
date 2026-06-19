@@ -1,6 +1,6 @@
 # PLAN — FPGA (Aria-HDL) verification support
 
-> Make leanlift verify FPGA designs authored in **Aria-HDL** (`../fpga-meta-compiler`)
+> Make leanlift verify FPGA designs authored in **Aria-HDL** (`../fpga-meta-compiler-public`)
 > by **projecting Aria's hardware IR onto the leanlift model families that already
 > exist** — adding as little new code as possible. The capstone is a two-chip
 > serial protocol proved correct end-to-end: Lean4 export, **equivalence to a
@@ -82,7 +82,7 @@ Each test/step is tagged for where it must run. CI (`ci.sh`) runs only `[CPU]`.
   `Instance`, `FormalProperty`), `clock_domains`, `PipelineInfo`, `SystolicInfo`,
   `TimingInfo` (critical_path_ns, target_period_ns, II), and `@clock_freq`/`@max_*`
   annotations. Document the schema in `docs/FORMATS-fpga.md`. `[CPU]`
-- **B2 — Aria emitter** `--emit-ir-json` (in `../fpga-meta-compiler`, `src/ir_json.rs`):
+- **B2 — Aria emitter** `--emit-ir-json` (in `../fpga-meta-compiler-public`, `src/ir_json.rs`):
   hand-written JSON, deterministic, schema-versioned. Round-trips the demo modules.
   Brutal review: faithfulness to the in-memory IR (no field dropped silently). `[CPU]`
 - **B3 — leanlift frontend** `src/models/fpga.rs`: a dep-free JSON reader (sibling to
@@ -164,7 +164,7 @@ Each test/step is tagged for where it must run. CI (`ci.sh`) runs only `[CPU]`.
 The marquee demo. A basic framed serial link — **TX chip** + **RX chip** Aria
 modules + a **lossy channel** — proved correct on every axis at once.
 
-- **S1 — author the demo.** `../fpga-meta-compiler/examples/serial_link.ahdl`
+- **S1 — author the demo.** `../fpga-meta-compiler-public/examples/serial_link.ahdl`
   (TX FSM, RX FSM, channel with loss); the reference `examples/fpga/serial-link.petri`
   (the intended protocol as a Petri net); `examples/fpga/serial-link.recipe.md`. `[CPU]`
 - **S2 — the full ladder on it:**
@@ -232,7 +232,7 @@ proved kernel is touched.
 
 ### Bridge
 - [x] B1 — `docs/FORMATS-fpga.md` bridge schema (versioned, `aria-ir-json/v1`). `[CPU]`
-- [x] B2 — `../fpga-meta-compiler` `--emit-ir-json` (`src/ir_json.rs`); 118 tests, all
+- [x] B2 — `../fpga-meta-compiler-public` `--emit-ir-json` (`src/ir_json.rs`); 118 tests, all
       12 examples round-trip to valid JSON; annotations + formal props exported. `[CPU]` ★
 - [x] B3 — leanlift `src/models/fpga.rs` JSON reader + `lift fpga info` + echo;
       ci.sh FPGA section GREEN; fixture `examples/fpga/tcp_ip.aria.json`. `[CPU]` ★
@@ -304,7 +304,7 @@ proved kernel is touched.
       with EQUIVALENT + buggy-ref counterexample + sorry-free teeth. `[CPU]` ★
 
 ### Capstone
-- [x] S1 — `../fpga-meta-compiler/examples/serial_link.ahdl` (TX/RX frame FSMs) +
+- [x] S1 — `../fpga-meta-compiler-public/examples/serial_link.ahdl` (TX/RX frame FSMs) +
       golden (distinct source) + buggy variant + `serial-channel.model.toml` (lossy
       GSPN) + `serial-link.recipe.md`. `[CPU]`
 - [x] S2 — `scripts/serial-link-certify.sh`: the full ladder in one certificate —
@@ -347,7 +347,7 @@ mechanical (no LLM), triple-checked (Lean kernel ∧ BFS ∧ closed form).
 - [ ] `[GPU]` RTX 6000 Pro: Aria CUDA/OpenCL emulation; Verilator co-sim of the link;
       PRISM/Storm cross-check of `p*`; `yosys` synthesis sanity.
 
-> **`[M24]` validation found two Aria codegen bugs** (fixed in `../fpga-meta-compiler`,
+> **`[M24]` validation found two Aria codegen bugs** (fixed in `../fpga-meta-compiler-public`,
 > commit `c540161`, with regression tests): Metal didn't declare pipeline/retiming
 > registers (undeclared `retime_*`); Verilog duplicated `clk`/`rst` when a design
 > declared its own. Both surfaced by compiling every example's Metal + running the full

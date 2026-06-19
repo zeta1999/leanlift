@@ -1,6 +1,6 @@
 # Formats reference — FPGA (Aria-HDL) bridge
 
-leanlift verifies FPGA designs authored in **Aria-HDL** (`../fpga-meta-compiler`)
+leanlift verifies FPGA designs authored in **Aria-HDL** (`../fpga-meta-compiler-public`)
 by ingesting its hardware IR through a JSON bridge and projecting it onto the
 existing model families (see [`PLAN-fpga.md`](./PLAN-fpga.md)). This page is the
 bridge-schema reference.
@@ -98,7 +98,7 @@ numeric string for those fields.
 | streaming `pipeline` / backpressure | qnet | throughput, bottleneck stage, stability | `throughput` |
 | channel loss (a `*.model.toml` GSPN) | GSPN→CTMC | delivery probability, asymptotic `p*` | `model prism`/`prove` |
 
-The emitter is faithful by construction (`../fpga-meta-compiler/src/ir_json.rs`):
+The emitter is faithful by construction (`../fpga-meta-compiler-public/src/ir_json.rs`):
 every IR variant has a tag and all of its fields, and **nothing is dropped** —
 annotations and formal properties included. The leanlift reader is a
 dependency-free JSON parser (`src/models/fpga.rs`, sibling to `xml.rs`).
