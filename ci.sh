@@ -122,6 +122,25 @@ else
   bad "link phase sweep — knee vs p* mismatch"; tail -6 "$TMP/sweep"
 fi
 
+# LE3 cross-check: the depolarizing-noise GSPN steady-state fidelity must equal the
+# Lean/Kraus closed form F = 1 - p/2 across a p-sweep (LEAN_ERROR_PLAN.md LE3 stochastic
+# axis ↔ Leanproofs/Quantum/Depolarizing.lean depolarizing_fidelity). Tolerance ≤1e-3.
+le3_ok=1
+for p in 0.05 0.1 0.2 0.3 0.5 0.8; do
+  mu=$(awk "BEGIN{print 2 - $p}")
+  exp=$(awk "BEGIN{print 1 - $p/2}")
+  F=$("$LIFT" model prism "$M/depolarizing.model.toml" --set p=$p --set mu_restore=$mu \
+        --out "$TMP/dp.json" 2>/dev/null | grep -E '^\s+F ' | grep -oE '[0-9]+\.[0-9]+' | head -1)
+  if ! awk "BEGIN{d=$F-$exp; if(d<0)d=-d; exit !(d<=1e-3)}"; then
+    le3_ok=0; echo "    p=$p: F_native=$F vs 1-p/2=$exp (Δ>1e-3)"
+  fi
+done
+if [ "$le3_ok" = 1 ]; then
+  pass "LE3 depolarizing fidelity  (PRISM steady-state F = 1-p/2 = Lean/Kraus law, Δ≤1e-3 over p∈[.05,.8])"
+else
+  bad "LE3 depolarizing fidelity — PRISM steady-state disagrees with the Lean F=1-p/2 bound"
+fi
+
 # ---------------------------------------------------------------------------- #
 sect "RT — schedulability (utilization bound + exact RTA)"
 if "$LIFT" model check "$M/tasks.model.toml" >"$TMP/rt" 2>&1; then
