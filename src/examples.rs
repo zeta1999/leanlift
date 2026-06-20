@@ -34,6 +34,8 @@ pub const NAMES: &[&str] = &[
     "fadd32", "cpp-fadd32",
     // f32 reordered-reduction validation (exercises --float-tol ulp/rel)
     "fdot4",
+    // QLSS/QSVT inversion-polynomial kernel: Clenshaw Chebyshev eval (LE1-a)
+    "cheb-eval", "cpp-cheb-eval",
 ];
 
 fn lean_lib() -> PathBuf {
@@ -359,6 +361,35 @@ pub fn lookup(name: &str) -> Option<Example> {
                 runner: "examples/fdot/Fdot4.lean".into(),
                 lean_path: lean_lib(),
             },
+            proof_frag: None,
+        }),
+        // Degree-3 Chebyshev series via Clenshaw — the fixed-arity reformulation
+        // of `quantum-core::linalg::chebyshev::eval_chebyshev` (the QSVT/QLSS
+        // inversion polynomial). f64, only + - *, so bit-exact: Lean binary64 ≡
+        // C++ `double`. LEAN_ERROR_PLAN LE1-a. `lift verify cheb-eval`.
+        "cheb-eval" => Some(Example {
+            name: "cheb-eval",
+            lang: Lang::Cpp,
+            source: "examples/cheb/cheb_eval.cpp".into(),
+            fn_name: "cheb_eval4",
+            signature: f64s(5),
+            profile: Profile::ChebEval,
+            gen: vectors::cheb_eval_vectors,
+            frontend: Frontend::Prewritten {
+                runner: "examples/cheb/ChebEval.lean".into(),
+                lean_path: lean_lib(),
+            },
+            proof_frag: None,
+        }),
+        "cpp-cheb-eval" => Some(Example {
+            name: "cpp-cheb-eval",
+            lang: Lang::Cpp,
+            source: "examples/cheb/cheb_eval.cpp".into(),
+            fn_name: "cheb_eval4",
+            signature: f64s(5),
+            profile: Profile::ChebEval,
+            gen: vectors::cheb_eval_vectors,
+            frontend: Frontend::Llm { max_iters: 4 },
             proof_frag: None,
         }),
         // 1D optimization: golden-section search (f64). Hand candidate + LLM.

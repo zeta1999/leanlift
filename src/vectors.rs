@@ -127,6 +127,46 @@ pub fn fdot4_vectors() -> Vec<Vector> {
     v
 }
 
+/// `cheb_eval4(c0,c1,c2,c3, x)` over f64 — Clenshaw evaluation of a degree-3
+/// Chebyshev series (the QSVT/QLSS inversion-polynomial kernel `eval_chebyshev`,
+/// fixed to 4 coefficients). `x` is drawn from the Chebyshev domain `[-1, 1]`
+/// where `T_k` are well-conditioned; coefficients span a modest range. Edge
+/// cases pin the recurrence (zero series, constant, the bare `T_1=x`, `T_2`,
+/// `T_3`, and `x = ±1` where `T_k(±1) = (±1)^k`). Encoded as IEEE bit patterns;
+/// only `+ - *` so Lean binary64 ≡ C++ `double` bit-for-bit.
+pub fn cheb_eval_vectors() -> Vec<Vector> {
+    let mut v = Vec::new();
+    let mut push = |c0: f64, c1: f64, c2: f64, c3: f64, x: f64| {
+        v.push(Vector::new(vec![
+            f64_bits(c0),
+            f64_bits(c1),
+            f64_bits(c2),
+            f64_bits(c3),
+            f64_bits(x),
+        ]))
+    };
+    // Edge series across the domain endpoints, centre, and a few interior points.
+    let xs = [-1.0_f64, -0.5, 0.0, 0.25, 0.5, 1.0];
+    for &x in &xs {
+        push(0.0, 0.0, 0.0, 0.0, x); // zero series → 0
+        push(1.0, 0.0, 0.0, 0.0, x); // constant T_0 → 1
+        push(0.0, 1.0, 0.0, 0.0, x); // T_1(x) = x
+        push(0.0, 0.0, 1.0, 0.0, x); // T_2(x) = 2x²−1
+        push(0.0, 0.0, 0.0, 1.0, x); // T_3(x) = 4x³−3x
+        push(1.0, -0.5, 0.25, -0.125, x); // a decaying mixed series
+    }
+    let mut rng = SplitMix64(SEED);
+    for _ in 0..200 {
+        let c0 = rand_f64(&mut rng, -2.0, 2.0);
+        let c1 = rand_f64(&mut rng, -2.0, 2.0);
+        let c2 = rand_f64(&mut rng, -2.0, 2.0);
+        let c3 = rand_f64(&mut rng, -2.0, 2.0);
+        let x = rand_f64(&mut rng, -1.0, 1.0);
+        push(c0, c1, c2, c3, x);
+    }
+    v
+}
+
 /// `fadd(a, b) = a + b` over f64 — the Phase-1 smoke test for the float path.
 /// Edge doubles (zeros, ±1, fractions, large/small) plus random finite pairs;
 /// the only point is that C++ `double` and Lean `Float` agree bit-for-bit.

@@ -33,6 +33,10 @@ pub enum Profile {
     /// postcondition is the standard dot-product rounding-error bound; the two
     /// summation orders agree only within a `--float-tol` tolerance.
     Fdot4,
+    /// Degree-3 Chebyshev series via Clenshaw (`eval_chebyshev`, fixed arity).
+    /// Bit-exact (oracle and model use the same recurrence); the postcondition
+    /// cross-checks Clenshaw against the direct `Σ c_k T_k(x)` sum (L1 analysis).
+    ChebEval,
 }
 
 impl Profile {
@@ -50,6 +54,7 @@ impl Profile {
             Profile::OptHj => &["hj"],
             Profile::Fadd => &["fadd"],
             Profile::Fdot4 => &["fdot4"],
+            Profile::ChebEval => &["cheb-eval"],
         }
     }
 
@@ -143,6 +148,33 @@ impl Profile {
                 let u = 2f64.powi(-24);
                 Some((r - dot).abs() <= 8.0 * u * mag + 1e-7)
             }
+            // Clenshaw must agree with the direct Chebyshev sum Σ c_k T_k(x) to
+            // within the f64 rounding floor: a real per-result error estimate
+            // (L1 "analysis"). T_k via the recurrence T_0=1, T_1=x,
+            // T_{k+1}=2x·T_k−T_{k-1}; γ = 16u with u = 2⁻⁵³ bounds the degree-3
+            // evaluation (and either evaluation order).
+            Profile::ChebEval => {
+                let c = [
+                    f64::from_bits(args[0]),
+                    f64::from_bits(args[1]),
+                    f64::from_bits(args[2]),
+                    f64::from_bits(args[3]),
+                ];
+                let x = f64::from_bits(args[4]);
+                let r = f64::from_bits(result);
+                if !r.is_finite() {
+                    return None;
+                }
+                let t = [1.0, x, 2.0 * x * x - 1.0, 4.0 * x * x * x - 3.0 * x];
+                let mut direct = 0.0f64;
+                let mut mag = 0.0f64;
+                for k in 0..4 {
+                    direct += c[k] * t[k];
+                    mag += (c[k] * t[k]).abs();
+                }
+                let u = 2f64.powi(-53);
+                Some((r - direct).abs() <= 16.0 * u * mag + 1e-12)
+            }
             _ => None,
         }
     }
@@ -157,6 +189,7 @@ impl Profile {
             Profile::OptGd => Some("0 ≤ f(x_K) ≤ f(x_0)  (descent)"),
             Profile::OptHj => Some("0 ≤ f(best) ≤ f(start)  (no worse than start)"),
             Profile::Fdot4 => Some("|fl·dot − Σaᵢbᵢ| ≤ 8u·Σ|aᵢbᵢ|  (u = 2⁻²⁴)"),
+            Profile::ChebEval => Some("|Clenshaw − Σcₖtₖ(x)| ≤ 16u·Σ|cₖtₖ|  (u = 2⁻⁵³)"),
             _ => None,
         }
     }
@@ -184,6 +217,7 @@ impl Profile {
             Profile::OptHj => "hj",
             Profile::Fadd => "fadd",
             Profile::Fdot4 => "fdot4",
+            Profile::ChebEval => "cheb-eval",
         }
     }
 
@@ -205,7 +239,8 @@ impl Profile {
             // bounded / deterministic, or float (NaN/Inf canonicalized, not a
             // declared `wrap` class): no overflow-divergence.
             Profile::Isqrt | Profile::Bisect | Profile::Quant => false,
-            Profile::OptGss | Profile::OptGd | Profile::OptHj | Profile::Fadd | Profile::Fdot4 => false,
+            Profile::OptGss | Profile::OptGd | Profile::OptHj | Profile::Fadd | Profile::Fdot4
+            | Profile::ChebEval => false,
         }
     }
 }
