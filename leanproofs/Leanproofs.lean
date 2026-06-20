@@ -7,3 +7,4 @@ import Leanproofs.Quantum.AmplitudeDamping
 import Leanproofs.Quantum.PhaseDamping
 import Leanproofs.Quantum.DepolarizingDepth
 import Leanproofs.Quantum.TensorChannel
+import Leanproofs.Quantum.GlobalDepolarizing
