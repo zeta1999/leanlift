@@ -480,6 +480,17 @@ if bash "$ROOT/scripts/depth-certify.sh" --check >"$TMP/depthcap" 2>&1; then
 else
   bad "depth capstone --check failed"; cat "$TMP/depthcap"
 fi
+# S2d — the multi-qubit WIDTH fidelity floor (LE4): single-qubit channels on each factor of an
+# n-qubit register are CPTP and the fidelity factorizes across qubits, F=(1−p/2)^n, instantiated
+# n=3 for the circulant register. Lean tensor CPTP+factorization ∧ consistency ∧ threshold ∧ MC.
+if bash "$ROOT/scripts/tensor-certify.sh" --check >"$TMP/tencap" 2>&1; then
+  grep -q "width fidelity floor (1−p/2)^3 is CERTIFIED" "$TMP/tencap" \
+    && grep -q "PASS: LE4 tensor width fidelity floor certified" "$TMP/tencap" \
+    && pass "tensor width fidelity floor (LE4)  (circulant n=3: Lean tensor-CPTP ∧ (1−p/2)^n ∧ MC → CERTIFIED)" \
+    || { bad "tensor capstone: incomplete"; cat "$TMP/tencap"; }
+else
+  bad "tensor capstone --check failed"; cat "$TMP/tencap"
+fi
 # S3 — the delivery-cliff sweep: empirical knee must match the closed-form p*.
 if bash "$ROOT/scripts/serial-link-sweep.sh" --check >"$TMP/ssw" 2>&1; then
   grep -q "empirical delivery cliff ≈ closed-form p\*" "$TMP/ssw" \
