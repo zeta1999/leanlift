@@ -141,6 +141,26 @@ else
   bad "LE3 depolarizing fidelity — PRISM steady-state disagrees with the Lean F=1-p/2 bound"
 fi
 
+# LE3 cross-check (amplitude + phase damping): the GSPN steady-states must equal the Lean/Kraus
+# laws — amplitude survival π(excited)=1−γ (amplitudeDamping_relax) and phase coherence
+# π(coherent)=1−λ (phaseDamping_coherence) — across a rate sweep. Tolerance ≤1e-3.
+le3d_ok=1
+for r in 0.05 0.1 0.2 0.3 0.5; do
+  mu=$(awk "BEGIN{printf \"%.4f\", 1 - $r}")
+  exp=$(awk "BEGIN{print 1 - $r}")
+  Fa=$("$LIFT" model prism "$M/amplitude_damping.model.toml" --set gamma=$r --set pump=$mu \
+        2>/dev/null | awk '$1=="Fsurv"{print $3}')
+  Fc=$("$LIFT" model prism "$M/phase_damping.model.toml" --set lam=$r --set rephase=$mu \
+        2>/dev/null | awk '$1=="Coh"{print $3}')
+  awk "BEGIN{d=$Fa-$exp; if(d<0)d=-d; exit !(d<=1e-3)}" || { le3d_ok=0; echo "    amp γ=$r: Fsurv=$Fa vs 1−γ=$exp"; }
+  awk "BEGIN{d=$Fc-$exp; if(d<0)d=-d; exit !(d<=1e-3)}" || { le3d_ok=0; echo "    phase λ=$r: Coh=$Fc vs 1−λ=$exp"; }
+done
+if [ "$le3d_ok" = 1 ]; then
+  pass "LE3 amplitude/phase damping  (PRISM steady-states 1−γ / 1−λ = Lean/Kraus laws, Δ≤1e-3 over r∈[.05,.5])"
+else
+  bad "LE3 amplitude/phase damping — PRISM steady-states disagree with the Lean damping laws"
+fi
+
 # ---------------------------------------------------------------------------- #
 sect "RT — schedulability (utilization bound + exact RTA)"
 if "$LIFT" model check "$M/tasks.model.toml" >"$TMP/rt" 2>&1; then
@@ -437,6 +457,17 @@ if bash "$ROOT/scripts/depolarizing-certify.sh" --check >"$TMP/qcap" 2>&1; then
     || { bad "depolarizing capstone: incomplete"; cat "$TMP/qcap"; }
 else
   bad "depolarizing capstone --check failed"; cat "$TMP/qcap"
+fi
+# S2b — the QUANTUM capstone (LE4) for the other two standard channels: amplitude damping
+# (T₁, survival 1−γ) and phase damping (T₂, coherence 1−λ), each Kraus CPTP proof ∧ Lean law
+# ∧ PRISM steady-state ∧ SSA sim. With S2 this closes all 3 standard single-qubit error models.
+if bash "$ROOT/scripts/damping-certify.sh" --check >"$TMP/dcap" 2>&1; then
+  grep -q "both error models CERTIFIED" "$TMP/dcap" \
+    && grep -q "PASS: LE4 amplitude/phase-damping capstone certified" "$TMP/dcap" \
+    && pass "amplitude/phase-damping capstone (LE4)  (Kraus-CPTP ∧ Lean 1−γ/1−λ ∧ PRISM ∧ SSA → CERTIFIED)" \
+    || { bad "damping capstone: incomplete"; cat "$TMP/dcap"; }
+else
+  bad "damping capstone --check failed"; cat "$TMP/dcap"
 fi
 # S3 — the delivery-cliff sweep: empirical knee must match the closed-form p*.
 if bash "$ROOT/scripts/serial-link-sweep.sh" --check >"$TMP/ssw" 2>&1; then
