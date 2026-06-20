@@ -1,0 +1,60 @@
+# amplitude_damping — the *stochastic axis* for the single-qubit AMPLITUDE-DAMPING (T₁)
+# error model.  The Lean/Kraus side (LeanLift.Quantum.amplitudeDamping_relax) proves that the
+# excited-state survival after one application of the channel is exactly
+#     ⟨1| E_γ(|1⟩⟨1|) |1⟩ = 1 − γ .
+# Here we recover that SAME number 1 − γ as a steady-state population of an ergodic 2-state CTMC.
+#
+# A logical qubit lives in `excited` (the |1⟩ component) or `ground` (|0⟩).  Energy relaxation
+# fires `excited → ground` at rate γ (the damping knob); a balancing re-excitation drift fires
+# `ground → excited` at rate (1 − γ).  The unique stationary law of this birth-death chain is
+#     π(excited) = (1−γ) / ((1−γ) + γ) = 1 − γ ,
+# i.e. the steady-state excited population is EXACTLY the proven channel survival 1 − γ.
+# Sweeping γ draws the T₁ decay curve; the capstone cross-checks π(excited) against 1 − γ and
+# against the Lean closed form to ±1e-3 (LEAN_ERROR_PLAN.md LE3 / LE4).
+#
+# Invariant: excited + ground = 1 (one logical qubit), conserved by every transition; the chain
+# is ergodic so the steady state is well-defined (mirrors depolarizing.model.toml).
+kind = "gspn"
+places = ["excited", "ground"]
+initial = "excited:1"               # start in the excited |1⟩ state
+
+conserved = ["excited", "ground"]
+[[bound]]
+name = "qubit"
+max = "1"
+places = ["excited", "ground"]
+
+[[param]]
+name = "gamma"
+value = "0.3"                       # amplitude-damping rate γ (swept in the manual/CI)
+[[param]]
+name = "pump"
+value = "1 - gamma"                 # re-excitation drift ⇒ π(excited) = 1 − γ exactly
+
+# energy relaxation: the excited component decays into the ground subspace
+[[transition]]
+name = "relax"
+kind = "timed"
+rate = "gamma"
+pre = "excited:1"
+post = "ground:1"
+
+# balancing re-excitation drift back to the excited subspace
+[[transition]]
+name = "pump"
+kind = "timed"
+rate = "pump"
+pre = "ground:1"
+post = "excited:1"
+
+# --- steady-state survival metrics ---------------------------------------- #
+[[query]]
+name = "Fsurv"
+compute = "mean"
+target = "excited"        # steady-state P(excited) = excited survival = 1 − γ
+
+[[query]]
+name = "Pground"
+compute = "full"
+target = "ground"
+time = "1"                # P(ground = 1) = γ

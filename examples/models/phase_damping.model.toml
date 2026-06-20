@@ -1,0 +1,63 @@
+# phase_damping — the *stochastic axis* for the single-qubit PHASE-DAMPING (pure dephasing, T₂)
+# error model.  The Lean/Kraus side (LeanLift.Quantum.phaseDamping_coherence) proves that the
+# off-diagonal coherence after one application of the channel shrinks by exactly
+#     (E_λ ρ)₀₁ = (1 − λ) · ρ₀₁ ,
+# i.e. the surviving fraction of coherence is 1 − λ.  Here we recover that SAME number 1 − λ as a
+# steady-state population of an ergodic 2-state CTMC.
+#
+# The single coherence degree of freedom is coarse-grained into `coherent` (the surviving
+# off-diagonal) and `decohered` (the lost component).  Dephasing fires `coherent → decohered` at
+# rate λ (the dephasing knob); a balancing rephasing drift fires `decohered → coherent` at rate
+# (1 − λ).  The unique stationary law is
+#     π(coherent) = (1−λ) / ((1−λ) + λ) = 1 − λ ,
+# i.e. the steady-state coherent fraction is EXACTLY the proven coherence-survival factor 1 − λ.
+# Sweeping λ draws the T₂ decay curve; the capstone cross-checks π(coherent) against 1 − λ and
+# against the Lean closed form to ±1e-3.  Unlike amplitude damping the populations are untouched
+# (phaseDamping_expZ: ⟨Z⟩ preserved); only coherence decays — this model tracks that coherence.
+#
+# Invariant: coherent + decohered = 1, conserved by every transition; the chain is ergodic so the
+# steady state is well-defined (mirrors depolarizing.model.toml).
+kind = "gspn"
+places = ["coherent", "decohered"]
+initial = "coherent:1"              # start fully coherent
+
+conserved = ["coherent", "decohered"]
+[[bound]]
+name = "coh"
+max = "1"
+places = ["coherent", "decohered"]
+
+[[param]]
+name = "lam"
+value = "0.3"                       # dephasing rate λ (swept in the manual/CI)
+[[param]]
+name = "rephase"
+value = "1 - lam"                   # rephasing drift ⇒ π(coherent) = 1 − λ exactly
+
+# dephasing: the coherent component decays into the decohered subspace
+[[transition]]
+name = "dephase"
+kind = "timed"
+rate = "lam"
+pre = "coherent:1"
+post = "decohered:1"
+
+# balancing rephasing drift back to the coherent subspace
+[[transition]]
+name = "rephase"
+kind = "timed"
+rate = "rephase"
+pre = "decohered:1"
+post = "coherent:1"
+
+# --- steady-state coherence metrics --------------------------------------- #
+[[query]]
+name = "Coh"
+compute = "mean"
+target = "coherent"       # steady-state P(coherent) = surviving coherence = 1 − λ
+
+[[query]]
+name = "Pdec"
+compute = "full"
+target = "decohered"
+time = "1"                # P(decohered = 1) = λ
