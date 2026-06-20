@@ -1,0 +1,59 @@
+# depolarizing — the LE3 *stochastic axis*: model single-qubit depolarizing noise as
+# an ergodic 2-state CTMC and recover, as a steady-state quantity, the same fidelity
+# law the Lean/Kraus side proves: F = 1 - p/2  (LeanLift.Quantum.depolarizing_fidelity).
+#
+# A logical qubit lives in one of two coarse-grained subspaces: `correct` (aligned with
+# the ideal state) or `error` (the orthogonal/mixed component a depolarizing event scatters
+# into). Depolarizing fires at rate p (the noise knob); the restoring drift returns to
+# `correct` at rate (2 - p). The unique stationary law of this birth-death chain is
+#     π(error) = p / (p + (2 - p)) = p/2 ,   π(correct) = 1 - p/2 ,
+# so the steady-state `correct` probability is EXACTLY the proven channel fidelity F=1-p/2.
+# Sweeping p draws the robustness knee; the gate cross-checks π(correct) against 1-p/2 and
+# against the emulator noise-vs-accuracy curve to ±5% (LEAN_ERROR_PLAN.md LE3 / LE4).
+#
+# Invariant: correct + error = 1 (one logical qubit), conserved by every transition — the
+# chain is ergodic so the steady state is well-defined (mirrors the serial-link demo).
+kind = "gspn"
+places = ["correct", "error"]
+initial = "correct:1"               # start in the ideal state
+
+conserved = ["correct", "error"]
+[[bound]]
+name = "qubit"
+max = "1"
+places = ["correct", "error"]
+
+[[param]]
+name = "p"
+value = "0.3"                        # depolarizing rate (swept in the manual/CI)
+[[param]]
+name = "mu_restore"
+value = "2 - p"                      # restoring drift ⇒ π(error)=p/2 exactly
+
+# depolarizing event: ideal component scatters into the error subspace
+[[transition]]
+name = "depolarize"
+kind = "timed"
+rate = "p"
+pre = "correct:1"
+post = "error:1"
+
+# restoring drift back to the ideal subspace
+[[transition]]
+name = "restore"
+kind = "timed"
+rate = "mu_restore"
+pre = "error:1"
+post = "correct:1"
+
+# --- steady-state fidelity metrics ---------------------------------------- #
+[[query]]
+name = "F"
+compute = "mean"
+target = "correct"        # steady-state P(correct) = fidelity = 1 - p/2
+
+[[query]]
+name = "Perr"
+compute = "full"
+target = "error"
+time = "1"                # P(error = 1) = p/2
