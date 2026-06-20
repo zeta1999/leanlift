@@ -53,4 +53,14 @@ theorem pauli_twirl (ρ : Matrix (Fin 2) (Fin 2) ℂ) :
      rw [Complex.I_sq]
      ring)
 
+/-- `⟨Z⟩(ρ) = Tr(Z·ρ)`, the Pauli-Z expectation of operator `ρ`. -/
+noncomputable def expZ (ρ : Matrix (Fin 2) (Fin 2) ℂ) : ℂ := (σZ * ρ).trace
+
+/-- `⟨Z⟩(ρ) = ρ₀₀ − ρ₁₁` (the population imbalance). -/
+theorem expZ_eq (ρ : Matrix (Fin 2) (Fin 2) ℂ) : expZ ρ = ρ 0 0 - ρ 1 1 := by
+  simp only [expZ, σZ, Matrix.trace_fin_two, Matrix.mul_apply, Fin.sum_univ_two, Matrix.of_apply,
+    Matrix.cons_val', Matrix.cons_val_zero, Matrix.cons_val_one, Matrix.head_cons,
+    Matrix.empty_val', Matrix.cons_val_fin_one]
+  ring
+
 end LeanLift.Quantum
