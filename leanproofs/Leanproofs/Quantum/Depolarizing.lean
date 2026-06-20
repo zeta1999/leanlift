@@ -46,7 +46,8 @@ noncomputable def depolarizing (p : ℝ) (hp : 0 ≤ p) (hp1 : p ≤ 1) : KrausM
   complete := by
     have ha : Real.sqrt (1 - 3 * p / 4) ^ 2 = 1 - 3 * p / 4 := Real.sq_sqrt (by linarith)
     have hb : Real.sqrt (p / 4) ^ 2 = p / 4 := Real.sq_sqrt (by linarith)
-    simp only [depolarizingOps, Fin.sum_univ_four, Matrix.cons_val_zero, Matrix.cons_val_one,
+    rw [Fin.sum_univ_four]
+    simp only [depolarizingOps, Matrix.cons_val_zero, Matrix.cons_val_one,
       Matrix.head_cons, Matrix.cons_val_two, Matrix.cons_val_three, Matrix.tail_cons]
     rw [conjT_smul_invol _ conjTranspose_one (one_mul 1),
       conjT_smul_invol _ σX_herm σX_sq, conjT_smul_invol _ σY_herm σY_sq,
@@ -70,9 +71,10 @@ theorem depolarizing_apply (p : ℝ) (hp : 0 ≤ p) (hp1 : p ≤ 1)
       show σX * ρ * σX + σY * ρ * σY + σZ * ρ * σZ + ρ
         = ρ + σX * ρ * σX + σY * ρ * σY + σZ * ρ * σZ from by abel]
     exact pauli_twirl ρ
-  simp only [KrausMap.apply, depolarizing, depolarizingOps, Fin.sum_univ_four,
-    Matrix.cons_val_zero, Matrix.cons_val_one, Matrix.head_cons, Matrix.cons_val_two,
-    Matrix.cons_val_three, Matrix.tail_cons]
+  rw [show (depolarizing p hp hp1).apply ρ
+        = ∑ i : Fin 4, depolarizingOps p i * ρ * (depolarizingOps p i)ᴴ from rfl, Fin.sum_univ_four]
+  simp only [depolarizingOps, Matrix.cons_val_zero, Matrix.cons_val_one, Matrix.head_cons,
+    Matrix.cons_val_two, Matrix.cons_val_three, Matrix.tail_cons]
   rw [smul_invol_apply _ conjTranspose_one, smul_invol_apply _ σX_herm,
     smul_invol_apply _ σY_herm, smul_invol_apply _ σZ_herm,
     Matrix.one_mul, Matrix.mul_one, ha, hb]

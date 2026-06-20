@@ -43,8 +43,8 @@ noncomputable def phaseDamping (l : ℝ) (hl : 0 ≤ l) (hl1 : l ≤ 1) : KrausM
   complete := by
     have ha : Real.sqrt (1 - l / 2) ^ 2 = 1 - l / 2 := Real.sq_sqrt (by linarith)
     have hb : Real.sqrt (l / 2) ^ 2 = l / 2 := Real.sq_sqrt (by linarith)
-    simp only [phaseDampingOps, Fin.sum_univ_two, Matrix.cons_val_zero, Matrix.cons_val_one,
-      Matrix.head_cons]
+    rw [Fin.sum_univ_two]
+    simp only [phaseDampingOps, Matrix.cons_val_zero, Matrix.cons_val_one, Matrix.head_cons]
     rw [conjT_smul_invol _ conjTranspose_one (one_mul 1), conjT_smul_invol _ σZ_herm σZ_sq,
       ← add_smul]
     simp only [ha, hb]
@@ -58,8 +58,9 @@ theorem phaseDamping_apply (l : ℝ) (hl : 0 ≤ l) (hl1 : l ≤ 1)
       = ((1 - l / 2 : ℝ) : ℂ) • ρ + ((l / 2 : ℝ) : ℂ) • (σZ * ρ * σZ) := by
   have ha : Real.sqrt (1 - l / 2) ^ 2 = 1 - l / 2 := Real.sq_sqrt (by linarith)
   have hb : Real.sqrt (l / 2) ^ 2 = l / 2 := Real.sq_sqrt (by linarith)
-  simp only [KrausMap.apply, phaseDamping, phaseDampingOps, Fin.sum_univ_two,
-    Matrix.cons_val_zero, Matrix.cons_val_one, Matrix.head_cons]
+  rw [show (phaseDamping l hl hl1).apply ρ
+        = ∑ i : Fin 2, phaseDampingOps l i * ρ * (phaseDampingOps l i)ᴴ from rfl, Fin.sum_univ_two]
+  simp only [phaseDampingOps, Matrix.cons_val_zero, Matrix.cons_val_one, Matrix.head_cons]
   rw [smul_invol_apply _ conjTranspose_one, smul_invol_apply _ σZ_herm, Matrix.one_mul,
     Matrix.mul_one, ha, hb]
 

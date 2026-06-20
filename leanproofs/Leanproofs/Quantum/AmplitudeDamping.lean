@@ -65,7 +65,8 @@ noncomputable def amplitudeDamping (γ : ℝ) (hγ : 0 ≤ γ) (hγ1 : γ ≤ 1)
   ops := ![adK0 γ, adK1 γ]
   complete := by
     obtain ⟨h1, h2⟩ := ad_sqrt_sq γ hγ hγ1
-    simp only [Fin.sum_univ_two, Matrix.cons_val_zero, Matrix.cons_val_one, Matrix.head_cons,
+    rw [Fin.sum_univ_two]
+    simp only [Matrix.cons_val_zero, Matrix.cons_val_one, Matrix.head_cons,
       adK0_conjT, adK1_conjT]
     simp only [adK0, adK1, Matrix.mul_fin_two, Matrix.one_fin_two]
     ext i j
@@ -91,8 +92,10 @@ theorem amplitudeDamping_apply (γ : ℝ) (hγ : 0 ≤ γ) (hγ1 : γ ≤ 1)
   obtain ⟨h1, h2⟩ := ad_sqrt_sq γ hγ hγ1
   have hsum : (amplitudeDamping γ hγ hγ1).apply ρ
       = adK0 γ * ρ * (adK0 γ)ᴴ + adK1 γ * ρ * (adK1 γ)ᴴ := by
-    simp only [KrausMap.apply, amplitudeDamping, Fin.sum_univ_two, Matrix.cons_val_zero,
-      Matrix.cons_val_one, Matrix.head_cons]
+    rw [show (amplitudeDamping γ hγ hγ1).apply ρ
+          = ∑ i : Fin 2, ![adK0 γ, adK1 γ] i * ρ * (![adK0 γ, adK1 γ] i)ᴴ from rfl,
+      Fin.sum_univ_two]
+    simp only [Matrix.cons_val_zero, Matrix.cons_val_one, Matrix.head_cons]
   rw [hsum, adK0_conjT, adK1_conjT, eta_fin_two ρ]
   simp only [adK0, adK1, Matrix.mul_fin_two]
   ext i j
