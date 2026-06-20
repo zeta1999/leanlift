@@ -428,6 +428,16 @@ if bash "$ROOT/scripts/serial-link-certify.sh" --check >"$TMP/scap" 2>&1; then
 else
   bad "serial-link capstone --check failed"; cat "$TMP/scap"
 fi
+# S2 — the QUANTUM capstone (LE4): Kraus CPTP proof ∧ Lean fidelity law ∧ PRISM knee
+# ∧ SSA sim all agree on F=1−p/2 for the depolarizing error model. One certificate.
+if bash "$ROOT/scripts/depolarizing-certify.sh" --check >"$TMP/qcap" 2>&1; then
+  grep -q "depolarized fidelity ≥ τ" "$TMP/qcap" \
+    && grep -q "PASS: LE4 depolarizing capstone certified" "$TMP/qcap" \
+    && pass "depolarizing capstone (LE4)  (Kraus-CPTP ∧ Lean F=1−p/2 ∧ PRISM ∧ SSA → CERTIFIED)" \
+    || { bad "depolarizing capstone: incomplete"; cat "$TMP/qcap"; }
+else
+  bad "depolarizing capstone --check failed"; cat "$TMP/qcap"
+fi
 # S3 — the delivery-cliff sweep: empirical knee must match the closed-form p*.
 if bash "$ROOT/scripts/serial-link-sweep.sh" --check >"$TMP/ssw" 2>&1; then
   grep -q "empirical delivery cliff ≈ closed-form p\*" "$TMP/ssw" \
