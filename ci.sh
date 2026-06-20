@@ -469,6 +469,17 @@ if bash "$ROOT/scripts/damping-certify.sh" --check >"$TMP/dcap" 2>&1; then
 else
   bad "damping capstone --check failed"; cat "$TMP/dcap"
 fi
+# S2c — the per-ALGORITHM depth fidelity floor (LE4): the single-gate depolarizing law lifted
+# to a depth-G circuit, F_G(p)=(1+(1−p)^G)/2, instantiated at G=3 for the circulant CyclicShift
+# solver. Lean depth theorem ∧ single-gate consistency ∧ threshold knee ∧ independent Monte-Carlo.
+if bash "$ROOT/scripts/depth-certify.sh" --check >"$TMP/depthcap" 2>&1; then
+  grep -q "fidelity floor F_3(p)=(1+(1−p)^3)/2 is CERTIFIED" "$TMP/depthcap" \
+    && grep -q "PASS: LE4 depth fidelity floor certified" "$TMP/depthcap" \
+    && pass "depth fidelity floor (LE4)  (circulant G=3: Lean F_G=(1+(1−p)^G)/2 ∧ consistency ∧ MC → CERTIFIED)" \
+    || { bad "depth capstone: incomplete"; cat "$TMP/depthcap"; }
+else
+  bad "depth capstone --check failed"; cat "$TMP/depthcap"
+fi
 # S3 — the delivery-cliff sweep: empirical knee must match the closed-form p*.
 if bash "$ROOT/scripts/serial-link-sweep.sh" --check >"$TMP/ssw" 2>&1; then
   grep -q "empirical delivery cliff ≈ closed-form p\*" "$TMP/ssw" \
