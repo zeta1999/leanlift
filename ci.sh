@@ -491,6 +491,17 @@ if bash "$ROOT/scripts/tensor-certify.sh" --check >"$TMP/tencap" 2>&1; then
 else
   bad "tensor capstone --check failed"; cat "$TMP/tencap"
 fi
+# S2e — the ENTANGLED-output fidelity floor (LE4, deepest leg): the global (register-wide)
+# depolarizing channel is entanglement-independent, so its fidelity law (1−p)^G+(1−(1−p)^G)/d holds
+# for any pure state. d=8 = circulant 3-qubit register. Lean trace+fidelity ∧ d=2≡depth ∧ mixing ∧ MC.
+if bash "$ROOT/scripts/global-certify.sh" --check >"$TMP/gcap" 2>&1; then
+  grep -q "entangled-output floor (1−p)^3+(1−(1−p)^3)/8 is CERTIFIED" "$TMP/gcap" \
+    && grep -q "PASS: LE4 global (entangled-output) fidelity floor certified" "$TMP/gcap" \
+    && pass "global entangled-output floor (LE4)  (circulant d=8: Lean (1−p)^G+(1−(1−p)^G)/d ∧ d=2≡depth ∧ MC → CERTIFIED)" \
+    || { bad "global capstone: incomplete"; cat "$TMP/gcap"; }
+else
+  bad "global capstone --check failed"; cat "$TMP/gcap"
+fi
 # S3 — the delivery-cliff sweep: empirical knee must match the closed-form p*.
 if bash "$ROOT/scripts/serial-link-sweep.sh" --check >"$TMP/ssw" 2>&1; then
   grep -q "empirical delivery cliff ≈ closed-form p\*" "$TMP/ssw" \
