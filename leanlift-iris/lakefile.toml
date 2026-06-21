@@ -1,0 +1,22 @@
+name = "leanlift-iris"
+version = "0.1.0"
+defaultTargets = ["LeanliftIris"]
+
+# Phase 0.1: depend on the Lean 4 port of Iris (core lib, no Mathlib).
+# Pinned to v4.28.0 to match this repo's installed toolchain.
+#
+# Pin Qq to the v4.28.0 tag explicitly: iris's own lakefile requires it via the
+# moving `git#stable` branch, whose old commit has since been GC'd. A root-level
+# require overrides the transitive one and avoids that drift.
+[[require]]
+name = "Qq"
+scope = "leanprover-community"
+rev = "v4.28.0"
+
+[[require]]
+name = "iris"
+git.url = "https://github.com/leanprover-community/iris-lean.git"
+rev = "v4.28.0"
+
+[[lean_lib]]
+name = "LeanliftIris"
