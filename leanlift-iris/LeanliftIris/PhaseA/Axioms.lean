@@ -6,6 +6,7 @@ is that verification proofs are sorry-free and kernel-checked.
 import LeanliftIris.PhaseA.Sweep
 import LeanliftIris.PhaseA.OrderBook
 import LeanliftIris.PhaseA.Lang
+import LeanliftIris.PhaseA.HeapRes
 
 namespace LeanliftIris.PhaseA
 
@@ -32,5 +33,9 @@ namespace LeanliftIris.PhaseA
 #print axioms ex_fork
 #print axioms fill_app
 #print axioms val_no_prim_step
+
+-- Heap resource / points-to (A2 step 1). Iris-model proofs legitimately use the
+-- classical axioms; the leanlift invariant is the ABSENCE of `sorryAx`.
+#print axioms pointsTo_agree
 
 end LeanliftIris.PhaseA
