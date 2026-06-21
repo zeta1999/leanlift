@@ -13,7 +13,7 @@ worked end to end for `load`. Sorry-free.
 import LeanliftIris.PhaseA.Wp
 
 namespace LeanliftIris.PhaseA
-open Iris Iris.BI COFE
+open Iris Iris.BI COFE HeapView One DFrac Agree LeibnizO OFE
 
 /-! ## `prim_step` inversion infrastructure (pure, over `Lang`) -/
 
@@ -73,5 +73,51 @@ theorem wp_lift_step (γ : GName) [HasHeap γ GF F] (e : Expr) (Φ : Val → IPr
   simp only [wpF]
   iright
   iexact H
+
+/-- **Heap agreement.** Owning the authoritative heap and a points-to forces the
+heap to contain that value at that location — the bridge from `stateInterp` to a
+concrete `σ l`. -/
+theorem stateInterp_pointsTo_agree {γ : GName} [HasHeap γ GF F]
+    (σ : Heap) (l : Nat) (v : Val) :
+    stateInterp (F := F) γ σ ∗ (l ↦[γ] v) ⊢ (⌜σ l = some v⌝ : IProp GF) := by
+  refine iOwn_op.mpr.trans ?_
+  refine iOwn_cmraValid.trans ?_
+  refine (UPred.cmraValid_elim _).trans ?_
+  iintro %H
+  ipure_intro
+  obtain ⟨_, _, Hl⟩ := auth_op_frag_one_validN_iff.mp H
+  -- Hl : get? (toAgreeHeap σ) l ≡{n}≡ some (toAgree ⟨v⟩); reduce get? (fun-map) + toAgreeHeap
+  simp only [Std.PartialMap.get?, Std.instPartialMapFun, toAgreeHeap] at Hl
+  -- Hl : (σ l).map (fun w => toAgree ⟨w⟩) ≡{n}≡ some (toAgree ⟨v⟩)
+  cases hσ : σ l with
+  | none => rw [hσ] at Hl; simp at Hl
+  | some w =>
+    rw [hσ] at Hl
+    simp only [Option.map_some] at Hl
+    rw [some_dist_some] at Hl
+    rw [LeibnizO.dist_inj (Agree.toAgree_injN Hl)]
+
+/-- **Load rule.** Reading location `l` (owned as `l ↦ v`) returns `v` and gives
+the points-to back to the continuation. The first heap operation verified against
+the `wp`. -/
+theorem wp_load (γ : GName) [HasHeap γ GF F] (l : Nat) (v : Val) (Φ : Val → IProp GF) :
+    (l ↦[γ] v) ∗ ((l ↦[γ] v) -∗ |==> Φ v) ⊢
+      wp (F := F) γ (.load (.val (.loc l))) Φ := by
+  iintro ⟨Hpt, HΦ⟩
+  iapply wp_lift_step
+  iintro %σ Hsi
+  ihave %Hag := stateInterp_pointsTo_agree (γ := γ) σ l v $$ [Hsi, Hpt]
+  · isplitl [Hsi] <;> iassumption
+  iintro %e' %σ' %efs %Hstep
+  obtain ⟨w, hσl, he', hσ', hefs⟩ := prim_step_load_inv Hstep
+  have hwv : w = v := by rw [hσl] at Hag; exact Option.some.inj Hag
+  subst hwv; subst he'; subst hσ'; subst hefs
+  iintro !>
+  iintro !>
+  isplitl [Hsi]
+  · iexact Hsi
+  · iapply wp_value
+    iapply HΦ
+    iexact Hpt
 
 end LeanliftIris.PhaseA
