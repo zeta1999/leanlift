@@ -8,6 +8,7 @@ import LeanliftIris.PhaseA.OrderBook
 import LeanliftIris.PhaseA.Lang
 import LeanliftIris.PhaseA.HeapRes
 import LeanliftIris.PhaseA.Wp
+import LeanliftIris.PhaseA.WpLifting
 
 namespace LeanliftIris.PhaseA
 
@@ -40,5 +41,7 @@ namespace LeanliftIris.PhaseA
 #print axioms pointsTo_agree
 #print axioms wp_unfold
 #print axioms wp_value
+#print axioms prim_step_load_inv
+#print axioms wp_lift_step
 
 end LeanliftIris.PhaseA
