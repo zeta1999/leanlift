@@ -30,5 +30,7 @@ namespace LeanliftIris.PhaseA
 #print axioms ex_load_after_alloc
 #print axioms ex_cas_success
 #print axioms ex_fork
+#print axioms fill_app
+#print axioms val_no_prim_step
 
 end LeanliftIris.PhaseA
