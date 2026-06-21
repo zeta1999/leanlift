@@ -146,4 +146,71 @@ theorem wp_load (γ : GName) [HasHeap γ GF F] (l : Nat) (v : Val) (Φ : Val →
     iapply HΦ
     iexact Hpt
 
+/-- Updating the authoritative map at `l` matches updating the heap there. The
+`PartialMap` instance is pinned explicitly (the function-map functor is
+higher-order, so it won't infer from `toAgreeHeap σ` alone). -/
+theorem insert_toAgreeHeap (σ : Heap) (l : Nat) (v : Val) :
+    @Std.PartialMap.insert (Nat → Option ·) Nat (@Std.instPartialMapFun Nat _)
+        (Agree (LeibnizO Val)) (toAgreeHeap σ) l (toAgree (⟨v⟩ : LeibnizO Val))
+      = toAgreeHeap (σ.set l v) := by
+  funext k'
+  simp only [Std.PartialMap.insert, toAgreeHeap, Heap.set]
+  by_cases h : k' = l <;> simp_all [eq_comm]
+
+/-- **Store rule.** Writing `v_new` to `l` (owned as `l ↦ v_old`) updates the
+authoritative heap and the points-to and returns `unit`. The first *mutating*
+rule: a frame-preserving ghost update (`HeapView.update_replace`); no heap
+agreement is needed (full ownership). -/
+theorem wp_store (γ : GName) [HasHeap γ GF F] (l : Nat) (v_old v_new : Val)
+    (Φ : Val → IProp GF) :
+    (l ↦[γ] v_old) ∗ ((l ↦[γ] v_new) -∗ |==> Φ .unit) ⊢
+      wp (F := F) γ (.store (.val (.loc l)) (.val v_new)) Φ := by
+  iintro ⟨Hpt, HΦ⟩
+  iapply wp_lift_step
+  iintro %σ Hsi
+  iintro %e' %σ' %efs %Hstep
+  obtain ⟨_, he', hσ', hefs⟩ := prim_step_store_inv Hstep
+  subst he'; subst hσ'; subst hefs
+  have hval : ✓ (toAgree (⟨v_new⟩ : LeibnizO Val)) :=
+    CMRA.valid_op_left (toAgree_op_valid_iff_eq.mpr rfl)
+  have Hrepl := update_replace (F := F) (H := (Nat → Option ·)) (k := l)
+    (m1 := toAgreeHeap σ) (v1 := toAgree (⟨v_old⟩ : LeibnizO Val))
+    (v2 := toAgree (⟨v_new⟩ : LeibnizO Val)) hval
+  rw [insert_toAgreeHeap] at Hrepl
+  -- explicit types ⇒ `iOwn_op`/`iOwn_update` infer their functor/instances
+  have Hcomb_lem :
+      (stateInterp (F := F) γ σ ∗ (l ↦[γ] v_old))
+      ⊢ iOwn (GF := GF) (F := FHeap (F := F)) γ
+          (Auth (own one) (toAgreeHeap σ)
+            • Frag l (own one) (toAgree (⟨v_old⟩ : LeibnizO Val))) :=
+    iOwn_op.mpr
+  have Hupd_lem :
+      (iOwn (GF := GF) (F := FHeap (F := F)) γ
+        (Auth (own one) (toAgreeHeap σ)
+          • Frag l (own one) (toAgree (⟨v_old⟩ : LeibnizO Val))))
+      ⊢ |==> iOwn (GF := GF) (F := FHeap (F := F)) γ
+        (Auth (own one) (toAgreeHeap (σ.set l v_new))
+          • Frag l (own one) (toAgree (⟨v_new⟩ : LeibnizO Val))) :=
+    iOwn_update Hrepl
+  have Hsplit_lem :
+      (iOwn (GF := GF) (F := FHeap (F := F)) γ
+        (Auth (own one) (toAgreeHeap (σ.set l v_new))
+          • Frag l (own one) (toAgree (⟨v_new⟩ : LeibnizO Val))))
+      ⊢ (stateInterp (F := F) γ (σ.set l v_new) ∗ (l ↦[γ] v_new)) :=
+    iOwn_op.mp
+  iintro !>
+  ihave Hcomb := Hcomb_lem $$ [Hsi, Hpt]
+  · isplitl [Hsi] <;> iassumption
+  ihave Hupd := Hupd_lem $$ [Hcomb]
+  · iexact Hcomb
+  imod Hupd with Hnew
+  ihave ⟨HA, HF⟩ := Hsplit_lem $$ [Hnew]
+  · iexact Hnew
+  iintro !>
+  isplitl [HA]
+  · iexact HA
+  · iapply wp_value
+    iapply HΦ
+    iexact HF
+
 end LeanliftIris.PhaseA
