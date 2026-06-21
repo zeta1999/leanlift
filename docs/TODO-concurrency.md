@@ -1,0 +1,50 @@
+# TODO — concurrency / Iris-in-Lean lane
+
+Actionable checklist for [`PLAN-concurrency.md`](./PLAN-concurrency.md). Sandbox:
+[`../leanlift-iris/`](../leanlift-iris/). Order matters: do the C++ corpus first
+(Phases 0→A→B→C→D), then the Rust variant (Phase E).
+
+## Phase 0 — adopt the foundation
+- [x] 0.1 iris-lean as a Lake dep, pinned v4.28.0 (core `Iris`, no Mathlib), `lake build` green
+- [x] 0.2 MoSeL "hello world" — `ent_refl`/`sep_comm`/`wand_elim`, sorry-free (no axiom dependence)
+- [ ] 0.3 track Eileen; pull OFE/COFE/CMRA algebra (via `IrisMath`) when Phase A needs it; do NOT fork the camera hierarchy
+
+## Phase A — concrete SC program logic (the cheap, high-confidence wins)
+- [ ] A1 define `λ-conc`: tiny imperative core + heap + CAS/FAA/load/store/fork, SC small-step semantics in Lean
+- [ ] A2 define `wp e {Φ}` over `λ-conc`; prove the adequacy theorem (closes the model-code gap for this lane)
+- [ ] A3 functional proofs (SC): order book #9 invariant (`best = max occupied`, fall-back) + sweep-VWAP #10 (exact 128-bit notional, Q==0 / over-ask / drained-level, `best_ask ≤ VWAP ≤ touch`)
+- [ ] A4 first concurrent proof (SC): Treiber stack #7 linearizable via a logically-atomic triple (reclamation deferred)
+
+## Phase B — weak-memory layer (long pole; GATE after Phase A go/no-go)
+- [ ] B1 C11 release-acquire+relaxed op-sem for `λ-conc` (prefer operational view-based, à la iRC11)
+- [ ] B2 weak-memory assertions: rel/acq points-to, objective/subjective split, fences, the StoreLoad/`seq_cst` edge
+- [ ] B3 SPSC ring #1 under acq/rel (smallest honest weak-memory proof)
+- [ ] B4 seqlock #3 + SPMC broadcast #5 (torn-read freedom under the fence discipline)
+- [ ] B5 Chase–Lev #8 (marquee): correct WITH `seq_cst` fence, and exhibit acquire/release is insufficient
+- [ ] B6 hazard-pointer reclamation #7 under weak memory (publish-then-revalidate; bounded garbage)
+
+## Phase C — linearizability & prophecy
+- [ ] C1 reusable logically-atomic triple library (generalize A4)
+- [ ] C2 prophecy variables for future-dependent LPs: MPSC #2 stamp publish, Chase–Lev #8 last-element race
+
+## Phase D — integration with leanlift
+- [ ] D1 lane boundary: separate `[IRIS]` package, off-CI; `ci.sh` only checks it builds + is sorry-free
+- [ ] D2 combined certificate: leanlift SC-model ∧ Iris-lane weak-memory/linearizability; document trust boundaries
+- [ ] D3 docs disclaimer: leanlift's automated families do NOT prove memory-order correctness — only `[IRIS]` does
+
+## Phase E — Rust variant (AFTER the C++ corpus)
+- [ ] E1 sequential slice via Aeneas → Lean (order book, sweep, bitmap in safe Rust) — reuses leanlift's existing Rust path
+- [ ] E2 automated weak-memory screening: Loom (+ optionally Kani/Shuttle) over the concurrency cores; tag `[LOOM]`, off-CI
+- [ ] E3 deductive lane — pick: Verus (SMT, ~SC permission model) OR RustBelt-style Iris-in-Lean (full iRC11, reuses Phase B)
+- [ ] E4 certificate seam: Aeneas ∧ Loom ∧ (Verus|Iris); document which axis each tool owns
+- [ ] note: Aeneas itself covers ONLY the sequential slice — atomics/`unsafe` are outside its model (same boundary as C++)
+
+## Cross-cutting (every phase)
+- [ ] keep proofs sorry-free; verify with `#print axioms`
+- [ ] adversarial spec review + a "teeth" discrimination test per structure (a wrong variant must fail to verify)
+- [ ] watch the Lean generalized/setoid-rewriting gap (highest risk; flagged by Eileen and the community)
+
+## Recommendation
+Time-box **Phase 0 + Phase A** as a spike (low-risk, reuses upstream, already
+beyond leanlift's SC model). Treat **Phase B** as a separately-funded research
+effort with its own go/no-go.
