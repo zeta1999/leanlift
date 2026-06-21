@@ -7,6 +7,7 @@ import LeanliftIris.PhaseA.Sweep
 import LeanliftIris.PhaseA.OrderBook
 import LeanliftIris.PhaseA.Lang
 import LeanliftIris.PhaseA.HeapRes
+import LeanliftIris.PhaseA.Wp
 
 namespace LeanliftIris.PhaseA
 
@@ -37,5 +38,7 @@ namespace LeanliftIris.PhaseA
 -- Heap resource / points-to (A2 step 1). Iris-model proofs legitimately use the
 -- classical axioms; the leanlift invariant is the ABSENCE of `sorryAx`.
 #print axioms pointsTo_agree
+#print axioms wp_unfold
+#print axioms wp_value
 
 end LeanliftIris.PhaseA
