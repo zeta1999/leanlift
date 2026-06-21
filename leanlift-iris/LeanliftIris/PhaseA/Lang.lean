@@ -261,4 +261,42 @@ theorem ex_fork (e : Expr) (σ : Heap) :
     step ⟨[.fork e], σ⟩ ⟨[.val .unit, e], σ⟩ :=
   step.single (prim_step.head Head.fork)
 
+/-! ### Metatheory for the program logic (A2/A4)
+
+These are the structural facts the `wp`-bind rule and the adequacy proof rely on:
+contexts compose, and a value is a normal form (no thread that is a value can
+take a step). Proving them now keeps A1 a complete foundation. -/
+
+/-- Evaluation contexts compose (the algebraic basis of the `wp`-bind rule). -/
+theorem fill_app (K1 K2 : List Frame) (e : Expr) :
+    fill (K1 ++ K2) e = fill K1 (fill K2 e) := by
+  simp only [fill, List.foldr_append]
+
+/-- No frame ever produces a value: `fill1 fr e` is always a compound redex. -/
+theorem fill1_ne_val (fr : Frame) (e : Expr) (v : Val) : fill1 fr e ≠ .val v := by
+  cases fr <;> simp [fill1]
+
+/-- If a context plug yields a value, the context must be empty (the hole was at
+the top). -/
+theorem fill_val_nil {K : List Frame} {e : Expr} {v : Val} (h : fill K e = .val v) :
+    K = [] := by
+  cases K with
+  | nil => rfl
+  | cons fr K' =>
+    exfalso
+    have hfill : fill (fr :: K') e = fill1 fr (fill K' e) := by simp [fill]
+    rw [hfill] at h
+    exact fill1_ne_val fr (fill K' e) v h
+
+/-- **Values are normal forms.** A value expression cannot take a primitive step,
+so a value thread is genuinely finished (used by adequacy). -/
+theorem val_no_prim_step (v : Val) (σ : Heap) (e' : Expr) (σ' : Heap) (efs : List Expr) :
+    ¬ prim_step (.val v) σ e' σ' efs := by
+  rintro ⟨K, a, a', hK, _, hHead⟩
+  have hKnil : K = [] := fill_val_nil hK.symm
+  subst hKnil
+  simp only [fill_nil] at hK
+  subst hK
+  exact head_not_val v σ a' σ' efs hHead
+
 end LeanliftIris.PhaseA

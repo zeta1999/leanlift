@@ -52,6 +52,21 @@ Net: the **base logic and proof mode are done** (iris-lean); the **algebra is
 being done** (Eileen); the **sequential tactic story is demonstrated** (splean);
 the **weak-memory object language is the unbuilt critical path**.
 
+**iris-lean capability boundary (verified 2026-06-21 against the v4.28.0 source).**
+iris-lean ships the base logic + proof mode **and a substantial resource-algebra
+layer** — `Iris/Algebra/`: `CMRA`/`OFE`/`COFE` (+ `COFESolver` domain
+construction), `Auth`, `View`, **`Heap`/`HeapView`** (authoritative heap with
+`DFrac` fractions and singleton fragments — the algebra *behind* a `l ↦{dq} v`),
+`GenMap`, `Frac`/`DFrac`/`Excl`/`Agree`, frame-preserving `Updates`, and a BI
+`Lib/Fixpoint`. What it does **not** ship: any **program-logic layer** — no
+`own`/ghost-state plumbing (`gFunctors`), no **weakest precondition**, no
+**adequacy**. So **Phase A2 is a from-scratch build of the Iris program logic
+over `λ-conc`** (embed `HeapView` into `iProp` via `own`, define the `wp`
+fixpoint with `Lib/Fixpoint`, prove the per-`Head` lifting lemmas, then
+adequacy). This is heavier than the "cheap win" framing suggests; treat A2 like a
+gated focused effort with its own go/no-go (the algebra exists, but the wp +
+adequacy mechanization is the bulk). A1 + A3 (done) stand on their own without it.
+
 ## The No-LLM invariant (carried over) + the honesty it forces
 
 Every proof in this lane is **human-authored Lean checked by the Lean kernel,
