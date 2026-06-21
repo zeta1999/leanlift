@@ -10,8 +10,9 @@ Actionable checklist for [`PLAN-concurrency.md`](./PLAN-concurrency.md). Sandbox
 - [ ] 0.3 track Eileen; pull OFE/COFE/CMRA algebra (via `IrisMath`) when Phase A needs it; do NOT fork the camera hierarchy
 
 ## Phase A — concrete SC program logic (the cheap, high-confidence wins)
-- [ ] A1 define `λ-conc`: tiny imperative core + heap + CAS/FAA/load/store/fork, SC small-step semantics in Lean
-- [ ] A2 define `wp e {Φ}` over `λ-conc`; prove the adequacy theorem (closes the model-code gap for this lane)
+- [x] A1 define `λ-conc`: tiny imperative core + heap + CAS/FAA/load/store/fork, SC small-step semantics in Lean
+      — `leanlift-iris/LeanliftIris/PhaseA/Lang.lean`: Val/Expr (HeapLang-style: closures, pairs, ints/bools), substitution, `Head` reduction (pure + heap + atomic CAS/FAA + fork), evaluation contexts (`Frame`/`fill`), `prim_step`, thread-pool `step` + `steps` (RTC). Sanity: values don't head-step (progress), worked alloc/load/CAS-atomic/fork examples. Sorry-free (audit in `PhaseA/Axioms.lean`).
+- [ ] A2 define `wp e {Φ}` over `λ-conc`; prove the adequacy theorem (closes the model-code gap for this lane) — the heavy one: needs the Iris `wp`/state-interp machinery wired to `Lang`
 - [x] A3 functional proofs (SC): order book #9 invariant (`best = max occupied`, fall-back) + sweep-VWAP #10 (exact 128-bit notional, Q==0 / over-ask / drained-level, `best_ask ≤ VWAP ≤ touch`)
       — done as standalone pure-Lean proofs (no Iris/program-logic dependency, as the plan intends for the "essentially pure-function" warm-up). Files: `leanlift-iris/LeanliftIris/PhaseA/{Sweep,OrderBook}.lean`; sorry-free (audit: `PhaseA/Axioms.lean`, only `propext`/`Quot.sound`).
       - [x] #10 sweep: exact `filled = min Q total`, completion ⇔ `Q ≤ total`, over-ask, drained-level skip, lower+upper VWAP bracket (`best_ask·filled ≤ notional ≤ touch·filled`, exact `Nat` = no overflow)
