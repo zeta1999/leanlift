@@ -25,9 +25,12 @@ open Iris Iris.BI COFE HeapView One DFrac Agree LeibnizO
 variable {F} [UFraction F]
 
 /-- The heap functor: locations (`Nat`) to agreed-upon `λ-conc` values, with
-`DFrac` fractional ownership, represented as a finite association list. -/
+`DFrac` fractional ownership. The map type is the **plain-function** partial map
+`Nat → Option ·` (iris-lean's `instPartialMapFun`), which is exactly `Lang.Heap`
+— so the authoritative `state_interp` and the `pointsTo` fragments live in the
+same camera, with no finiteness bookkeeping. -/
 abbrev FHeap : OFunctorPre :=
-  constOF <| HeapView F Nat (Agree (LeibnizO Val)) Iris.Std.AssocList
+  constOF <| HeapView F Nat (Agree (LeibnizO Val)) (Nat → Option ·)
 
 -- The heap functor is present in the global functor list.
 variable {GF} [ElemG GF (FHeap (F := F))]
