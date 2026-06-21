@@ -46,5 +46,6 @@ namespace LeanliftIris.PhaseA
 #print axioms stateInterp_pointsTo_agree
 #print axioms wp_load
 #print axioms prim_step_store_inv
+#print axioms wp_store
 
 end LeanliftIris.PhaseA
