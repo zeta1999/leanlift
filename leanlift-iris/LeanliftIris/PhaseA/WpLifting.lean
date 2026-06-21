@@ -83,6 +83,31 @@ theorem prim_step_store_inv {l : Nat} {v : Val} {σ : Heap} {e' : Expr} {σ' : H
   cases hHead with
   | store hσ => exact ⟨⟨_, hσ⟩, hK', rfl, rfl⟩
 
+/-- **Context inversion for `if`** (scrutinee a boolean value). -/
+theorem ctx_nil_of_ite {K : List Frame} {a : Expr} {b : Bool} {e1 e2 : Expr}
+    (ha : toVal a = none) (h : fill K a = .ite (.val (.bool b)) e1 e2) :
+    K = [] ∧ a = .ite (.val (.bool b)) e1 e2 := by
+  cases K with
+  | nil => exact ⟨rfl, by simpa [fill] using h⟩
+  | cons fr K' =>
+    exfalso
+    have hnv : toVal (fill K' a) = none := fill_toVal_none ha K'
+    simp only [fill, List.foldr_cons] at h hnv
+    cases fr <;> simp_all [fill1, toVal]
+
+/-- **Step inversion for `if true`.** The sole step selects the then-branch. -/
+theorem prim_step_ite_true_inv {e1 e2 : Expr} {σ : Heap} {e' : Expr} {σ' : Heap}
+    {efs : List Expr} (h : prim_step (.ite (.val (.bool true)) e1 e2) σ e' σ' efs) :
+    e' = e1 ∧ σ' = σ ∧ efs = [] := by
+  obtain ⟨K, a, a', hK, hK', hHead⟩ := h
+  have ha := head_toVal_none hHead
+  obtain ⟨hKnil, haeq⟩ := ctx_nil_of_ite ha hK.symm
+  subst hKnil
+  subst haeq
+  simp only [fill] at hK'
+  cases hHead with
+  | iteT => exact ⟨hK', rfl, rfl⟩
+
 /-! ## Generic lifting -/
 
 variable {F} [UFraction F] {GF} [ElemG GF (FHeap (F := F))]
@@ -99,6 +124,31 @@ theorem wp_lift_step (γ : GName) [HasHeap γ GF F] (e : Expr) (Φ : Val → IPr
   simp only [wpF]
   iright
   iexact H
+
+/-- **Pure-step rule.** If every step of `e` is deterministic, heap-preserving,
+and fork-free (going to `etgt`), then `▷ wp etgt Φ ⊢ wp e Φ`. The determinism
+hypothesis is discharged per-operation by a `prim_step_*_inv` lemma. -/
+theorem wp_pure_det (γ : GName) [HasHeap γ GF F] (e etgt : Expr) (Φ : Val → IProp GF)
+    (hdet : ∀ σ e' σ' efs, prim_step e σ e' σ' efs → e' = etgt ∧ σ' = σ ∧ efs = []) :
+    ▷ wp (F := F) γ etgt Φ ⊢ wp (F := F) γ e Φ := by
+  iintro H
+  iapply wp_lift_step
+  iintro %σ Hsi
+  iintro %e' %σ' %efs %Hstep
+  obtain ⟨he, hσ, hefs⟩ := hdet σ e' σ' efs Hstep
+  subst he; subst hσ; subst hefs
+  iintro !>
+  iintro !>
+  isplitl [Hsi]
+  · iexact Hsi
+  · iexact H
+
+/-- **`if true` rule.** -/
+theorem wp_if_true (γ : GName) [HasHeap γ GF F] (e1 e2 : Expr) (Φ : Val → IProp GF) :
+    ▷ wp (F := F) γ e1 Φ ⊢ wp (F := F) γ (.ite (.val (.bool true)) e1 e2) Φ := by
+  apply wp_pure_det
+  intro σ e' σ' efs h
+  exact prim_step_ite_true_inv h
 
 /-- **Heap agreement.** Owning the authoritative heap and a points-to forces the
 heap to contain that value at that location — the bridge from `stateInterp` to a

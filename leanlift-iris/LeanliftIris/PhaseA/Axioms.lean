@@ -47,5 +47,7 @@ namespace LeanliftIris.PhaseA
 #print axioms wp_load
 #print axioms prim_step_store_inv
 #print axioms wp_store
+#print axioms wp_pure_det
+#print axioms wp_if_true
 
 end LeanliftIris.PhaseA
