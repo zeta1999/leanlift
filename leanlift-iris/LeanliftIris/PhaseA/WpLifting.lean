@@ -57,6 +57,32 @@ theorem prim_step_load_inv {l : Nat} {σ : Heap} {e' : Expr} {σ' : Heap} {efs :
   cases hHead with
   | load hσ => exact ⟨_, hσ, hK', rfl, rfl⟩
 
+/-- **Context inversion for `store`.** -/
+theorem ctx_nil_of_store {K : List Frame} {a : Expr} {l : Nat} {v : Val} (ha : toVal a = none)
+    (h : fill K a = .store (.val (.loc l)) (.val v)) :
+    K = [] ∧ a = .store (.val (.loc l)) (.val v) := by
+  cases K with
+  | nil => exact ⟨rfl, by simpa [fill] using h⟩
+  | cons fr K' =>
+    exfalso
+    have hnv : toVal (fill K' a) = none := fill_toVal_none ha K'
+    simp only [fill, List.foldr_cons] at h hnv
+    cases fr <;> simp_all [fill1, toVal]
+
+/-- **Step inversion for `store`.** The sole step writes `v` at the (allocated)
+location `l`, returns `unit`, forks nothing. -/
+theorem prim_step_store_inv {l : Nat} {v : Val} {σ : Heap} {e' : Expr} {σ' : Heap}
+    {efs : List Expr} (h : prim_step (.store (.val (.loc l)) (.val v)) σ e' σ' efs) :
+    (∃ w, σ l = some w) ∧ e' = .val .unit ∧ σ' = σ.set l v ∧ efs = [] := by
+  obtain ⟨K, a, a', hK, hK', hHead⟩ := h
+  have ha := head_toVal_none hHead
+  obtain ⟨hKnil, haeq⟩ := ctx_nil_of_store ha hK.symm
+  subst hKnil
+  subst haeq
+  simp only [fill] at hK'
+  cases hHead with
+  | store hσ => exact ⟨⟨_, hσ⟩, hK', rfl, rfl⟩
+
 /-! ## Generic lifting -/
 
 variable {F} [UFraction F] {GF} [ElemG GF (FHeap (F := F))]
