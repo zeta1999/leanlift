@@ -51,7 +51,7 @@ folding the whole list yields the same result as breaking early. -/
 
 /-- Step over one level given the budget `Q` and current `(filled, notional,
 touch, levels)`. -/
-def step (Q : Nat) (l : Level) :
+def fillStep (Q : Nat) (l : Level) :
     (Nat × Nat × Option Nat × Nat) → (Nat × Nat × Option Nat × Nat) :=
   fun (f, n, t, lv) =>
     let take := min l.qty (Q - f)
@@ -62,7 +62,7 @@ def step (Q : Nat) (l : Level) :
 def linearAux (Q : Nat) :
     List Level → (Nat × Nat × Option Nat × Nat) → (Nat × Nat × Option Nat × Nat)
   | [],      acc => acc
-  | l :: ls, acc => linearAux Q ls (step Q l acc)
+  | l :: ls, acc => linearAux Q ls (fillStep Q l acc)
 
 /-- Engine 1: single-shot linear walk. -/
 def sweepLinear (asks : List Level) (Q : Nat) : Sweep :=
@@ -72,12 +72,12 @@ def sweepLinear (asks : List Level) (Q : Nat) : Sweep :=
 
 /-! ## Basic accumulator invariants -/
 
-/-- The new `filled` after one step is `f + min qty (Q - f)` (uniform across the
+/-- The new `filled` after one fillStep is `f + min qty (Q - f)` (uniform across the
 empty/non-empty branches: when `take = 0` the level is skipped and `f + 0 = f`). -/
-theorem step_fst (Q : Nat) (l : Level) (acc : Nat × Nat × Option Nat × Nat) :
-    (step Q l acc).1 = acc.1 + min l.qty (Q - acc.1) := by
+theorem fillStep_fst (Q : Nat) (l : Level) (acc : Nat × Nat × Option Nat × Nat) :
+    (fillStep Q l acc).1 = acc.1 + min l.qty (Q - acc.1) := by
   obtain ⟨f, n, t, lv⟩ := acc
-  simp only [step]
+  simp only [fillStep]
   by_cases hz : min l.qty (Q - f) = 0
   · simp [hz]
   · simp [hz]
@@ -94,8 +94,8 @@ theorem linearAux_filled (Q : Nat) (asks : List Level) :
   | cons l ls ih =>
     intro acc h
     simp only [linearAux, total]
-    rw [ih (step Q l acc) (by rw [step_fst]; have := Nat.min_le_right l.qty (Q - acc.1); omega)]
-    rw [step_fst]
+    rw [ih (fillStep Q l acc) (by rw [fillStep_fst]; have := Nat.min_le_right l.qty (Q - acc.1); omega)]
+    rw [fillStep_fst]
     have := Nat.min_le_right l.qty (Q - acc.1)
     omega
 
@@ -139,7 +139,7 @@ theorem linearAux_drained (Q : Nat) (l : Level) (ls : List Level)
     (hl : l.qty = 0) (acc : Nat × Nat × Option Nat × Nat) :
     linearAux Q (l :: ls) acc = linearAux Q ls acc := by
   obtain ⟨f, n, t, lv⟩ := acc
-  simp only [linearAux, step, hl, Nat.zero_min, if_true]
+  simp only [linearAux, fillStep, hl, Nat.zero_min, if_true]
 
 /-! ## VWAP bracket: `best_ask * filled ≤ notional ≤ touch * filled`
 
@@ -173,9 +173,9 @@ theorem linearAux_lower (Q lo : Nat) (asks : List Level) :
     obtain ⟨f, n, t, lv⟩ := acc
     simp only [linearAux]
     by_cases hz : min l.qty (Q - f) = 0
-    · simp only [step, if_pos hz]
+    · simp only [fillStep, if_pos hz]
       exact ih (f, n, t, lv) (fun m hm => hlo m (by simp [hm])) Hlo
-    · simp only [step, if_neg hz]
+    · simp only [fillStep, if_neg hz]
       apply ih
       · exact fun m hm => hlo m (by simp [hm])
       · -- lo * (f + take) ≤ n + price * take
@@ -203,9 +203,9 @@ theorem linearAux_upper (Q : Nat) (asks : List Level) (hasc : Ascending asks) :
     obtain ⟨hhead, htail⟩ := hasc
     simp only [linearAux]
     by_cases hz : min l.qty (Q - f) = 0
-    · simp only [step, if_pos hz]
+    · simp only [fillStep, if_pos hz]
       exact ih htail (f, n, t, lv) Hhi (fun tp ht m hm => Ht tp ht m (by simp [hm]))
-    · simp only [step, if_neg hz]
+    · simp only [fillStep, if_neg hz]
       apply ih htail
       · -- n + price * take ≤ price * (f + take)
         have htp : t.getD 0 ≤ l.price := by
@@ -254,7 +254,7 @@ theorem sweep_Q_zero (asks : List Level) :
     | cons l ls ih =>
       intro acc
       obtain ⟨f, n, t, lv⟩ := acc
-      simp only [linearAux, step]
+      simp only [linearAux, fillStep]
       rw [ih]
       simp
   simp [sweepLinear, key]

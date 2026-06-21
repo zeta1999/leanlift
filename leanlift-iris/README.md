@@ -33,8 +33,18 @@ Phase A, when the camera/algebra layer is actually needed.
 
   Deferred follow-ons (not required by A3): the hierarchical-bitmap `clz`/`ctz`
   refinement of `maxOcc`/`minOcc`, and the optional `sweep_linear == prefix.query`
-  two-engine equivalence. The harder concurrent proof (A4 Treiber) waits on the
-  A1/A2 program logic.
+  two-engine equivalence.
+
+- **A1 — the `λ-conc` object language.** ✅ `LeanliftIris/PhaseA/Lang.lean`: a
+  minimal HeapLang-style concurrent core (closures, pairs, int/bool ops, a heap
+  with `alloc`/`load`/`store`, atomic `CAS`/`FAA`, `fork`) with a
+  **sequentially-consistent** small-step semantics — `Head` reduction under
+  evaluation contexts (`prim_step`), lifted to a thread-pool interleaving `step`
+  / `steps`. SC = every step threads the single shared heap (no per-location
+  order); Phase B swaps this layer for weak memory. Sanity lemmas: values are not
+  redexes (progress), plus worked `alloc`/`load`/atomic-`CAS`/`fork` reductions.
+  Next: **A2** lifts an Iris `wp` over this language and proves adequacy; **A4**
+  (Treiber, SC) builds on both.
 
 ## Build
 

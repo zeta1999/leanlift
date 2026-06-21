@@ -5,6 +5,7 @@ is that verification proofs are sorry-free and kernel-checked.
 -/
 import LeanliftIris.PhaseA.Sweep
 import LeanliftIris.PhaseA.OrderBook
+import LeanliftIris.PhaseA.Lang
 
 namespace LeanliftIris.PhaseA
 
@@ -23,5 +24,11 @@ namespace LeanliftIris.PhaseA
 #print axioms minOcc_some_iff
 #print axioms minOcc_fallback
 #print axioms microprice_bracket
+
+-- λ-conc language (A1)
+#print axioms head_not_val
+#print axioms ex_load_after_alloc
+#print axioms ex_cas_success
+#print axioms ex_fork
 
 end LeanliftIris.PhaseA
