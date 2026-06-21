@@ -108,6 +108,36 @@ theorem prim_step_ite_true_inv {e1 e2 : Expr} {σ : Heap} {e' : Expr} {σ' : Hea
   cases hHead with
   | iteT => exact ⟨hK', rfl, rfl⟩
 
+/-- **Context inversion for `cas`** (all three arguments values). -/
+theorem ctx_nil_of_cas {K : List Frame} {a : Expr} {l : Nat} {v1 v2 : Val}
+    (ha : toVal a = none) (h : fill K a = .cas (.val (.loc l)) (.val v1) (.val v2)) :
+    K = [] ∧ a = .cas (.val (.loc l)) (.val v1) (.val v2) := by
+  cases K with
+  | nil => exact ⟨rfl, by simpa [fill] using h⟩
+  | cons fr K' =>
+    exfalso
+    have hnv : toVal (fill K' a) = none := fill_toVal_none ha K'
+    simp only [fill, List.foldr_cons] at h hnv
+    cases fr <;> simp_all [fill1, toVal]
+
+/-- **Step inversion for `cas`.** A `cas` either succeeds (the cell held the
+expected `v1`, writes `v2`, returns `true`) or fails (held something else,
+unchanged, returns `false`). -/
+theorem prim_step_cas_inv {l : Nat} {v1 v2 : Val} {σ : Heap} {e' : Expr} {σ' : Heap}
+    {efs : List Expr} (h : prim_step (.cas (.val (.loc l)) (.val v1) (.val v2)) σ e' σ' efs) :
+    ∃ v0, σ l = some v0 ∧
+      ((v0 = v1 ∧ e' = .val (.bool true) ∧ σ' = σ.set l v2 ∧ efs = []) ∨
+       (v0 ≠ v1 ∧ e' = .val (.bool false) ∧ σ' = σ ∧ efs = [])) := by
+  obtain ⟨K, a, a', hK, hK', hHead⟩ := h
+  have ha := head_toVal_none hHead
+  obtain ⟨hKnil, haeq⟩ := ctx_nil_of_cas ha hK.symm
+  subst hKnil
+  subst haeq
+  simp only [fill] at hK'
+  cases hHead with
+  | casS hσ he => exact ⟨_, hσ, Or.inl ⟨he, hK', rfl, rfl⟩⟩
+  | casF hσ hne => exact ⟨_, hσ, Or.inr ⟨hne, hK', rfl, rfl⟩⟩
+
 /-! ## Generic lifting -/
 
 variable {F} [UFraction F] {GF} [ElemG GF (FHeap (F := F))]
@@ -262,5 +292,89 @@ theorem wp_store (γ : GName) [HasHeap γ GF F] (l : Nat) (v_old v_new : Val)
   · iapply wp_value
     iapply HΦ
     iexact HF
+
+/-- **CAS failure rule.** If `l` holds `v_cur ≠ v1`, the compare-and-swap fails:
+the heap is unchanged and `false` is returned (load-style, no ghost update). -/
+theorem wp_cas_fail (γ : GName) [HasHeap γ GF F] (l : Nat) (v_cur v1 v2 : Val)
+    (Φ : Val → IProp GF) (hne : v_cur ≠ v1) :
+    (l ↦[γ] v_cur) ∗ ((l ↦[γ] v_cur) -∗ |==> Φ (.bool false)) ⊢
+      wp (F := F) γ (.cas (.val (.loc l)) (.val v1) (.val v2)) Φ := by
+  iintro ⟨Hpt, HΦ⟩
+  iapply wp_lift_step
+  iintro %σ Hsi
+  ihave %Hag := stateInterp_pointsTo_agree (γ := γ) σ l v_cur $$ [Hsi, Hpt]
+  · isplitl [Hsi] <;> iassumption
+  iintro %e' %σ' %efs %Hstep
+  obtain ⟨v0, hσl, hcase⟩ := prim_step_cas_inv Hstep
+  have hv0 : v0 = v_cur := by rw [hσl] at Hag; exact Option.some.inj Hag
+  rcases hcase with ⟨he, _, _, _⟩ | ⟨_, he', hσ', hefs⟩
+  · subst hv0; exact absurd he hne
+  · subst he'; subst hσ'; subst hefs
+    iintro !>
+    iintro !>
+    isplitl [Hsi]
+    · iexact Hsi
+    · iapply wp_value
+      iapply HΦ
+      iexact Hpt
+
+/-- **CAS success rule.** If `l` holds the expected `v1`, the compare-and-swap
+succeeds: writes `v2`, returns `true` (agreement rules out the failure branch;
+store-style ghost update). -/
+theorem wp_cas_suc (γ : GName) [HasHeap γ GF F] (l : Nat) (v1 v2 : Val)
+    (Φ : Val → IProp GF) :
+    (l ↦[γ] v1) ∗ ((l ↦[γ] v2) -∗ |==> Φ (.bool true)) ⊢
+      wp (F := F) γ (.cas (.val (.loc l)) (.val v1) (.val v2)) Φ := by
+  iintro ⟨Hpt, HΦ⟩
+  iapply wp_lift_step
+  iintro %σ Hsi
+  ihave %Hag := stateInterp_pointsTo_agree (γ := γ) σ l v1 $$ [Hsi, Hpt]
+  · isplitl [Hsi] <;> iassumption
+  iintro %e' %σ' %efs %Hstep
+  obtain ⟨v0, hσl, hcase⟩ := prim_step_cas_inv Hstep
+  have hv0 : v0 = v1 := by rw [hσl] at Hag; exact Option.some.inj Hag
+  rcases hcase with ⟨_, he', hσ', hefs⟩ | ⟨hne, _, _, _⟩
+  · subst he'; subst hσ'; subst hefs
+    have hval : ✓ (toAgree (⟨v2⟩ : LeibnizO Val)) :=
+      CMRA.valid_op_left (toAgree_op_valid_iff_eq.mpr rfl)
+    have Hrepl := update_replace (F := F) (H := (Nat → Option ·)) (k := l)
+      (m1 := toAgreeHeap σ) (v1 := toAgree (⟨v1⟩ : LeibnizO Val))
+      (v2 := toAgree (⟨v2⟩ : LeibnizO Val)) hval
+    rw [insert_toAgreeHeap] at Hrepl
+    have Hcomb_lem :
+        (stateInterp (F := F) γ σ ∗ (l ↦[γ] v1))
+        ⊢ iOwn (GF := GF) (F := FHeap (F := F)) γ
+            (Auth (own one) (toAgreeHeap σ)
+              • Frag l (own one) (toAgree (⟨v1⟩ : LeibnizO Val))) :=
+      iOwn_op.mpr
+    have Hupd_lem :
+        (iOwn (GF := GF) (F := FHeap (F := F)) γ
+          (Auth (own one) (toAgreeHeap σ)
+            • Frag l (own one) (toAgree (⟨v1⟩ : LeibnizO Val))))
+        ⊢ |==> iOwn (GF := GF) (F := FHeap (F := F)) γ
+          (Auth (own one) (toAgreeHeap (σ.set l v2))
+            • Frag l (own one) (toAgree (⟨v2⟩ : LeibnizO Val))) :=
+      iOwn_update Hrepl
+    have Hsplit_lem :
+        (iOwn (GF := GF) (F := FHeap (F := F)) γ
+          (Auth (own one) (toAgreeHeap (σ.set l v2))
+            • Frag l (own one) (toAgree (⟨v2⟩ : LeibnizO Val))))
+        ⊢ (stateInterp (F := F) γ (σ.set l v2) ∗ (l ↦[γ] v2)) :=
+      iOwn_op.mp
+    iintro !>
+    ihave Hcomb := Hcomb_lem $$ [Hsi, Hpt]
+    · isplitl [Hsi] <;> iassumption
+    ihave Hupd := Hupd_lem $$ [Hcomb]
+    · iexact Hcomb
+    imod Hupd with Hnew
+    ihave ⟨HA, HF⟩ := Hsplit_lem $$ [Hnew]
+    · iexact Hnew
+    iintro !>
+    isplitl [HA]
+    · iexact HA
+    · iapply wp_value
+      iapply HΦ
+      iexact HF
+  · exact absurd hv0 hne
 
 end LeanliftIris.PhaseA
