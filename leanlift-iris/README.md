@@ -17,11 +17,36 @@ Phase A, when the camera/algebra layer is actually needed.
   proof mode (`iintro`/`isplitl`/`iexact`/`iapply`). All three **depend on no
   axioms** (verified via `#print axioms`).
 
+- **A3 — first functional proofs (SC), the pure-function warm-up.** ✅ Done as
+  standalone core-Lean proofs (no Iris/program-logic dependency yet), turning the
+  C++ corpus' fuzz-tested properties into universally-quantified theorems:
+  - `LeanliftIris/PhaseA/Sweep.lean` (#10 effective-best): exact `filled =
+    min Q total`, completion ⇔ `Q ≤ total`, over-ask, drained-level skipping, and
+    the VWAP bracket `best_ask·filled ≤ notional ≤ touch·filled` (notional in
+    unbounded `Nat`, so *exactly* the C++ 128-bit accumulator with no overflow).
+  - `LeanliftIris/PhaseA/OrderBook.lean` (#9 l2-order-book): `maxOcc`/`minOcc`
+    characterised as the greatest/least occupied tick (the spec the bitmap's
+    `clz`/`ctz` must meet), bid- and ask-side **fall-back** on cancel, and the
+    microprice bracket `[best_bid, best_ask]`.
+  - All sorry-free; `LeanliftIris/PhaseA/Axioms.lean` audits them (`propext`,
+    `Quot.sound` only — no `sorryAx`, no `Classical.choice`).
+
+  Deferred follow-ons (not required by A3): the hierarchical-bitmap `clz`/`ctz`
+  refinement of `maxOcc`/`minOcc`, and the optional `sweep_linear == prefix.query`
+  two-engine equivalence. The harder concurrent proof (A4 Treiber) waits on the
+  A1/A2 program logic.
+
 ## Build
 
 ```sh
 lake update    # fetches iris (v4.28.0) + Qq (v4.28.0)
 lake build
+```
+
+Audit the Phase-A proofs are axiom-clean:
+
+```sh
+lake env lean LeanliftIris/PhaseA/Axioms.lean
 ```
 
 ## Notes

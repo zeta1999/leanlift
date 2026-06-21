@@ -12,8 +12,12 @@ Actionable checklist for [`PLAN-concurrency.md`](./PLAN-concurrency.md). Sandbox
 ## Phase A — concrete SC program logic (the cheap, high-confidence wins)
 - [ ] A1 define `λ-conc`: tiny imperative core + heap + CAS/FAA/load/store/fork, SC small-step semantics in Lean
 - [ ] A2 define `wp e {Φ}` over `λ-conc`; prove the adequacy theorem (closes the model-code gap for this lane)
-- [ ] A3 functional proofs (SC): order book #9 invariant (`best = max occupied`, fall-back) + sweep-VWAP #10 (exact 128-bit notional, Q==0 / over-ask / drained-level, `best_ask ≤ VWAP ≤ touch`)
-- [ ] A4 first concurrent proof (SC): Treiber stack #7 linearizable via a logically-atomic triple (reclamation deferred)
+- [x] A3 functional proofs (SC): order book #9 invariant (`best = max occupied`, fall-back) + sweep-VWAP #10 (exact 128-bit notional, Q==0 / over-ask / drained-level, `best_ask ≤ VWAP ≤ touch`)
+      — done as standalone pure-Lean proofs (no Iris/program-logic dependency, as the plan intends for the "essentially pure-function" warm-up). Files: `leanlift-iris/LeanliftIris/PhaseA/{Sweep,OrderBook}.lean`; sorry-free (audit: `PhaseA/Axioms.lean`, only `propext`/`Quot.sound`).
+      - [x] #10 sweep: exact `filled = min Q total`, completion ⇔ `Q ≤ total`, over-ask, drained-level skip, lower+upper VWAP bracket (`best_ask·filled ≤ notional ≤ touch·filled`, exact `Nat` = no overflow)
+      - [x] #9 order book: `maxOcc`/`minOcc` = greatest/least occupied (the `clz`/`ctz` spec), bid+ask fall-back on cancel, microprice bracket `[best_bid, best_ask]`
+      - [ ] A3-refine (follow-on, not required by A3): hierarchical-bitmap `clz`/`ctz` refinement of `maxOcc`/`minOcc` (bit-vector proof); optional two-engine equivalence `sweep_linear == prefix.query`
+- [ ] A4 first concurrent proof (SC): Treiber stack #7 linearizable via a logically-atomic triple (reclamation deferred) — needs A1/A2 first
 
 ## Phase B — weak-memory layer (long pole; GATE after Phase A go/no-go)
 - [ ] B1 C11 release-acquire+relaxed op-sem for `λ-conc` (prefer operational view-based, à la iRC11)
