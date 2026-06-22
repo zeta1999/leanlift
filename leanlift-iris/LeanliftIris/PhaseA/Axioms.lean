@@ -78,6 +78,7 @@ namespace LeanliftIris.PhaseA
 #print axioms LeanliftIris.PhaseB.mp_relaxed_admits_stale
 #print axioms LeanliftIris.PhaseB.mp_release_necessary
 #print axioms LeanliftIris.PhaseB.mp_machine_run
+#print axioms LeanliftIris.PhaseB.sb_admits_reorder
 #print axioms LeanliftIris.PhaseB.ra_transfer
 #print axioms LeanliftIris.PhaseB.mp_via_logic
 #print axioms LeanliftIris.PhaseB.reads_determined

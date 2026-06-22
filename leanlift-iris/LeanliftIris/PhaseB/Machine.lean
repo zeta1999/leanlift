@@ -89,4 +89,43 @@ theorem mp_machine_run (d f : Loc) (hdf : d ≠ f) :
             View.singleton, maxTs, initMem, hdf, Ne.symm hdf]⟩) ?_
   exact Steps.refl _
 
+/-! ## Store buffering: rel/acq admits store→load reordering
+
+The litmus `x:=1(rel); r1:=y(acq) ∥ y:=1(rel); r2:=x(acq)` with the weak outcome
+`r1 = r2 = 0`: each thread, not having synchronized with the other, may read the
+*stale* initial value of the other's location. Release/acquire does **not**
+forbid this — it is the store→load reordering the corpus' Chase–Lev deque (#8)
+needs a `seq_cst` fence to rule out. (Capturing that prevention requires
+extending the model with a global seq-cst order — the remaining frontier.) -/
+
+private def sbMX (x : Loc) : Mem := (store initMem View.bot x 1 .rel).1
+private def sbVX (x : Loc) : View := (store initMem View.bot x 1 .rel).2
+private def sbMXY (x y : Loc) : Mem := (store (sbMX x) View.bot y 1 .rel).1
+private def sbVY (x y : Loc) : View := (store (sbMX x) View.bot y 1 .rel).2
+
+/-- **Store buffering is admitted.** There is an execution of the SB litmus in
+which both threads read `0` (the stale initial value) — store→load reordering,
+which release/acquire permits. -/
+theorem sb_admits_reorder (x y : Loc) (hxy : x ≠ y) :
+    ∃ C : Config,
+      Steps ([([.wr x 1 .rel, .rd y .acq], View.bot, []),
+              ([.wr y 1 .rel, .rd x .acq], View.bot, [])], initMem) C ∧
+      (C.1[0]?).map (fun th => th.2.2) = some [0] ∧
+      (C.1[1]?).map (fun th => th.2.2) = some [0] := by
+  refine ⟨([([], loadView (sbVX x) y ⟨0, 0, View.bot⟩ .acq, [0]),
+            ([], loadView (sbVY x y) x ⟨0, 0, View.bot⟩ .acq, [0])], sbMXY x y), ?_, rfl, rfl⟩
+  -- T1: x := 1 (release)
+  refine Steps.step (Step.wr [] [_] [.rd y .acq] View.bot [] initMem x 1 .rel) ?_
+  -- T1: r1 := y (acquire) — reads the stale initial y = 0
+  refine Steps.step (Step.rd [] [_] [] (sbVX x) [] (sbMX x) y .acq ⟨0, 0, View.bot⟩
+    ⟨by simp [sbMX, store, push, initMem, hxy, Ne.symm hxy],
+     by simp [sbVX, store, View.join, View.singleton, View.bot, maxTs, initMem, hxy, Ne.symm hxy]⟩) ?_
+  -- T2: y := 1 (release)
+  refine Steps.step (Step.wr [_] [] [.rd x .acq] View.bot [] (sbMX x) y 1 .rel) ?_
+  -- T2: r2 := x (acquire) — reads the stale initial x = 0 (it never synchronized)
+  refine Steps.step (Step.rd [_] [] [] (sbVY x y) [] (sbMXY x y) x .acq ⟨0, 0, View.bot⟩
+    ⟨by simp [sbMXY, sbMX, store, push, maxTs, initMem, hxy, Ne.symm hxy],
+     by simp [sbVY, sbMX, store, View.join, View.singleton, View.bot, maxTs, initMem, hxy, Ne.symm hxy]⟩) ?_
+  exact Steps.refl _
+
 end LeanliftIris.PhaseB
