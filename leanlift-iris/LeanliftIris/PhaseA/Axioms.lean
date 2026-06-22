@@ -14,6 +14,7 @@ import LeanliftIris.PhaseA.Examples
 import LeanliftIris.PhaseA.Treiber
 import LeanliftIris.PhaseB.WeakMem
 import LeanliftIris.PhaseB.Machine
+import LeanliftIris.PhaseB.Logic
 
 namespace LeanliftIris.PhaseA
 
@@ -77,6 +78,8 @@ namespace LeanliftIris.PhaseA
 #print axioms LeanliftIris.PhaseB.mp_relaxed_admits_stale
 #print axioms LeanliftIris.PhaseB.mp_release_necessary
 #print axioms LeanliftIris.PhaseB.mp_machine_run
+#print axioms LeanliftIris.PhaseB.ra_transfer
+#print axioms LeanliftIris.PhaseB.mp_via_logic
 #print axioms wp_mono
 #print axioms wp_let
 #print axioms wp_pair
