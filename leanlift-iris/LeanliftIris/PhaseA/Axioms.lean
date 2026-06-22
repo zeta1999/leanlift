@@ -51,5 +51,6 @@ namespace LeanliftIris.PhaseA
 #print axioms wp_if_true
 #print axioms wp_cas_suc
 #print axioms wp_cas_fail
+#print axioms wp_alloc
 
 end LeanliftIris.PhaseA
