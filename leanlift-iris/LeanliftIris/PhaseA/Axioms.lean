@@ -80,6 +80,8 @@ namespace LeanliftIris.PhaseA
 #print axioms LeanliftIris.PhaseB.mp_machine_run
 #print axioms LeanliftIris.PhaseB.ra_transfer
 #print axioms LeanliftIris.PhaseB.mp_via_logic
+#print axioms LeanliftIris.PhaseB.reads_determined
+#print axioms LeanliftIris.PhaseB.spsc_consumer_reads_payload
 #print axioms wp_mono
 #print axioms wp_let
 #print axioms wp_pair
