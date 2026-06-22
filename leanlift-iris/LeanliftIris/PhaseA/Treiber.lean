@@ -164,4 +164,101 @@ theorem push_body_spec (γ : GName) [HasHeap γ GF F] (s : Nat) (v hd : Val) (xs
           · iexact Hnode
           · iexact Hrep
 
+/-! ## Code + property: `pop` — *pop removes the head and returns it*
+
+The dual of `push`: read the head `head = !s` (a node `loc l`), load the node
+`node = !head` to get `(v, nxt)`, project out the value `v = fst node` and the
+next pointer `nxt = snd node`, then `CAS(s, head, nxt)` to unlink it (succeeds in
+the single-owner proof), returning `v`. On a stack holding `x :: xs` this returns
+`x` and leaves a stack holding `xs`. The retry branch is inlined as `v` (dead).
+This is the second lock-free operation, exercising the projection rules
+`wp_fst`/`wp_snd` and validating the `wp` layer on a read-modify-return op. -/
+
+/-- `pop`'s body with `s := loc s` plugged in, in A-normal form:
+`let head = !s in let node = !head in let v = fst node in let nxt = snd node in
+ let b = CAS(s, head, nxt) in if b then v else v`. -/
+def popBody (s : Nat) : Expr :=
+  .app (.val (.clos "_" "head"
+    (.app (.val (.clos "_" "node"
+      (.app (.val (.clos "_" "v"
+        (.app (.val (.clos "_" "nxt"
+          (.app (.val (.clos "_" "b"
+            (.ite (.var "b") (.var "v") (.var "v"))))
+            (.cas (.val (.loc s)) (.var "head") (.var "nxt")))))
+          (.sndE (.var "node")))))
+        (.fstE (.var "node")))))
+      (.load (.var "head")))))
+    (.load (.val (.loc s)))
+
+/-- **`pop` removes the head and returns it.** From a stack whose head node is
+`l ↦ (x, nxt)` and whose tail from `nxt` represents `xs`, running `pop` returns
+`x` and re-establishes `isStack γ s xs`. Composes `wp_load` (twice), the new
+projection rules `wp_fst`/`wp_snd`, `wp_cas_suc`, `wp_if_true`, `wp_value`.
+(`hclx`/`hclnxt`: the popped value and the next pointer are substitution-closed —
+the standard side-condition, automatic for the first-order heap fragment.) -/
+theorem pop_body_spec (γ : GName) [HasHeap γ GF F] (s : Nat) (x nxt : Val) (l : Nat)
+    (xs : List Val)
+    (hclx : ∀ (y : String) (w : Val), substV y w x = x)
+    (hclnxt : ∀ (y : String) (w : Val), substV y w nxt = nxt) :
+    (s ↦[γ] (.loc l)) ∗ (l ↦[γ] (.pair x nxt)) ∗ listRep γ nxt xs ⊢
+      wp (F := F) γ (popBody s) (fun r => iprop(⌜r = x⌝ ∗ isStack γ s xs)) := by
+  simp only [popBody]
+  iintro ⟨Hs, Hnode, Hrep⟩
+  -- let head = !s   (head ↦ loc l)
+  iapply wp_let
+  iapply (wp_load γ s (.loc l))
+  isplitl [Hs]
+  · iexact Hs
+  · iintro Hs2
+    iintro !>
+    iintro !>
+    simp [substE, substV, hclx, hclnxt]
+    -- let node = !head   (node ↦ (x, nxt))
+    iapply wp_let
+    iapply (wp_load γ l (.pair x nxt))
+    isplitl [Hnode]
+    · iexact Hnode
+    · iintro Hnode2
+      iintro !>
+      iintro !>
+      simp [substE, substV, hclx, hclnxt]
+      -- let v = fst node   (= x)
+      iapply wp_let
+      iapply (wp_fst γ x nxt)
+      iintro !>
+      iapply wp_value
+      iintro !>
+      iintro !>
+      simp [substE, substV, hclx, hclnxt]
+      -- let nxt = snd node   (= nxt)
+      iapply wp_let
+      iapply (wp_snd γ x nxt)
+      iintro !>
+      iapply wp_value
+      iintro !>
+      iintro !>
+      simp [substE, substV, hclx, hclnxt]
+      -- let b = CAS(s, loc l, nxt)
+      iapply wp_let
+      iapply (wp_cas_suc γ s (.loc l) nxt)
+      isplitl [Hs2]
+      · iexact Hs2
+      · iintro Hs3
+        iintro !>
+        iintro !>
+        simp [substE, substV, hclx, hclnxt]
+        -- if b (= true) then v else v
+        iapply wp_if_true
+        iintro !>
+        iapply wp_value
+        iintro !>
+        -- postcondition: ⌜x = x⌝ ∗ isStack γ s xs
+        isplitl []
+        · ipure_intro; rfl
+        · simp only [isStack]
+          iexists nxt
+          isplitl [Hs3]
+          · iexact Hs3
+          · iexact Hrep
+
 end LeanliftIris.PhaseA

@@ -267,6 +267,52 @@ theorem prim_step_pair_inv {x y : Val} {σ : Heap} {e' : Expr} {σ' : Heap} {efs
   cases hHead with
   | pair => exact ⟨hK', rfl, rfl⟩
 
+theorem ctx_nil_of_fst {K : List Frame} {a : Expr} {x y : Val} (ha : toVal a = none)
+    (h : fill K a = .fstE (.val (.pair x y))) :
+    K = [] ∧ a = .fstE (.val (.pair x y)) := by
+  cases K with
+  | nil => exact ⟨rfl, by simpa [fill] using h⟩
+  | cons fr K' =>
+    exfalso
+    have hnv : toVal (fill K' a) = none := fill_toVal_none ha K'
+    simp only [fill, List.foldr_cons] at h hnv
+    cases fr <;> simp_all [fill1, toVal]
+
+theorem prim_step_fst_inv {x y : Val} {σ : Heap} {e' : Expr} {σ' : Heap} {efs : List Expr}
+    (h : prim_step (.fstE (.val (.pair x y))) σ e' σ' efs) :
+    e' = .val x ∧ σ' = σ ∧ efs = [] := by
+  obtain ⟨K, a, a', hK, hK', hHead⟩ := h
+  have ha := head_toVal_none hHead
+  obtain ⟨hKnil, haeq⟩ := ctx_nil_of_fst ha hK.symm
+  subst hKnil
+  subst haeq
+  simp only [fill] at hK'
+  cases hHead with
+  | fst => exact ⟨hK', rfl, rfl⟩
+
+theorem ctx_nil_of_snd {K : List Frame} {a : Expr} {x y : Val} (ha : toVal a = none)
+    (h : fill K a = .sndE (.val (.pair x y))) :
+    K = [] ∧ a = .sndE (.val (.pair x y)) := by
+  cases K with
+  | nil => exact ⟨rfl, by simpa [fill] using h⟩
+  | cons fr K' =>
+    exfalso
+    have hnv : toVal (fill K' a) = none := fill_toVal_none ha K'
+    simp only [fill, List.foldr_cons] at h hnv
+    cases fr <;> simp_all [fill1, toVal]
+
+theorem prim_step_snd_inv {x y : Val} {σ : Heap} {e' : Expr} {σ' : Heap} {efs : List Expr}
+    (h : prim_step (.sndE (.val (.pair x y))) σ e' σ' efs) :
+    e' = .val y ∧ σ' = σ ∧ efs = [] := by
+  obtain ⟨K, a, a', hK, hK', hHead⟩ := h
+  have ha := head_toVal_none hHead
+  obtain ⟨hKnil, haeq⟩ := ctx_nil_of_snd ha hK.symm
+  subst hKnil
+  subst haeq
+  simp only [fill] at hK'
+  cases hHead with
+  | snd => exact ⟨hK', rfl, rfl⟩
+
 /-! ## Generic lifting -/
 
 variable {F} [UFraction F] {GF} [ElemG GF (FHeap (F := F))]
@@ -318,6 +364,20 @@ theorem wp_pair (γ : GName) [HasHeap γ GF F] (x y : Val) (Φ : Val → IProp G
   apply wp_pure_det (hnv := rfl)
   intro σ e' σ' efs h
   exact prim_step_pair_inv h
+
+/-- **First-projection rule.** `fst (x, y)` steps to `x`. -/
+theorem wp_fst (γ : GName) [HasHeap γ GF F] (x y : Val) (Φ : Val → IProp GF) :
+    ▷ wp (F := F) γ (.val x) Φ ⊢ wp (F := F) γ (.fstE (.val (.pair x y))) Φ := by
+  apply wp_pure_det (hnv := rfl)
+  intro σ e' σ' efs h
+  exact prim_step_fst_inv h
+
+/-- **Second-projection rule.** `snd (x, y)` steps to `y`. -/
+theorem wp_snd (γ : GName) [HasHeap γ GF F] (x y : Val) (Φ : Val → IProp GF) :
+    ▷ wp (F := F) γ (.val y) Φ ⊢ wp (F := F) γ (.sndE (.val (.pair x y))) Φ := by
+  apply wp_pure_det (hnv := rfl)
+  intro σ e' σ' efs h
+  exact prim_step_snd_inv h
 
 /-- **β rule.** Applying a closure substitutes and steps to the body. -/
 theorem wp_beta (γ : GName) [HasHeap γ GF F] (f x : String) (body : Expr) (w : Val)

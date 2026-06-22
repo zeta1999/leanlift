@@ -236,9 +236,16 @@ go/no-go review. If B stalls, Phase A alone is already a shippable capability.
   `lat_realized` — for *any* `LAT P Q` and any program realizing its commit, the real
   `wp` establishes the abstract postcondition `Q` at the representation level
   (`{repr s} e {∃ s', ⌜Q s'⌝ ∗ repr s'}`). `push` is re-derived through it
-  (`push_realizes` + `push_establishes_post`, end-to-end). *Still to do:* the full
-  mask/atomic-update encoding (open the invariant at the LP, true `<<<P>>> e <<<Q>>>`
-  against a concurrent context) and a second realized operation (e.g. Treiber `pop`).
+  (`push_realizes` + `push_establishes_post`, end-to-end). A **second operation**
+  now goes through the bridge: Treiber `pop` (`PhaseA.pop_body_spec` — a verified
+  read-modify-return lock-free op using the new `wp_fst`/`wp_snd` projection rules;
+  returns the head and re-establishes `isStack` for the tail), bridged via
+  `popAbstract` (commit `List.tail`) + `pop_realizes_commit`. `pop` is *partial*
+  (non-empty stacks only), so it uses the per-state `LAT`+`HoareTriple` interface
+  rather than the total `∀`-`Realizes` wrapper — showing the bridge handles
+  state-shrinking ops too. *Still to do:* the full mask/atomic-update encoding
+  (open the invariant at the LP, true `<<<P>>> e <<<Q>>>` against a concurrent
+  context).
 - **C2 — prophecy variables.** 🚧 *Foundation done* (`PhaseC/Prophecy.lean`). The
   prophecy mechanism in the small + the Chase–Lev last-element LP: the obstruction
   `lp_not_present_determined` (the LP is genuinely future-dependent — no present-only
