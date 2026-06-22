@@ -548,4 +548,57 @@ theorem wp_alloc (γ : GName) [HasHeap γ GF F] (v : Val) (Φ : Val → IProp GF
     iapply Hcont
     iexact HF
 
+/-- A `some` from `toVal` pins the expression to that value. -/
+theorem toVal_some_eq {e : Expr} {v : Val} (h : toVal e = some v) : e = .val v := by
+  cases e <;> simp_all [toVal]
+
+/-- **Bind rule.** Verify the focused expression `e` first; its postcondition
+continues with the refilled evaluation context. The structural rule for
+sequencing (e.g. `let x = !s in …`). Proved by Löb induction. -/
+theorem wp_bind (γ : GName) [HasHeap γ GF F] (K : List Frame) (e : Expr)
+    (Φ : Val → IProp GF) :
+    wp (F := F) γ e (fun v => wp (F := F) γ (fill K (.val v)) Φ) ⊢
+      wp (F := F) γ (fill K e) Φ := by
+  have hcl : ⊢ ∀ ee, wp (F := F) γ ee (fun v => wp (F := F) γ (fill K (.val v)) Φ)
+                       -∗ wp (F := F) γ (fill K ee) Φ := by
+    iapply BILoeb.loeb_weak
+    iintro IH
+    iintro %ee Hwp
+    cases hv : toVal ee with
+    | some v =>
+      have hee : ee = .val v := toVal_some_eq hv
+      subst hee
+      iapply bupd_wp
+      iapply (wp_value_inv γ v (fun v => wp (F := F) γ (fill K (.val v)) Φ))
+      iexact Hwp
+    | none =>
+      iapply wp_unfold
+      simp only [wpF, fill_toVal_none hv K]
+      iintro %σ Hσ
+      ihave HwpStep := (wp_step γ ee (fun v => wp (F := F) γ (fill K (.val v)) Φ) hv) $$ [Hwp]
+      · iexact Hwp
+      ihave HwpBody := HwpStep $$ [Hσ]
+      · iexact Hσ
+      imod HwpBody with HwpInner
+      iintro !>
+      iintro %ee2 %σ2 %efs2 %Hstep
+      obtain ⟨e', he'', hstep'⟩ := fill_step_inv Hstep hv
+      subst he''
+      ispecialize HwpInner $$ %e'
+      ispecialize HwpInner $$ %σ2
+      ispecialize HwpInner $$ %efs2
+      ispecialize HwpInner $$ []
+      · ipure_intro; exact hstep'
+      iintro !>
+      imod HwpInner with ⟨Hsi', Hwe⟩
+      iintro !>
+      isplitl [Hsi']
+      · iexact Hsi'
+      · iapply IH
+        iexact Hwe
+    exact true_intro
+  iintro Hwp
+  iapply hcl
+  all_goals first | iexact Hwp | exact true_intro
+
 end LeanliftIris.PhaseA
