@@ -87,4 +87,34 @@ theorem wp_value (γ : GName) [HasHeap γ GF F] (v : Val) (Φ : Val → IProp GF
   simp only [wpF, toVal]
   iexact H
 
+/-- `wp` unfolded as a forward entailment. -/
+theorem wp_unfold_fwd (γ : GName) [HasHeap γ GF F] (e : Expr) (Φ : Val → IProp GF) :
+    wp (F := F) γ e Φ ⊢ wpF (F := F) γ (wp (F := F) γ) e Φ :=
+  (equiv_iff.mp (wp_unfold γ e Φ)).mp
+
+/-- The functor absorbs a leading update (`match`-shape: value case is `|==> Φ v`,
+step case has the update after `stateInterp`). -/
+theorem bupd_wpF (γ : GName) [HasHeap γ GF F]
+    (wp : Expr → (Val → IProp GF) → IProp GF) (e : Expr) (Φ : Val → IProp GF) :
+    (|==> wpF (F := F) γ wp e Φ) ⊢ wpF (F := F) γ wp e Φ := by
+  cases hv : toVal e with
+  | some v =>
+    simp only [wpF, hv]
+    iintro H
+    imod H with H
+    iexact H
+  | none =>
+    simp only [wpF, hv]
+    iintro H
+    iintro %σ Hσ
+    imod H with H
+    iapply H
+    iexact Hσ
+
+/-- **Absorb a leading update.** The bridge for the value case of `wp_bind`. -/
+theorem bupd_wp (γ : GName) [HasHeap γ GF F] (e : Expr) (Φ : Val → IProp GF) :
+    (|==> wp (F := F) γ e Φ) ⊢ wp (F := F) γ e Φ :=
+  ((BIUpdate.mono (wp_unfold_fwd γ e Φ)).trans (bupd_wpF γ (wp (F := F) γ) e Φ)).trans
+    (equiv_iff.mp (wp_unfold γ e Φ)).mpr
+
 end LeanliftIris.PhaseA
