@@ -49,3 +49,6 @@ open LeanliftIris.PhaseC
 #print axioms LeanliftIris.PhaseA.wp_adequacy_closed    -- A2: closed adequacy (no iProp hyps)
 #print axioms LeanliftIris.PhaseA.ex_alloc_load_closed_input -- A2: closed pipeline input from nothing
 #print axioms LeanliftIris.PhaseA.primSteps_imp_steps   -- A2: run relation = real single-thread steps
+#print axioms LeanliftIris.PhaseA.wp_faa                -- A2: fetch-and-add wp rule
+#print axioms LeanliftIris.PhaseA.incr_spec            -- A4: FAA counter increment spec
+#print axioms incr_establishes_post                    -- C1↔wp: counter increment through the bridge
