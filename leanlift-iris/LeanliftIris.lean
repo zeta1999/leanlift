@@ -18,4 +18,5 @@ import LeanliftIris.PhaseB.SeqCst
 import LeanliftIris.PhaseB.ChaseLev
 import LeanliftIris.PhaseB.SPMC
 import LeanliftIris.PhaseB.HazardPtr
+import LeanliftIris.PhaseB.HazardGC
 import LeanliftIris.PhaseB.ChaseLevDeque

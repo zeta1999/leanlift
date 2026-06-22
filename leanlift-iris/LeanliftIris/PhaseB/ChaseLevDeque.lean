@@ -145,6 +145,76 @@ theorem wrap_steal2 : d2wrapped.popTop.1.popTop.2 = some 30 := by decide
 /-- The deque is then empty: a fourth steal returns `none`. -/
 theorem wrap_steal3 : d2wrapped.popTop.1.popTop.1.popTop.2 = none := by decide
 
+/-! ## Growing the buffer (doubling)
+
+When the ring fills, the deque must **grow**: allocate a bigger backing array and
+move the live elements over. We model the *compacting* doubling grow — copy the
+`size` live elements into a fresh array of capacity `2·cap`, re-based to start at
+slot `0` (`top := 0`, `bot := size`). This is the structural counterpart to the
+weak-memory side and keeps the proof Mathlib-free: the only arithmetic fact needed
+is `k % newcap = k` for `k < newcap` (`Nat.mod_eq_of_lt`), avoiding the modular
+*injectivity* the absolute-index (non-compacting) variant would require.
+
+`elem d k` is the `k`-th live element counting from `top`. We prove grow preserves
+every element (`elem_grow`), preserves `size`, and strictly increases capacity —
+so a wrapped buffer is re-laid contiguously with room to spare, contents intact. -/
+
+/-- The `k`-th live element, counting from the top (`0 ≤ k < size`). -/
+def elem (d : Deque α) (k : Nat) : α := d.buf ((d.top + k) % d.cap)
+
+/-- A steal returns the `0`-th live element (the top). -/
+theorem popTop_eq_elem (d : Deque α) (h : d.top < d.bot) :
+    d.popTop.2 = some (d.elem 0) := by
+  unfold popTop elem
+  rw [if_neg (by omega)]
+  simp [Nat.add_zero]
+
+/-- **Compacting doubling grow.** Copy the `size` live elements into a fresh array
+of capacity `2·cap`, re-based to `[0, size)`; slots past `size` get a sentinel. -/
+def grow (d : Deque α) (dflt : α) : Deque α :=
+  { cap := 2 * d.cap
+    buf := fun j => if j < d.size then d.buf ((d.top + j) % d.cap) else dflt
+    top := 0
+    bot := d.size }
+
+/-- Grow preserves the number of live elements. -/
+theorem size_grow (d : Deque α) (dflt : α) : (d.grow dflt).size = d.size := by
+  simp [size, grow]
+
+/-- Grow strictly increases capacity (more room for pushes). -/
+theorem cap_grow (d : Deque α) (dflt : α) (h : 0 < d.cap) :
+    d.cap < (d.grow dflt).cap := by
+  show d.cap < 2 * d.cap; omega
+
+/-- **Grow preserves contents.** Every live element is unchanged across a grow —
+the `k`-th element from the top before equals the `k`-th after. Wrap-around is
+resolved (the data is re-laid contiguously) without disturbing the logical
+sequence. -/
+theorem elem_grow (d : Deque α) (dflt : α) (k : Nat)
+    (hcap : 0 < d.cap) (hsz : d.size ≤ d.cap) (hk : k < d.size) :
+    (d.grow dflt).elem k = d.elem k := by
+  simp only [elem, grow]
+  have hknew : (0 + k) % (2 * d.cap) = k := by
+    rw [Nat.zero_add, Nat.mod_eq_of_lt (by omega)]
+  rw [hknew, if_pos hk]
+
+/-! ## Concrete grow: a wrapped buffer re-laid contiguously, contents intact
+
+`d2wrapped` (cap 2) holds `[20, 30]` with `30` in the *reused* slot 0 — wrapped.
+Growing it gives a cap-4 buffer holding `[20, 30]` contiguously in slots 0,1, and
+the thief still reads `20` then `30`. -/
+
+/-- After grow the live elements are `20` then `30`… -/
+theorem grow_elem0 : (d2wrapped.grow 0).elem 0 = 20 := by decide
+theorem grow_elem1 : (d2wrapped.grow 0).elem 1 = 30 := by decide
+/-- …the size is preserved (2)… -/
+theorem grow_size : (d2wrapped.grow 0).size = 2 := by decide
+/-- …the capacity doubled (2 → 4)… -/
+theorem grow_cap : (d2wrapped.grow 0).cap = 4 := by decide
+/-- …and a thief reads them back in FIFO order from the re-laid buffer. -/
+theorem grow_steal0 : (d2wrapped.grow 0).popTop.2 = some 20 := by decide
+theorem grow_steal1 : (d2wrapped.grow 0).popTop.1.popTop.2 = some 30 := by decide
+
 end Deque
 
 end LeanliftIris.PhaseB

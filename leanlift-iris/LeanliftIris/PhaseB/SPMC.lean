@@ -24,9 +24,18 @@ facts that make the ring correct:
     stamp sees it change and knows its slot was lapped — it never silently accepts
     stale data.
 
-Scope note: this captures the stamp/overrun mechanism honestly; it does *not*
-claim the double-stamp check alone defends a *relaxed* payload read against a lap
-in flight (that needs the data read ordered by the acquire, a separate argument).
+And it closes the ordering question the SPSC handshake left implicit — **the
+payload read must be ordered after the stamp acquire**:
+
+  * `spmc_acq_ordered_reads_fresh` — the *positive* direction restated: a payload
+    read taken from the post-acquire view (`loadView … s … .acq`) is determined to
+    read the freshest payload `200`, even across the lap (this is `spmc_reads_latest`).
+  * `spmc_relaxed_lap_in_flight` — the *necessity*: a payload read **not** ordered
+    after the acquire (an unsynchronized relaxed load, view `⊥`) still admits the
+    lapped/stale value `100` after the producer has moved on to round 1. So the
+    stamp check alone is not enough — the data read genuinely must be ordered by
+    the acquire (acquire-load / consume-dependency / acquire fence).
+
 Core Lean only, sorry-free.
 -/
 import LeanliftIris.PhaseB.Logic
@@ -98,6 +107,36 @@ theorem spmc_reads_latest (hds : d ≠ s) (Vc : View) :
     · rfl
     · simp at hts
     · simp at hts
+
+/-! ## The payload read must be ordered after the stamp acquire
+
+`spmc_reads_latest` already shows the *positive* direction — a payload read taken
+from the **post-acquire view** reads the freshest value across the lap. We restate
+it under a name that makes the ordering explicit, then prove its converse: drop
+the ordering and the lap-in-flight hazard is real. -/
+
+/-- **Acquire-ordered ⇒ fresh.** A consumer whose payload read starts from the
+view it gained by acquire-loading the round-1 stamp is determined to read the
+newest payload `200` — the ordering after the acquire is exactly what defeats the
+lap. (Same statement as `spmc_reads_latest`, named for the ordering it relies on.) -/
+theorem spmc_acq_ordered_reads_fresh (hds : d ≠ s) (Vc : View) :
+    readsAs (r1M2 d s) (loadView Vc s (r1Pub d s) .acq) d 200 :=
+  spmc_reads_latest d s hds Vc
+
+/-- **The ordering is necessary — lap in flight.** If the payload read is *not*
+ordered after the stamp acquire (modeled as an unsynchronized relaxed load from
+the bottom view), then even after the producer has lapped to round 1 the consumer
+can still load the round-0 payload `100`. So a consumer that validates against the
+round-1 stamp but reads the payload with an unordered relaxed load may pair the
+new stamp with stale bytes: the stamp check alone does **not** defend the payload —
+the data read must be ordered by the acquire. (Cf. `mp_relaxed_admits_stale`.) -/
+theorem spmc_relaxed_lap_in_flight (hds : d ≠ s) :
+    ∃ m : Msg, canLoad (r1M2 d s) View.bot d m ∧ m.val = 100 := by
+  refine ⟨storeMsg initMem View.bot d 100 .rlx, ⟨?_, ?_⟩, rfl⟩
+  · -- the round-0 payload write is still in `d`'s history after the lap
+    simp [r1M2, r1M1, r0M2, r0M1, storeMsg, store, push, maxTs, initMem, hds, Ne.symm hds]
+  · -- the bottom view imposes no lower bound at `d`
+    exact Nat.zero_le _
 
 /-! ## Overrun is observable -/
 

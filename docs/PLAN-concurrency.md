@@ -176,8 +176,12 @@ iris-lean.
   no torn snapshot) and `seqlock_torn_without_validation` (bare relaxed reads admit
   a torn `[42,0]` machine run). SPMC (`PhaseB/SPMC.lean`): the per-slot stamp
   seqlock with slot reuse — `spmc_consumer_reads_round0` (pre-lap consistency),
-  `spmc_reads_latest` (freshest publish read consistently after a lap), and
-  `spmc_stamp_advances` (overrun is observable as a strictly-advancing stamp).
+  `spmc_reads_latest` (freshest publish read consistently after a lap),
+  `spmc_stamp_advances` (overrun is observable as a strictly-advancing stamp), and
+  `spmc_relaxed_lap_in_flight` — a payload read *not* ordered after the stamp
+  acquire admits a lapped/stale value, so the data read genuinely must be ordered
+  by the acquire (`spmc_acq_ordered_reads_fresh` is the positive side). This closes
+  the earlier scope caveat.
 - **B5 — `seq_cst` + `#8 Chase–Lev`, the marquee.** ✅ *Last-element race done.*
   `PhaseB/SeqCst.lean` adds a global SC view (`scStore`/`canLoadSC`) whose
   StoreLoad lower-bound **forbids store-buffering** — `sb_sc_no_both_zero` proves
@@ -191,13 +195,19 @@ iris-lean.
   done: a fixed-capacity circular buffer with owner LIFO (`popBottom_pushBottom_val`),
   single-element steal, size/`top≤bot` invariants, and a concrete `cap=2`
   wrap-around run where a vacated slot is reused and the thief still reads every
-  element back in FIFO order. Still to do: the growable (doubling) buffer.
-- **B6 — reclamation under weak memory.** ✅ *Safety done* (`PhaseB/HazardPtr.lean`).
+  element back in FIFO order. The **growable (doubling) buffer** is also done
+  (`grow`, compacting variant): `elem_grow` (contents preserved across a grow),
+  `size_grow`, `cap_grow` (capacity doubles), and a concrete wrapped→grown run
+  (`grow_steal0/1`) where a wrapped buffer is re-laid contiguously, contents intact.
+- **B6 — reclamation under weak memory.** ✅ *Done.* Safety (`PhaseB/HazardPtr.lean`):
   `#7` hazard-pointer safety as two-sided store buffering: the reader's
   publish-then-revalidate ∥ the reclaimer's retire-then-scan. `hp_use_after_free_relacq`
   (rel/acq admits use-after-free — reader derefs a node the reclaimer frees) and
-  `hp_sc_no_use_after_free` (seq_cst forbids it for every interleaving). Still to
-  do: bounded-garbage accounting; EBR optional.
+  `hp_sc_no_use_after_free` (seq_cst forbids it for every interleaving).
+  **Bounded-garbage accounting** (`PhaseB/HazardGC.lean`): `allSlots_length_le` (at
+  most `N·K` nodes hazardous), `bounded_garbage`/`bounded_garbage_NK` (a scan leaves
+  ≤ `N·K` unreclaimed, by pigeonhole), and `reclaim_progress` (a scan of `R` retired
+  nodes frees ≥ `R − N·K`, so the retire list cannot grow unboundedly). EBR optional.
 
 Exit B: the weak-memory obligations leanlift cannot express are kernel-checked for
 SPSC, seqlock, SPMC, Chase–Lev, and HP-reclamation. **Gate:** B1–B2 are a major
