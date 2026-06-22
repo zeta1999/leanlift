@@ -52,3 +52,4 @@ open LeanliftIris.PhaseC
 #print axioms LeanliftIris.PhaseA.wp_faa                -- A2: fetch-and-add wp rule
 #print axioms LeanliftIris.PhaseA.incr_spec            -- A4: FAA counter increment spec
 #print axioms incr_establishes_post                    -- C1↔wp: counter increment through the bridge
+#print axioms LeanliftIris.PhaseA.primSteps.trans      -- A2: run relation composes (preorder)
