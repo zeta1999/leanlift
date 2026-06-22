@@ -240,9 +240,15 @@ go/no-go review. If B stalls, Phase A alone is already a shippable capability.
   release/acquire stamp hands off the payload (`mpsc_consumer_reads_payload`) with
   ABA defense (`mpsc_stamp_advances`), and the enqueue order is future-dependent —
   resolved by a prophecy of the FAA race winner (`mpsc_order_proph`,
-  `mpsc_order_not_present`, `mpsc_order_distinct`). *Still to do:* the
-  prophecy-resolution *operational* step in the machine (here resolution is modeled
-  as a function of the physical state/schedule).
+  `mpsc_order_not_present`, `mpsc_order_distinct`). The prophecy-resolution
+  *operational* step is also done (`PhaseC/ProphMachine.lean`): `NewProph`/`Resolve`
+  as real `PStep` transitions (resolve guarded to fire at most once), with
+  `resolved_stable` (a resolution is permanent) and `proph_predicts_future` (the
+  prophesied value read from the final state equals the value resolved
+  mid-execution — soundness over the transition system, not an assumed resolution
+  function). *Still to do for full C:* lift these onto the Phase-A `wp`/adequacy so
+  the LP/resolution attach to the real `λ-conc` execution (C1 currently runs an
+  abstract micro-step list; resolution lives on its own small machine).
 
 ## Phase D — integration with leanlift (the seam)
 
