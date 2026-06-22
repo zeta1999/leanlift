@@ -92,6 +92,39 @@ def storeMsg (M : Mem) (V : View) (l : Loc) (v : Int) (o : MemOrd) : Msg :=
   let t := maxTs M l + 1
   ⟨v, t, View.join (if o = .rel ∨ o = .sc then V else View.bot) (View.singleton l t)⟩
 
+/-! ## Coherence: per-location writes are totally ordered by timestamp -/
+
+private theorem foldl_acc_ge :
+    ∀ (xs : List Msg) (acc : Time), acc ≤ xs.foldl (fun a m => max a m.ts) acc := by
+  intro xs
+  induction xs with
+  | nil => intro acc; exact Nat.le_refl _
+  | cons x xs ih => intro acc; exact Nat.le_trans (Nat.le_max_left acc x.ts) (ih (max acc x.ts))
+
+private theorem foldl_max_ts_ge {m : Msg} :
+    ∀ (xs : List Msg) (acc : Time), m ∈ xs → m.ts ≤ xs.foldl (fun a m => max a m.ts) acc := by
+  intro xs
+  induction xs with
+  | nil => intro acc h; cases h
+  | cons x xs ih =>
+    intro acc h
+    rcases List.mem_cons.mp h with h | h
+    · rw [h]; exact Nat.le_trans (Nat.le_max_right acc x.ts) (foldl_acc_ge xs (max acc x.ts))
+    · exact ih (max acc x.ts) h
+
+/-- Every write in `l`'s history has a timestamp `≤` the location's maximum. -/
+theorem mem_ts_le_maxTs (M : Mem) (l : Loc) (m : Msg) (h : m ∈ M l) : m.ts ≤ maxTs M l :=
+  foldl_max_ts_ge (M l) 0 h
+
+/-- **Coherence.** A new store gets a fresh timestamp, strictly greater than every
+existing write to that location — so each location's modification order is a total
+order, and the store is its new latest write. -/
+theorem store_ts_fresh (M : Mem) (V : View) (l : Loc) (v : Int) (o : MemOrd)
+    (m : Msg) (h : m ∈ M l) : m.ts < (storeMsg M V l v o).ts := by
+  have hle := mem_ts_le_maxTs M l m h
+  have hts : (storeMsg M V l v o).ts = maxTs M l + 1 := rfl
+  rw [hts]; exact Nat.lt_succ_of_le hle
+
 /-! ## Foundational view lemmas
 
 A store/load only ever *advances* a thread's view (observations are monotone),
