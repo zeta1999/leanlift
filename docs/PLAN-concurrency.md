@@ -269,7 +269,10 @@ go/no-go review. If B stalls, Phase A alone is already a shippable capability.
   advances by one), bridged via `incrAbstract` (commit `(· + 1)`) +
   `incr_realizes`/`incr_establishes_post`. `incr` is *total*, so it uses the
   `∀`-`Realizes` wrapper like `push` — the same interface absorbs CAS-linking,
-  head-removal, and arithmetic RMW, total and partial alike. *Still to do:* the full
+  head-removal, and arithmetic RMW, total and partial alike. Verified operations
+  also **compose into larger programs**: `twoIncr_spec` chains `incr_spec` with
+  itself under `wp_let` (`let _ = incr s in incr s` advances the count by two),
+  showing the per-operation specs sequence via the program logic. *Still to do:* the full
   mask/atomic-update encoding (open the invariant at the LP, true `<<<P>>> e <<<Q>>>`
   against a concurrent context).
 - **C2 — prophecy variables.** 🚧 *Foundation done* (`PhaseC/Prophecy.lean`). The
