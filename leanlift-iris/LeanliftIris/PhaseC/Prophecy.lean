@@ -75,8 +75,8 @@ value consistent with the resolution — namely the resolution itself. The whole
 content is the discipline that `resolve` is a function of the *physical* state
 alone (it cannot mention `pv`), which makes the fixpoint `pv = resolve phys`
 trivially solvable; a resolution that read `pv` could be unsatisfiable. -/
-theorem proph_sound {Phys : Type} (resolve : Phys → Bool) (phys : Phys) :
-    ∃ pv : Bool, pv = resolve phys ∧ ∀ y : Bool, y = resolve phys → y = pv :=
+theorem proph_sound {Phys : Type} {α : Type} (resolve : Phys → α) (phys : Phys) :
+    ∃ pv : α, pv = resolve phys ∧ ∀ y : α, y = resolve phys → y = pv :=
   ⟨resolve phys, rfl, fun _ hy => hy⟩
 
 /-- **Faithfulness.** Under a consistent assignment (`pv = w`), the effect `take`
