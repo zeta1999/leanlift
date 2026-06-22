@@ -45,7 +45,11 @@ unblocked) → fork/progress `wpF` extensions. Then Phase B (weak memory, gated)
       - [x] #10 sweep: exact `filled = min Q total`, completion ⇔ `Q ≤ total`, over-ask, drained-level skip, lower+upper VWAP bracket (`best_ask·filled ≤ notional ≤ touch·filled`, exact `Nat` = no overflow)
       - [x] #9 order book: `maxOcc`/`minOcc` = greatest/least occupied (the `clz`/`ctz` spec), bid+ask fall-back on cancel, microprice bracket `[best_bid, best_ask]`
       - [ ] A3-refine (follow-on, not required by A3): hierarchical-bitmap `clz`/`ctz` refinement of `maxOcc`/`minOcc` (bit-vector proof); optional two-engine equivalence `sweep_linear == prefix.query`
-- [ ] A4 first concurrent proof (SC): Treiber stack #7 linearizable via a logically-atomic triple (reclamation deferred) — needs A1/A2 first
+- [~] A4 first concurrent proof (SC): Treiber stack #7 — **the end-to-end pipeline is demonstrated** (`LeanliftIris/PhaseA/Treiber.lean` + `Examples.lean`):
+      - code: `pushV`/`pushBody` — Treiber `push` encoded in `λ-conc` (matches `treiber_hazard.cpp`).
+      - annotation: `listRep`/`isStack` (the cell `s` points to a linked list spelling a Lean `List Val`).
+      - property: **`push_cas_step`** — the linking `CAS` (succeeds in the single-owner SC setting) re-establishes `isStack γ s (v :: xs)` ("push prepends"). Plus `ex_alloc_load` shows `wp_bind`+`alloc`+`load` composing on a real program.
+      - remaining (mechanical): the single end-to-end `push_body_spec` chaining `load`+`alloc`+`cas` over the `let`s — cleanest via a `wp_let` helper (needs `wp_mono`, provable by Löb like `wp_bind`). Then: linearizable/concurrent version = logical-atomicity (Phase C); reclamation deferred.
 
 ## Phase B — weak-memory layer (long pole; GATE after Phase A go/no-go)
 - [ ] B1 C11 release-acquire+relaxed op-sem for `λ-conc` (prefer operational view-based, à la iRC11)
