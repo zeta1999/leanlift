@@ -58,5 +58,6 @@ namespace LeanliftIris.PhaseA
 #print axioms bupd_wp
 #print axioms fill_step_inv
 #print axioms wp_step_pres
+#print axioms wp_adequacy_val
 
 end LeanliftIris.PhaseA
