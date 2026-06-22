@@ -10,9 +10,12 @@ gap for this lane. We build it from:
   * the model soundness of `|==> ⌜·⌝` and `▷` (`pure_soundness`, `later_soundness`)
     to extract a meta-level `Prop` after a finite run.
 
-This file currently establishes the preservation step; the meta-level extraction
-over `steps` is the remaining piece (tracked in docs/TODO-concurrency.md).
-Sorry-free.
+This file establishes the one-step preservation, lifts it to a whole fork-free
+run via the step-update tower `sfupdN`, collapses that tower over a pure
+postcondition at the `UPred` model level (`sfupdN_pure_soundness`), and assembles
+the headline **sequential adequacy** `wp_adequacy_seq`: a `wp` proof of a pure
+property + a fork-free run reaching a value ⟹ the meta-level fact. (The general
+concurrent/thread-pool `steps` adequacy is future work.) Sorry-free.
 -/
 import LeanliftIris.PhaseA.WpLifting
 
@@ -55,5 +58,142 @@ theorem wp_adequacy_val (γ : GName) [HasHeap γ GF F] (v : Val) (φ : Val → P
     (h.trans (wp_value_inv γ v (fun w => iprop(⌜φ w⌝)))).trans hbupd
   have hte : (iprop(True) : IProp GF) ⊢ emp := biaffine_iff_true_emp.1 inferInstance
   exact UPred.pure_soundness (hte.trans hb)
+
+/-! ## Multi-step preservation: the step-update tower
+
+A `k`-step run of the `wp` accumulates one `|==> ▷` per primitive step plus the
+trailing `|==>` of the base case. We package that modality as a *tower*
+`sfupdN k X = (|==> ▷)^k |==> X` and lift one-step preservation along a whole
+fork-free run. -/
+
+/-- The step-update tower `(|==> ▷)^k |==> X`. -/
+def sfupdN (k : Nat) (X : IProp GF) : IProp GF :=
+  match k with
+  | 0    => iprop(|==> X)
+  | k+1  => iprop(|==> ▷ (sfupdN k X))
+
+/-- Every tower starts with a `|==>`, so a leading `|==>` is absorbed. -/
+theorem sfupdN_bupd_absorb (k : Nat) (X : IProp GF) :
+    iprop(|==> sfupdN k X) ⊢ sfupdN k X := by
+  cases k with
+  | zero => exact BIUpdate.trans
+  | succ k => exact BIUpdate.trans
+
+/-- The tower is monotone in its payload. -/
+theorem sfupdN_mono (k : Nat) {X Y : IProp GF} (h : X ⊢ Y) :
+    sfupdN k X ⊢ sfupdN k Y := by
+  induction k with
+  | zero => exact BIUpdate.mono h
+  | succ k ih => exact BIUpdate.mono (later_mono ih)
+
+/-- Towers compose: stacking an `a`-tower over a `b`-tower is an `(a+b)`-tower. -/
+theorem sfupdN_compose (a b : Nat) (X : IProp GF) :
+    sfupdN a (sfupdN b X) ⊢ sfupdN (a + b) X := by
+  induction a with
+  | zero =>
+      show iprop(|==> sfupdN b X) ⊢ sfupdN (0 + b) X
+      rw [Nat.zero_add]
+      exact sfupdN_bupd_absorb b X
+  | succ k ih =>
+      show iprop(|==> ▷ (sfupdN k (sfupdN b X))) ⊢ sfupdN (k + 1 + b) X
+      have : (k + 1 + b) = (k + b) + 1 := by omega
+      rw [this]
+      exact BIUpdate.mono (later_mono ih)
+
+/-- **Fork-free multi-step relation** — the reflexive-transitive closure of a
+single-thread, no-fork primitive step. This is the single-thread fragment of the
+thread-pool `steps` (each step lifts via `step.single`). -/
+inductive primSteps : Expr → Heap → Expr → Heap → Prop where
+  | refl {e σ} : primSteps e σ e σ
+  | tail {e σ e' σ' e'' σ''} :
+      primSteps e σ e' σ' → prim_step e' σ' e'' σ'' [] → primSteps e σ e'' σ''
+
+/-- A stepping expression is not a value. -/
+theorem toVal_none_of_prim_step {e : Expr} {σ : Heap} {e' : Expr} {σ' : Heap}
+    {efs : List Expr} (h : prim_step e σ e' σ' efs) : toVal e = none := by
+  cases e <;> first | rfl | (exfalso; exact val_no_prim_step _ _ _ _ _ h)
+
+/-- **Multi-step preservation.** A `k`-step fork-free run carries
+`stateInterp ∗ wp` from the start state to the end state, modulo a `k`-tall
+step-update tower. The iProp-level core of sequential adequacy: proved by
+induction on the run from the one-step `wp_step_pres`. -/
+theorem wp_primSteps_pres (γ : GName) [HasHeap γ GF F] (Φ : Val → IProp GF)
+    {e : Expr} {σ : Heap} {e' : Expr} {σ' : Heap} (h : primSteps e σ e' σ') :
+    ∃ k, iprop(stateInterp γ σ ∗ wp (F := F) γ e Φ) ⊢
+      sfupdN k iprop(stateInterp γ σ' ∗ wp (F := F) γ e' Φ) := by
+  induction h with
+  | refl => exact ⟨0, BIUpdate.intro⟩
+  | tail _hsteps hstep ih =>
+      obtain ⟨k, ih⟩ := ih
+      refine ⟨k + 1, ?_⟩
+      have hone :
+          iprop(stateInterp γ _ ∗ wp (F := F) γ _ Φ) ⊢ sfupdN 1 iprop(stateInterp γ _ ∗ wp (F := F) γ _ Φ) :=
+        wp_step_pres γ _ _ _ _ [] Φ (toVal_none_of_prim_step hstep) hstep
+      refine ih.trans ((sfupdN_mono k hone).trans ?_)
+      exact sfupdN_compose k 1 _
+
+/-! ## The step-update tower over a pure proposition collapses (model level)
+
+The remaining piece the file's header tracked: extracting a meta-level `Prop` from
+the tower. A `|==>` over a *pure* proposition is sound (`bupd_plainly` for pure),
+and a `▷` over a pure proposition is sound at a high enough step-index
+(`later_soundness`'s idea). Threading the two through the tower — evaluating at
+step-index `k` and peeling one `▷` per level — collapses `sfupdN k ⌜φ⌝` to `φ`.
+This is proved at the `UPred` model level (like `later_soundness`). -/
+
+/-- **Tower collapse.** If `True` entails the `k`-tall tower over a pure `φ`, then
+`φ` holds at the meta level. -/
+theorem sfupdN_pure_soundness {φ : Prop} (k : Nat)
+    (h : (iprop(True) : IProp GF) ⊢ sfupdN k iprop(⌜φ⌝)) : φ := by
+  suffices key : ∀ (j m : Nat) (x : IResUR GF), j ≤ m → ✓{m} x →
+      (sfupdN j (iprop(⌜φ⌝) : IProp GF)).holds m x → φ by
+    exact key k k CMRA.unit (Nat.le_refl k) CMRA.unit_validN
+      (h k CMRA.unit CMRA.unit_validN trivial)
+  intro j
+  induction j with
+  | zero =>
+      intro m x _ hv hh
+      obtain ⟨x', _, hφ⟩ := hh m CMRA.unit (Nat.le_refl m)
+        (CMRA.unit_right_id.symm.dist.validN.1 hv)
+      exact hφ
+  | succ j ih =>
+      intro m x hjm hv hh
+      cases m with
+      | zero => omega
+      | succ m' =>
+          obtain ⟨x', hx'v, hlater⟩ := hh (m'+1) CMRA.unit (Nat.le_refl _)
+            (CMRA.unit_right_id.symm.dist.validN.1 hv)
+          have hx'v' : ✓{m'} x' :=
+            CMRA.validN_of_le (Nat.le_succ m')
+              (CMRA.unit_right_id.dist.validN.1 hx'v)
+          exact ih m' x' (by omega) hx'v' hlater
+
+/-! ## Sequential adequacy — the trust anchor
+
+Composing the multi-step preservation with the tower collapse: a `wp` proof of a
+pure postcondition, plus a fork-free run that reaches a value, yields a meta-level
+operational fact about the real `λ-conc` program. This closes the model/code gap
+for every sequential `wp` result in the lane (Treiber `push`/`pop`, the bridge). -/
+
+/-- **Sequential adequacy.** If `stateInterp γ σ ∗ wp γ e ⌜φ⌝` holds and the
+program `e` runs fork-free from heap `σ` to a value `v` (at heap `σ'`), then
+`φ v` holds at the meta level. -/
+theorem wp_adequacy_seq (γ : GName) [HasHeap γ GF F] (e : Expr) (σ : Heap)
+    (v : Val) (σ' : Heap) (φ : Val → Prop)
+    (hrun : primSteps e σ (.val v) σ')
+    (h : (iprop(True) : IProp GF) ⊢
+      iprop(stateInterp γ σ ∗ wp (F := F) γ e (fun w => iprop(⌜φ w⌝)))) : φ v := by
+  obtain ⟨k, hpres⟩ := wp_primSteps_pres γ (fun w => iprop(⌜φ w⌝)) hrun
+  -- the end payload (state interp + wp at the final value) entails the pure goal
+  have bpe : (iprop(|==> ⌜φ v⌝) : IProp GF) ⊢ iprop(⌜φ v⌝) :=
+    (BIUpdate.mono plainly_pure.mpr).trans BIBUpdatePlainly.bupd_plainly
+  have hwpv : wp (F := F) γ (.val v) (fun w => iprop(⌜φ w⌝)) ⊢ iprop(⌜φ v⌝) :=
+    (wp_value_inv γ v (fun w => iprop(⌜φ w⌝))).trans bpe
+  have hpayload :
+      iprop(stateInterp γ σ' ∗ wp (F := F) γ (.val v) (fun w => iprop(⌜φ w⌝))) ⊢ iprop(⌜φ v⌝) := by
+    iintro ⟨_, H⟩
+    iapply hwpv
+    iexact H
+  exact sfupdN_pure_soundness k (h.trans (hpres.trans (sfupdN_mono k hpayload)))
 
 end LeanliftIris.PhaseA
