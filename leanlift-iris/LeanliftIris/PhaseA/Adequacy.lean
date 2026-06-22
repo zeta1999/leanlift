@@ -43,4 +43,17 @@ theorem wp_step_pres (γ : GName) [HasHeap γ GF F] (e : Expr) (σ : Heap) (e' :
   iintro !>
   iexact H3
 
+/-- **Adequacy, base case.** A value verified against a pure postcondition
+satisfies it at the meta level. Exercises the soundness path
+(`wp_value_inv` → `bupd_elim` → `pure_soundness`). -/
+theorem wp_adequacy_val (γ : GName) [HasHeap γ GF F] (v : Val) (φ : Val → Prop)
+    (h : ⊢ wp (F := F) γ (.val v) (fun w => iprop(⌜φ w⌝))) : φ v := by
+  -- |==> ⌜φ v⌝ ⊢ ⌜φ v⌝ (bupd over a plain pure)
+  have hbupd : (iprop(|==> ⌜φ v⌝) : IProp GF) ⊢ iprop(⌜φ v⌝) :=
+    (BIUpdate.mono plainly_pure.mpr).trans BIBUpdatePlainly.bupd_plainly
+  have hb : (emp : IProp GF) ⊢ iprop(⌜φ v⌝) :=
+    (h.trans (wp_value_inv γ v (fun w => iprop(⌜φ w⌝)))).trans hbupd
+  have hte : (iprop(True) : IProp GF) ⊢ emp := biaffine_iff_true_emp.1 inferInstance
+  exact UPred.pure_soundness (hte.trans hb)
+
 end LeanliftIris.PhaseA
