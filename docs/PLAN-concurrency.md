@@ -176,13 +176,17 @@ iris-lean.
   parity ⇒ no torn snapshot) and `seqlock_torn_without_validation` (bare relaxed
   reads admit a torn `[42,0]` machine run). SPMC = the per-slot stamp seqlock
   fanned across a ring, still to do.
-- **B5 — `seq_cst` + `#8 Chase–Lev`, the marquee.** Model started
-  (`PhaseB/SeqCst.lean`): a global SC view (`scStore`/`canLoadSC`) whose
+- **B5 — `seq_cst` + `#8 Chase–Lev`, the marquee.** ✅ *Last-element race done.*
+  `PhaseB/SeqCst.lean` adds a global SC view (`scStore`/`canLoadSC`) whose
   StoreLoad lower-bound **forbids store-buffering** — `sb_sc_no_both_zero` proves
   *no* SC interleaving of SB yields the weak `r1=r2=0`, the exact outcome
-  `sb_admits_reorder` shows release/acquire admits. Still to do: lift this to the
-  full `#8` deque and **exhibit that acquire/release is insufficient** (the Lê et
-  al. bug) — the demonstration that this lane sees the memory model.
+  `sb_admits_reorder` shows release/acquire admits. `PhaseB/ChaseLev.lean` then
+  recognizes the Chase–Lev take/steal last-element race *as* store buffering and
+  proves both halves: `chase_lev_double_claim_relacq` (rel/acq lets owner **and**
+  thief claim the same element — the Lê et al. bug) and
+  `chase_lev_sc_no_double_claim` (seq_cst forbids the double-claim for every
+  interleaving). Still to do: the full deque structure (array + wrap-around) and
+  growable buffer beyond the single-element linearization point.
 - **B6 — reclamation under weak memory.** `#7` hazard-pointer safety: the
   publish-then-revalidate StoreLoad argument; bounded garbage. (EBR optional.)
 
