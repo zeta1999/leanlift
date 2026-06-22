@@ -236,6 +236,23 @@ theorem primSteps_imp_steps {e : Expr} {σ : Heap} {e' : Expr} {σ' : Heap}
   | refl => exact steps.refl
   | tail _ hstep ih => exact ih.tail (step.single hstep)
 
+/-! ### The run relation is a composable preorder
+
+Verified runs compose: chaining the runs of two program fragments gives the run of
+the whole, so end-to-end adequacy can be assembled fragment by fragment. -/
+
+/-- A single primitive step is a one-step run. -/
+theorem primSteps.single {e : Expr} {σ : Heap} {e' : Expr} {σ' : Heap}
+    (h : prim_step e σ e' σ' []) : primSteps e σ e' σ' :=
+  primSteps.refl.tail h
+
+/-- **Transitivity.** Fork-free runs compose (so `primSteps` is a preorder). -/
+theorem primSteps.trans {a : Expr} {σa : Heap} {b : Expr} {σb : Heap} {c : Expr} {σc : Heap}
+    (h1 : primSteps a σa b σb) (h2 : primSteps b σb c σc) : primSteps a σa c σc := by
+  induction h2 with
+  | refl => exact h1
+  | tail _ hstep ih => exact ih.tail hstep
+
 /-- **Multi-step preservation, explicit count.** Same as `wp_primSteps_pres` but
 the tower height is the run's length `n` — fixed independently of any ghost name. -/
 theorem wp_primStepsN_pres (γ : GName) [HasHeap γ GF F] (Φ : Val → IProp GF)
