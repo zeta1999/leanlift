@@ -171,11 +171,13 @@ iris-lean.
 - **B3 — `#1 SPSC` under acq/rel.** ✅ *Done* (`PhaseB/Logic.lean`,
   `spsc_consumer_reads_payload`). The smallest honest weak-memory proof:
   payload-before-publish release/acquire pairing, relaxed self-counter loads.
-- **B4 — `#3 seqlock`** ✅ *Done* (`PhaseB/Seqlock.lean`) **+ `#5 SPMC`** (todo).
-  Torn-read freedom proved both ways: `seqlock_consistent_read` (acquire + even
-  parity ⇒ no torn snapshot) and `seqlock_torn_without_validation` (bare relaxed
-  reads admit a torn `[42,0]` machine run). SPMC = the per-slot stamp seqlock
-  fanned across a ring, still to do.
+- **B4 — `#3 seqlock` + `#5 SPMC`.** ✅ *Done.* Seqlock (`PhaseB/Seqlock.lean`):
+  torn-read freedom both ways — `seqlock_consistent_read` (acquire + even parity ⇒
+  no torn snapshot) and `seqlock_torn_without_validation` (bare relaxed reads admit
+  a torn `[42,0]` machine run). SPMC (`PhaseB/SPMC.lean`): the per-slot stamp
+  seqlock with slot reuse — `spmc_consumer_reads_round0` (pre-lap consistency),
+  `spmc_reads_latest` (freshest publish read consistently after a lap), and
+  `spmc_stamp_advances` (overrun is observable as a strictly-advancing stamp).
 - **B5 — `seq_cst` + `#8 Chase–Lev`, the marquee.** ✅ *Last-element race done.*
   `PhaseB/SeqCst.lean` adds a global SC view (`scStore`/`canLoadSC`) whose
   StoreLoad lower-bound **forbids store-buffering** — `sb_sc_no_both_zero` proves
