@@ -87,6 +87,42 @@ single-location timestamp. -/
 def loadView (V : View) (l : Loc) (m : Msg) (o : MemOrd) : View :=
   View.join V (if o = .acq ∨ o = .sc then m.rview else View.singleton l m.ts)
 
+/-- The message a `store` creates (exposed for synchronization reasoning). -/
+def storeMsg (M : Mem) (V : View) (l : Loc) (v : Int) (o : MemOrd) : Msg :=
+  let t := maxTs M l + 1
+  ⟨v, t, View.join (if o = .rel ∨ o = .sc then V else View.bot) (View.singleton l t)⟩
+
+/-! ## Foundational view lemmas
+
+A store/load only ever *advances* a thread's view (observations are monotone),
+and a release/acquire handshake transfers the releaser's whole view to the
+acquirer — the happens-before edge weak-memory correctness rests on. -/
+
+/-- A store only advances the writer's view. -/
+theorem store_view_mono (M : Mem) (V : View) (l : Loc) (v : Int) (o : MemOrd) (l' : Loc) :
+    V l' ≤ (store M V l v o).2 l' := by
+  simp only [store, View.join]; exact Nat.le_max_left _ _
+
+/-- A load only advances the reader's view. -/
+theorem loadView_mono (V : View) (l : Loc) (m : Msg) (o : MemOrd) (l' : Loc) :
+    V l' ≤ loadView V l m o l' := by
+  simp only [loadView, View.join]; exact Nat.le_max_left _ _
+
+/-- **Release/acquire happens-before.** After acquire-loading a release-store, the
+acquirer's view dominates everything the releaser had observed: `Vprod ≤
+loadView Vcons f (release-msg) acq`. This is the general synchronization theorem
+— message passing is the special case where what the releaser observed includes a
+prior data write. -/
+theorem release_acquire_hb (M : Mem) (Vprod Vcons : View) (f : Loc) (v : Int) (l : Loc) :
+    Vprod l ≤ loadView Vcons f (storeMsg M Vprod f v .rel) .acq l := by
+  have h1 : (storeMsg M Vprod f v .rel).rview
+      = View.join Vprod (View.singleton f (maxTs M f + 1)) := by simp [storeMsg]
+  have h2 : loadView Vcons f (storeMsg M Vprod f v .rel) .acq
+      = View.join Vcons ((storeMsg M Vprod f v .rel).rview) := by simp [loadView]
+  rw [h2, h1]
+  simp only [View.join]
+  exact Nat.le_trans (Nat.le_max_left _ _) (Nat.le_max_right _ _)
+
 /-! ## Message passing (the SPSC publish-then-read edge)
 
 Locations `d` (data/payload) and `f` (flag/counter). Producer: write `d := 42`
