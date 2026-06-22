@@ -601,4 +601,64 @@ theorem wp_bind (γ : GName) [HasHeap γ GF F] (K : List Frame) (e : Expr)
   iapply hcl
   all_goals first | iexact Hwp | exact true_intro
 
+/-- **Monotonicity.** A pointwise-weaker postcondition gives a weaker `wp`.
+Proved by Löb induction (same shape as `wp_bind`). -/
+theorem wp_mono (γ : GName) [HasHeap γ GF F] (e : Expr) (Φ Ψ : Val → IProp GF)
+    (h : ∀ v, Φ v ⊢ Ψ v) : wp (F := F) γ e Φ ⊢ wp (F := F) γ e Ψ := by
+  have hcl : ⊢ ∀ ee, wp (F := F) γ ee Φ -∗ wp (F := F) γ ee Ψ := by
+    iapply BILoeb.loeb_weak
+    iintro IH
+    iintro %ee Hwp
+    cases hv : toVal ee with
+    | some v =>
+      have hee : ee = .val v := toVal_some_eq hv
+      subst hee
+      iapply wp_value
+      ihave HΦ := (wp_value_inv γ v Φ) $$ [Hwp]
+      · iexact Hwp
+      imod HΦ with HΦ2
+      iintro !>
+      iapply (h v)
+      iexact HΦ2
+    | none =>
+      iapply wp_unfold
+      simp only [wpF, hv]
+      iintro %σ Hσ
+      ihave HwpS := (wp_step γ ee Φ hv) $$ [Hwp]
+      · iexact Hwp
+      ihave HwpB := HwpS $$ [Hσ]
+      · iexact Hσ
+      imod HwpB with HwpI
+      iintro !>
+      iintro %ee2 %σ2 %efs2 %Hstep
+      ispecialize HwpI $$ %ee2
+      ispecialize HwpI $$ %σ2
+      ispecialize HwpI $$ %efs2
+      ispecialize HwpI $$ []
+      · ipure_intro; exact Hstep
+      iintro !>
+      imod HwpI with ⟨Hsi, Hwe⟩
+      iintro !>
+      isplitl [Hsi]
+      · iexact Hsi
+      · iapply IH
+        iexact Hwe
+    exact true_intro
+  iintro Hwp
+  iapply hcl
+  all_goals first | iexact Hwp | exact true_intro
+
+/-- **Let rule.** `let x := e in body` (encoded `(λ_ x. body) e`): verify `e`,
+then continue with `body[x := result]`. Combines `wp_bind` + `wp_beta` +
+`wp_mono`. -/
+theorem wp_let (γ : GName) [HasHeap γ GF F] (x : String) (body e : Expr)
+    (Φ : Val → IProp GF) :
+    wp (F := F) γ e (fun w => iprop(▷ wp (F := F) γ (substE x w (substE "_" (.clos "_" x body) body)) Φ)) ⊢
+      wp (F := F) γ (.app (.val (.clos "_" x body)) e) Φ := by
+  refine (wp_mono γ e _
+    (fun w => wp (F := F) γ (.app (.val (.clos "_" x body)) (.val w)) Φ) ?_).trans
+    (wp_bind γ [Frame.appR (.clos "_" x body)] e Φ)
+  intro w
+  exact wp_beta γ "_" x body w Φ
+
 end LeanliftIris.PhaseA
