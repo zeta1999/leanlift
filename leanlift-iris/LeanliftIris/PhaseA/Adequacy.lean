@@ -225,6 +225,17 @@ theorem primStepsN_of_primSteps {e : Expr} {σ : Heap} {e' : Expr} {σ' : Heap}
   | refl => exact ⟨0, .refl⟩
   | tail _ hstep ih => obtain ⟨n, hn⟩ := ih; exact ⟨n + 1, hn.tail hstep⟩
 
+/-- **The run relation is the real single-thread semantics.** A fork-free
+`primSteps` run is exactly a thread-pool `steps` run of the singleton pool — so the
+relation adequacy consumes is not an artificial abstraction but the genuine
+operational semantics restricted to one thread. (Each step lifts via
+`step.single`; with no forks the pool stays a singleton.) -/
+theorem primSteps_imp_steps {e : Expr} {σ : Heap} {e' : Expr} {σ' : Heap}
+    (h : primSteps e σ e' σ') : steps ⟨[e], σ⟩ ⟨[e'], σ'⟩ := by
+  induction h with
+  | refl => exact steps.refl
+  | tail _ hstep ih => exact ih.tail (step.single hstep)
+
 /-- **Multi-step preservation, explicit count.** Same as `wp_primSteps_pres` but
 the tower height is the run's length `n` — fixed independently of any ghost name. -/
 theorem wp_primStepsN_pres (γ : GName) [HasHeap γ GF F] (Φ : Val → IProp GF)
