@@ -48,3 +48,4 @@ open LeanliftIris.PhaseC
 #print axioms LeanliftIris.PhaseA.heap_init             -- A2: heap-ghost initialization
 #print axioms LeanliftIris.PhaseA.wp_adequacy_closed    -- A2: closed adequacy (no iProp hyps)
 #print axioms LeanliftIris.PhaseA.ex_alloc_load_closed_input -- A2: closed pipeline input from nothing
+#print axioms LeanliftIris.PhaseA.primSteps_imp_steps   -- A2: run relation = real single-thread steps
