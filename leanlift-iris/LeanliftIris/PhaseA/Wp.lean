@@ -39,30 +39,36 @@ points-to fragments (`HeapRes.pointsTo`) carve pieces out of this. -/
 def stateInterp (γ : GName) [HasHeap γ GF F] (σ : Heap) : IProp GF :=
   iOwn (GF := GF) (F := FHeap (F := F)) γ (Auth (own one) (toAgreeHeap σ))
 
-/-- The weakest-precondition functor. `wp` recurs only under `▷`, so `wpF` is
-contractive. -/
+/-- The weakest-precondition functor, in the standard `match toVal e` shape so
+that `wp (val v)` is invertible (`= |==> Φ v`) and a leading update can be
+absorbed (`bupd_wp`), which `wp_bind` needs. `wp` recurs only under `▷`, so `wpF`
+is contractive. -/
 def wpF (γ : GName) [HasHeap γ GF F]
     (wp : Expr → (Val → IProp GF) → IProp GF) (e : Expr) (Φ : Val → IProp GF) :
-    IProp GF := iprop(
-  (∃ v, ⌜toVal e = some v⌝ ∗ |==> Φ v) ∨
-  (∀ σ, stateInterp γ σ -∗
-    ∀ e' σ' efs, ⌜prim_step e σ e' σ' efs⌝ -∗
-      ▷ |==> (stateInterp γ σ' ∗ wp e' Φ)))
+    IProp GF :=
+  match toVal e with
+  | some v => iprop(|==> Φ v)
+  | none =>
+    iprop(∀ σ, stateInterp γ σ -∗ |==>
+      (∀ e' σ' efs, ⌜prim_step e σ e' σ' efs⌝ -∗ ▷ |==> (stateInterp γ σ' ∗ wp e' Φ)))
 
 instance wpF_contractive (γ : GName) [HasHeap γ GF F] :
     Contractive (wpF (F := F) γ) where
   distLater_dist {n x y HL} e Φ := by
-    refine or_ne.ne (.of_eq rfl) ?_
-    refine forall_ne (fun σ => ?_)
-    refine wand_ne.ne (.of_eq rfl) ?_
-    refine forall_ne (fun e' => ?_)
-    refine forall_ne (fun σ' => ?_)
-    refine forall_ne (fun efs => ?_)
-    refine wand_ne.ne (.of_eq rfl) ?_
-    refine Contractive.distLater_dist (fun m Hm => ?_)
-    refine BIUpdate.bupd_ne.ne ?_
-    refine sep_ne.ne (.of_eq rfl) ?_
-    exact HL m Hm e' Φ
+    simp only [wpF]
+    split
+    · exact .of_eq rfl
+    · refine forall_ne (fun σ => ?_)
+      refine wand_ne.ne (.of_eq rfl) ?_
+      refine BIUpdate.bupd_ne.ne ?_
+      refine forall_ne (fun e' => ?_)
+      refine forall_ne (fun σ' => ?_)
+      refine forall_ne (fun efs => ?_)
+      refine wand_ne.ne (.of_eq rfl) ?_
+      refine Contractive.distLater_dist (fun m Hm => ?_)
+      refine BIUpdate.bupd_ne.ne ?_
+      refine sep_ne.ne (.of_eq rfl) ?_
+      exact HL m Hm e' Φ
 
 /-- The weakest precondition: the guarded fixpoint of `wpF`. -/
 def wp (γ : GName) [HasHeap γ GF F] (e : Expr) (Φ : Val → IProp GF) : IProp GF :=
@@ -73,17 +79,12 @@ theorem wp_unfold (γ : GName) [HasHeap γ GF F] (e : Expr) (Φ : Val → IProp 
     wp (F := F) γ e Φ ≡ wpF (F := F) γ (wp (F := F) γ) e Φ := by
   apply fixpoint_unfold (f := ⟨wpF (F := F) γ, ne_of_contractive _⟩)
 
-/-- **Value rule** (smoke test that the `wp` is usable): to verify a value it
-suffices to (update-)establish the postcondition. -/
+/-- **Value rule.** `wp (val v)` is exactly an update of the postcondition. -/
 theorem wp_value (γ : GName) [HasHeap γ GF F] (v : Val) (Φ : Val → IProp GF) :
     (|==> Φ v) ⊢ wp (F := F) γ (.val v) Φ := by
   iintro H
   iapply wp_unfold
-  simp only [wpF]
-  ileft
-  iexists v
-  isplitl []
-  · ipure_intro; rfl
-  · iexact H
+  simp only [wpF, toVal]
+  iexact H
 
 end LeanliftIris.PhaseA
