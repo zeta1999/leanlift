@@ -53,3 +53,5 @@ open LeanliftIris.PhaseC
 #print axioms LeanliftIris.PhaseA.incr_spec            -- A4: FAA counter increment spec
 #print axioms incr_establishes_post                    -- C1↔wp: counter increment through the bridge
 #print axioms LeanliftIris.PhaseA.primSteps.trans      -- A2: run relation composes (preorder)
+#print axioms LeanliftIris.PhaseA.prim_step_preserves_forkFree -- A2: fork-freedom preserved by reduction
+#print axioms LeanliftIris.PhaseA.wp_adequacy_steps    -- A2: adequacy over the real thread-pool steps
