@@ -223,9 +223,16 @@ go/no-go review. If B stalls, Phase A alone is already a shippable capability.
   operation from a `P`-state lands in `Q`) and the structural rules `LAT.refl`
   (no-op) and `LAT.frameL` (frame). Instantiated for Chase–Lev `take`: `takeLAT`
   (one-element `take` linearizes by removing the element, index read/write as
-  framing steps) and `take_linearizes`. *Still to do:* integrate with the Phase-A
-  `wp`/adequacy so the abstract commit is tied to the real `λ-conc` execution
-  (here the run is an abstract micro-step list); generalize beyond the deque.
+  framing steps) and `take_linearizes`. The abstract triple is now also **bridged
+  to the real `wp`** (`PhaseC/WpAtomic.lean`): a wp Hoare triple `HoareTriple` with
+  structural rules (`hoare_value`/`hoare_mono`/`hoare_conseq`) lifted from Phase A,
+  the Treiber-`push` linearization point as a Hoare triple (`hoare_push_cas`, from
+  `push_cas_step`), and the bridge `push_realizes_commit` — the verified `wp` proof
+  of `push` establishes exactly the abstract `LAT`'s commit (`pushAbstract`, `v::·`)
+  on the heap-level `isStack` predicate. So the abstract LP and the concrete
+  iris-lean proof name the same atomic effect. *Still to do:* the full
+  mask/atomic-update encoding (open the invariant at the LP) and generalizing the
+  bridge beyond `push`.
 - **C2 — prophecy variables.** 🚧 *Foundation done* (`PhaseC/Prophecy.lean`). The
   prophecy mechanism in the small + the Chase–Lev last-element LP: the obstruction
   `lp_not_present_determined` (the LP is genuinely future-dependent — no present-only
