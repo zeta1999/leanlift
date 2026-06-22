@@ -14,3 +14,4 @@ import LeanliftIris.PhaseB.WeakMem
 import LeanliftIris.PhaseB.Machine
 import LeanliftIris.PhaseB.Logic
 import LeanliftIris.PhaseB.Seqlock
+import LeanliftIris.PhaseB.SeqCst
