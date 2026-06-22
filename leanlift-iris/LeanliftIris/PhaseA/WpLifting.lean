@@ -29,6 +29,59 @@ theorem fill_toVal_none {a : Expr} (ha : toVal a = none) :
   | nil => simpa [fill] using ha
   | cons fr K' => cases fr <;> simp [fill, List.foldr_cons, fill1, toVal]
 
+/-- **Frame disambiguation.** When the hole content is a non-value, a frame is
+determined by the filled expression: `fill1` is injective in both the frame and
+the hole. (The basis of `step_by_val` for `wp_bind`.) -/
+theorem fill1_inj {fr fr' : Frame} {X Y : Expr} (h : fill1 fr X = fill1 fr' Y)
+    (hX : toVal X = none) (hY : toVal Y = none) : fr = fr' ∧ X = Y := by
+  cases fr <;> cases fr' <;> simp_all [fill1, toVal] <;> grind
+
+/-- A head redex's frame-hole is always a value: a redex never sits *above* a
+non-value subterm (rules out the `K' = []` case in `step_by_val`). -/
+theorem head_fill1 {fr : Frame} {X : Expr} {σ : Heap} {e' : Expr} {σ' : Heap}
+    {efs : List Expr} (h : Head (fill1 fr X) σ e' σ' efs) : toVal X ≠ none := by
+  cases fr <;> simp only [fill1] at h <;> cases h <;> simp [toVal]
+
+/-- **Context decomposition** (the inductive core of `step_by_val`). If a non-value
+`e` plugged under `K` equals a head-redex `a` plugged under `K'`, then `a` lies
+inside `e`: `K' = K ++ K2` and `e = fill K2 a`. -/
+theorem fill_eq_decomp {e a : Expr} (ha : toVal a = none)
+    (hHa : ∀ fr X, fill1 fr X = a → toVal X ≠ none) (he : toVal e = none) :
+    ∀ (K K' : List Frame), fill K e = fill K' a → ∃ K2, K' = K ++ K2 ∧ e = fill K2 a := by
+  intro K
+  induction K with
+  | nil => intro K' h; exact ⟨K', rfl, by simpa [fill] using h⟩
+  | cons fr Krest ih =>
+    intro K' h
+    cases K' with
+    | nil =>
+      exfalso
+      simp only [fill, List.foldr_cons] at h
+      exact hHa fr (fill Krest e) (by simpa [fill] using h) (fill_toVal_none he Krest)
+    | cons fr' K'rest =>
+      simp only [fill, List.foldr_cons] at h
+      obtain ⟨hfr, hfill⟩ :=
+        fill1_inj h (fill_toVal_none he Krest) (fill_toVal_none ha K'rest)
+      subst hfr
+      obtain ⟨K2, hK2, he2⟩ := ih K'rest hfill
+      exact ⟨K2, by rw [hK2]; rfl, he2⟩
+
+/-- **`step_by_val`.** A primitive step of `fill K e` (with `e` not a value)
+happens *inside* `e`: it decomposes into a step of `e` under the same context. -/
+theorem fill_step_inv {K : List Frame} {e : Expr} {σ : Heap} {e'' : Expr} {σ' : Heap}
+    {efs : List Expr} (h : prim_step (fill K e) σ e'' σ' efs) (he : toVal e = none) :
+    ∃ e', e'' = fill K e' ∧ prim_step e σ e' σ' efs := by
+  obtain ⟨K', a, a', hK, hK', hHead⟩ := h
+  have ha : toVal a = none := head_toVal_none hHead
+  have hHa : ∀ fr X, fill1 fr X = a → toVal X ≠ none := by
+    intro fr X hfX
+    rw [← hfX] at hHead
+    exact head_fill1 hHead
+  obtain ⟨K2, hKeq, heq⟩ := fill_eq_decomp ha hHa he K K' hK
+  subst hKeq
+  refine ⟨fill K2 a', ?_, ⟨K2, a, a', heq, rfl, hHead⟩⟩
+  rw [hK', fill_app]
+
 /-- **Context inversion for `load`.** If a redex plugs to `load (loc l)`, the
 context is empty and the redex is the whole `load`. -/
 theorem ctx_nil_of_load {K : List Frame} {a : Expr} {l : Nat} (ha : toVal a = none)
