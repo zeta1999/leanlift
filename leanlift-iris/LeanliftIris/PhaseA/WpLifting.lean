@@ -196,25 +196,28 @@ variable {F} [UFraction F] {GF} [ElemG GF (FHeap (F := F))]
 /-- **Generic step lifting.** Proving the `wp` step body (re-establish the state
 interpretation and the continuation `wp` after any primitive step) suffices to
 verify a non-value expression. The per-operation rules below are corollaries. -/
-theorem wp_lift_step (γ : GName) [HasHeap γ GF F] (e : Expr) (Φ : Val → IProp GF) :
-    (∀ σ, stateInterp γ σ -∗
-      ∀ e' σ' efs, ⌜prim_step e σ e' σ' efs⌝ -∗ ▷ |==> (stateInterp γ σ' ∗ wp (F := F) γ e' Φ))
+theorem wp_lift_step (γ : GName) [HasHeap γ GF F] (e : Expr) (Φ : Val → IProp GF)
+    (hnv : toVal e = none) :
+    (∀ σ, stateInterp γ σ -∗ |==>
+      (∀ e' σ' efs, ⌜prim_step e σ e' σ' efs⌝ -∗ ▷ |==> (stateInterp γ σ' ∗ wp (F := F) γ e' Φ)))
     ⊢ wp (F := F) γ e Φ := by
   iintro H
   iapply wp_unfold
-  simp only [wpF]
-  iright
+  simp only [wpF, hnv]
   iexact H
 
 /-- **Pure-step rule.** If every step of `e` is deterministic, heap-preserving,
 and fork-free (going to `etgt`), then `▷ wp etgt Φ ⊢ wp e Φ`. The determinism
 hypothesis is discharged per-operation by a `prim_step_*_inv` lemma. -/
 theorem wp_pure_det (γ : GName) [HasHeap γ GF F] (e etgt : Expr) (Φ : Val → IProp GF)
+    (hnv : toVal e = none)
     (hdet : ∀ σ e' σ' efs, prim_step e σ e' σ' efs → e' = etgt ∧ σ' = σ ∧ efs = []) :
     ▷ wp (F := F) γ etgt Φ ⊢ wp (F := F) γ e Φ := by
   iintro H
-  iapply wp_lift_step
+  iapply wp_unfold
+  simp only [wpF, hnv]
   iintro %σ Hsi
+  iintro !>
   iintro %e' %σ' %efs %Hstep
   obtain ⟨he, hσ, hefs⟩ := hdet σ e' σ' efs Hstep
   subst he; subst hσ; subst hefs
@@ -227,7 +230,7 @@ theorem wp_pure_det (γ : GName) [HasHeap γ GF F] (e etgt : Expr) (Φ : Val →
 /-- **`if true` rule.** -/
 theorem wp_if_true (γ : GName) [HasHeap γ GF F] (e1 e2 : Expr) (Φ : Val → IProp GF) :
     ▷ wp (F := F) γ e1 Φ ⊢ wp (F := F) γ (.ite (.val (.bool true)) e1 e2) Φ := by
-  apply wp_pure_det
+  apply wp_pure_det (hnv := rfl)
   intro σ e' σ' efs h
   exact prim_step_ite_true_inv h
 
@@ -236,7 +239,7 @@ theorem wp_beta (γ : GName) [HasHeap γ GF F] (f x : String) (body : Expr) (w :
     (Φ : Val → IProp GF) :
     ▷ wp (F := F) γ (substE x w (substE f (.clos f x body) body)) Φ ⊢
       wp (F := F) γ (.app (.val (.clos f x body)) (.val w)) Φ := by
-  apply wp_pure_det
+  apply wp_pure_det (hnv := rfl)
   intro σ e' σ' efs h
   exact prim_step_beta_inv h
 
@@ -253,7 +256,7 @@ theorem stateInterp_pointsTo_agree {γ : GName} [HasHeap γ GF F]
   ipure_intro
   obtain ⟨_, _, Hl⟩ := auth_op_frag_one_validN_iff.mp H
   -- Hl : get? (toAgreeHeap σ) l ≡{n}≡ some (toAgree ⟨v⟩); reduce get? (fun-map) + toAgreeHeap
-  simp only [Std.PartialMap.get?, Std.instPartialMapFun, toAgreeHeap] at Hl
+  simp only [Std.PartialMap.get?, toAgreeHeap] at Hl
   -- Hl : (σ l).map (fun w => toAgree ⟨w⟩) ≡{n}≡ some (toAgree ⟨v⟩)
   cases hσ : σ l with
   | none => rw [hσ] at Hl; simp at Hl
@@ -270,8 +273,10 @@ theorem wp_load (γ : GName) [HasHeap γ GF F] (l : Nat) (v : Val) (Φ : Val →
     (l ↦[γ] v) ∗ ((l ↦[γ] v) -∗ |==> Φ v) ⊢
       wp (F := F) γ (.load (.val (.loc l))) Φ := by
   iintro ⟨Hpt, HΦ⟩
-  iapply wp_lift_step
+  iapply wp_unfold
+  simp only [wpF, toVal]
   iintro %σ Hsi
+  iintro !>
   ihave %Hag := stateInterp_pointsTo_agree (γ := γ) σ l v $$ [Hsi, Hpt]
   · isplitl [Hsi] <;> iassumption
   iintro %e' %σ' %efs %Hstep
@@ -306,8 +311,10 @@ theorem wp_store (γ : GName) [HasHeap γ GF F] (l : Nat) (v_old v_new : Val)
     (l ↦[γ] v_old) ∗ ((l ↦[γ] v_new) -∗ |==> Φ .unit) ⊢
       wp (F := F) γ (.store (.val (.loc l)) (.val v_new)) Φ := by
   iintro ⟨Hpt, HΦ⟩
-  iapply wp_lift_step
+  iapply wp_unfold
+  simp only [wpF, toVal]
   iintro %σ Hsi
+  iintro !>
   iintro %e' %σ' %efs %Hstep
   obtain ⟨_, he', hσ', hefs⟩ := prim_step_store_inv Hstep
   subst he'; subst hσ'; subst hefs
@@ -360,8 +367,10 @@ theorem wp_cas_fail (γ : GName) [HasHeap γ GF F] (l : Nat) (v_cur v1 v2 : Val)
     (l ↦[γ] v_cur) ∗ ((l ↦[γ] v_cur) -∗ |==> Φ (.bool false)) ⊢
       wp (F := F) γ (.cas (.val (.loc l)) (.val v1) (.val v2)) Φ := by
   iintro ⟨Hpt, HΦ⟩
-  iapply wp_lift_step
+  iapply wp_unfold
+  simp only [wpF, toVal]
   iintro %σ Hsi
+  iintro !>
   ihave %Hag := stateInterp_pointsTo_agree (γ := γ) σ l v_cur $$ [Hsi, Hpt]
   · isplitl [Hsi] <;> iassumption
   iintro %e' %σ' %efs %Hstep
@@ -386,8 +395,10 @@ theorem wp_cas_suc (γ : GName) [HasHeap γ GF F] (l : Nat) (v1 v2 : Val)
     (l ↦[γ] v1) ∗ ((l ↦[γ] v2) -∗ |==> Φ (.bool true)) ⊢
       wp (F := F) γ (.cas (.val (.loc l)) (.val v1) (.val v2)) Φ := by
   iintro ⟨Hpt, HΦ⟩
-  iapply wp_lift_step
+  iapply wp_unfold
+  simp only [wpF, toVal]
   iintro %σ Hsi
+  iintro !>
   ihave %Hag := stateInterp_pointsTo_agree (γ := γ) σ l v1 $$ [Hsi, Hpt]
   · isplitl [Hsi] <;> iassumption
   iintro %e' %σ' %efs %Hstep
@@ -443,8 +454,10 @@ continuation receives the new points-to for whichever fresh `l` was chosen
 theorem wp_alloc (γ : GName) [HasHeap γ GF F] (v : Val) (Φ : Val → IProp GF) :
     (∀ l, (l ↦[γ] v) -∗ |==> Φ (.loc l)) ⊢ wp (F := F) γ (.alloc (.val v)) Φ := by
   iintro Hcont
-  iapply wp_lift_step
+  iapply wp_unfold
+  simp only [wpF, toVal]
   iintro %σ Hsi
+  iintro !>
   iintro %e' %σ' %efs %Hstep
   obtain ⟨l, hfresh, he', hσ', hefs⟩ := prim_step_alloc_inv Hstep
   subst he'
