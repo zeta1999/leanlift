@@ -72,6 +72,7 @@ namespace LeanliftIris.PhaseA
 #print axioms LeanliftIris.PhaseB.release_acquire_hb
 #print axioms LeanliftIris.PhaseB.message_passing
 #print axioms LeanliftIris.PhaseB.mp_relaxed_admits_stale
+#print axioms LeanliftIris.PhaseB.mp_release_necessary
 #print axioms wp_mono
 #print axioms wp_let
 #print axioms wp_pair

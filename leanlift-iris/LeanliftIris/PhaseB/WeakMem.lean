@@ -184,6 +184,26 @@ theorem mp_relaxed_admits_stale (hdf : d ≠ f) :
     simp [loadView, mpFlagMsg, store, View.join, View.bot, View.singleton, maxTs,
       initMem, push, hdf, Ne.symm hdf]
 
+/-- **Release is necessary.** If the producer stores the flag `f` only *relaxed*
+(not release), its write carries no view, so even an *acquire*-load of `f` gives
+the consumer nothing at `d` — it may still read the stale initial `0`. Symmetric
+to `mp_relaxed_admits_stale`: message passing needs **both** a release store and
+an acquire load. -/
+theorem mp_release_necessary (hdf : d ≠ f) :
+    ∃ m : Msg,
+      canLoad
+          ((store (store initMem View.bot d 42 .rlx).1
+              (store initMem View.bot d 42 .rlx).2 f 1 .rlx).1)
+          (loadView View.bot f
+            (storeMsg (store initMem View.bot d 42 .rlx).1
+              (store initMem View.bot d 42 .rlx).2 f 1 .rlx) .acq) d m ∧ m.val = 0 := by
+  refine ⟨⟨0, 0, View.bot⟩, ⟨?_, ?_⟩, rfl⟩
+  · -- the stale initial write is still in `d`'s history
+    simp [store, push, maxTs, initMem, hdf, Ne.symm hdf]
+  · -- a relaxed flag store carries no view, so the acquire load gains nothing at `d`
+    simp [loadView, storeMsg, store, View.join, View.bot, View.singleton, maxTs,
+      initMem, push, hdf, Ne.symm hdf]
+
 end MP
 
 end LeanliftIris.PhaseB
