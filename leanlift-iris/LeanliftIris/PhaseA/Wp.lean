@@ -117,6 +117,15 @@ theorem bupd_wp (γ : GName) [HasHeap γ GF F] (e : Expr) (Φ : Val → IProp GF
   ((BIUpdate.mono (wp_unfold_fwd γ e Φ)).trans (bupd_wpF γ (wp (F := F) γ) e Φ)).trans
     (equiv_iff.mp (wp_unfold γ e Φ)).mpr
 
+/-- `wp` at a value is an update of the postcondition (the inverse of
+`wp_value`). -/
+theorem wp_value_inv (γ : GName) [HasHeap γ GF F] (v : Val) (Φ : Val → IProp GF) :
+    wp (F := F) γ (.val v) Φ ⊢ |==> Φ v := by
+  refine (wp_unfold_fwd γ (.val v) Φ).trans ?_
+  simp only [wpF, toVal]
+  iintro H
+  iexact H
+
 /-- The step case of `wp`, exposed as a usable entailment (for non-values). -/
 theorem wp_step (γ : GName) [HasHeap γ GF F] (e : Expr) (Φ : Val → IProp GF)
     (hnv : toVal e = none) :
