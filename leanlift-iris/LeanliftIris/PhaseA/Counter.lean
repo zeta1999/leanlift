@@ -39,4 +39,34 @@ theorem incr_spec (γ : GName) [HasHeap γ GF F] (s : Nat) (k : Int) :
     · ipure_intro; rfl
     · iexact Hc'
 
+/-! ## Verified operations compose: two increments in sequence
+
+`incr_spec` is a per-operation spec; the program logic composes such specs into a
+larger program via `wp_let`. Here `let _ = incr s in incr s` advances the counter
+by two and returns the intermediate value — verified by chaining `incr_spec` twice
+under the sequencing rule. -/
+
+/-- `let _ = incr s in incr s`: increment the counter at `s` twice. -/
+def twoIncrBody (s : Nat) : Expr :=
+  .app (.val (.clos "_" "_" (incrBody s))) (incrBody s)
+
+/-- **Two increments advance the count by two.** Composing `incr_spec` with itself
+under `wp_let`: from a counter holding `k`, running `incr` twice returns the
+intermediate value `k + 1` and leaves the counter holding `k + 1 + 1`. -/
+theorem twoIncr_spec (γ : GName) [HasHeap γ GF F] (s : Nat) (k : Int) :
+    isCounter γ s k ⊢
+      wp (F := F) γ (twoIncrBody s)
+        (fun r => iprop(⌜r = .int (k + 1)⌝ ∗ isCounter γ s (k + 1 + 1))) := by
+  simp only [twoIncrBody]
+  refine (incr_spec γ s k).trans
+    ((wp_mono γ (incrBody s) _ _ ?_).trans (wp_let γ "_" (incrBody s) (incrBody s) _))
+  intro r
+  have hsub : substE "_" r (substE "_" (.clos "_" "_" (incrBody s)) (incrBody s))
+      = incrBody s := by simp [incrBody, substE, substV]
+  rw [hsub]
+  iintro ⟨_, Hc⟩
+  iintro !>
+  iapply (incr_spec γ s (k + 1))
+  iexact Hc
+
 end LeanliftIris.PhaseA
