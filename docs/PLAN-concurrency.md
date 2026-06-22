@@ -234,9 +234,15 @@ go/no-go review. If B stalls, Phase A alone is already a shippable capability.
   `takeLP_proph_correct`, and the payoff `owner_claim_lp` — under seq_cst, a
   `take` that physically claims linearizes (by the prophecy-resolved LP) as
   "owner took it" with the thief excluded, discharged via
-  `chase_lev_sc_no_double_claim`. *Still to do:* **#2 MPSC** (stamp-publish LP) and
-  the prophecy-resolution *operational* step in the machine (here resolution is
-  modeled as a function of the physical `SBState`).
+  `chase_lev_sc_no_double_claim`. **#2 MPSC** (Vyukov stamp queue) is also done
+  (`PhaseC/MPSC.lean`): the FAA contention point is exclusive (`tickets_nodup`,
+  `mpsc_distinct_slots` — distinct cells *by the RMW*, no seq_cst), the per-cell
+  release/acquire stamp hands off the payload (`mpsc_consumer_reads_payload`) with
+  ABA defense (`mpsc_stamp_advances`), and the enqueue order is future-dependent —
+  resolved by a prophecy of the FAA race winner (`mpsc_order_proph`,
+  `mpsc_order_not_present`, `mpsc_order_distinct`). *Still to do:* the
+  prophecy-resolution *operational* step in the machine (here resolution is modeled
+  as a function of the physical state/schedule).
 
 ## Phase D — integration with leanlift (the seam)
 
