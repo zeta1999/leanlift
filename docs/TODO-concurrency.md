@@ -4,6 +4,24 @@ Actionable checklist for [`PLAN-concurrency.md`](./PLAN-concurrency.md). Sandbox
 [`../leanlift-iris/`](../leanlift-iris/). Order matters: do the C++ corpus first
 (Phases 0→A→B→C→D), then the Rust variant (Phase E).
 
+## Current status (snapshot)
+
+Done & pushed, all sorry-free (`lake build` green; audited in
+`leanlift-iris/LeanliftIris/PhaseA/Axioms.lean` — only `propext`/`Quot.sound`,
+and for the Iris-model proofs also `Classical.choice`; never `sorryAx`):
+
+- **Phase 0** (iris-lean adopted) ✅ · **A3** (order book #9, sweep #10) ✅ ·
+  **A1** (`λ-conc` + SC semantics + metatheory) ✅
+- **A2 program logic over `λ-conc`** — essentially complete bar adequacy:
+  heap resource + `pointsTo`/agreement; the `wp` (bind-ready `match`-shape) with
+  `wp_unfold`/`wp_value`/`wp_value_inv`/`bupd_wp`/`wp_step`; **all operation
+  rules** (`load`, `store`, `cas_suc/fail`, `alloc`, `if`, `β`, `pure_det`);
+  `prim_step` inversion for every op; **`step_by_val`**; and **`wp_bind`** (the
+  `wp` composes).
+
+In progress / next: **A2.4 adequacy** (the trust anchor) → **A4 Treiber** (now
+unblocked) → fork/progress `wpF` extensions. Then Phase B (weak memory, gated).
+
 ## Phase 0 — adopt the foundation
 - [x] 0.1 iris-lean as a Lake dep, pinned v4.28.0 (core `Iris`, no Mathlib), `lake build` green
 - [x] 0.2 MoSeL "hello world" — `ent_refl`/`sep_comm`/`wand_elim`, sorry-free (no axiom dependence)
