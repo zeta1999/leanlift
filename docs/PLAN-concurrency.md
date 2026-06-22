@@ -230,9 +230,15 @@ go/no-go review. If B stalls, Phase A alone is already a shippable capability.
   `push_cas_step`), and the bridge `push_realizes_commit` — the verified `wp` proof
   of `push` establishes exactly the abstract `LAT`'s commit (`pushAbstract`, `v::·`)
   on the heap-level `isStack` predicate. So the abstract LP and the concrete
-  iris-lean proof name the same atomic effect. *Still to do:* the full
-  mask/atomic-update encoding (open the invariant at the LP) and generalizing the
-  bridge beyond `push`.
+  iris-lean proof name the same atomic effect. The bridge is now **operation-agnostic**:
+  a `Realizes repr f e` predicate ("`e` takes a heap representing `s` to one
+  representing `f s`") with a consequence rule (`realizes_mono`), and the general
+  `lat_realized` — for *any* `LAT P Q` and any program realizing its commit, the real
+  `wp` establishes the abstract postcondition `Q` at the representation level
+  (`{repr s} e {∃ s', ⌜Q s'⌝ ∗ repr s'}`). `push` is re-derived through it
+  (`push_realizes` + `push_establishes_post`, end-to-end). *Still to do:* the full
+  mask/atomic-update encoding (open the invariant at the LP, true `<<<P>>> e <<<Q>>>`
+  against a concurrent context) and a second realized operation (e.g. Treiber `pop`).
 - **C2 — prophecy variables.** 🚧 *Foundation done* (`PhaseC/Prophecy.lean`). The
   prophecy mechanism in the small + the Chase–Lev last-element LP: the obstruction
   `lp_not_present_determined` (the LP is genuinely future-dependent — no present-only

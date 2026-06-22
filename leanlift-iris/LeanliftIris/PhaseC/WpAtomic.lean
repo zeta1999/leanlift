@@ -109,4 +109,82 @@ theorem push_realizes_commit (γ : GName) [HasHeap γ GF F] (s : Nat) (v hd : Va
       (fun _ => isStack γ s ((pushAbstract v xs).commit xs)) :=
   push_body_spec γ s v hd xs hclv hclhd
 
+/-! ## The general bridge: realizing an abstract commit on a representation
+
+`push_realizes_commit` grounds *one* operation. To generalize beyond `push` we
+abstract the pattern: a representation predicate `repr : σ → IProp` reflecting the
+abstract state `σ` into the heap, and a program `e` that *realizes* an abstract
+effect `f : σ → σ` — from any heap representing `s`, running `e` ends in a heap
+representing `f s`. This is the operation-agnostic interface between the abstract
+`LAT` library and the real `wp`. -/
+
+/-- **Realization.** Program `e` realizes the abstract effect `f` on
+representation `repr`: from any heap representing the abstract state `s`, running
+`e` lands in a heap representing `f s`. (Postcondition ignores the return value —
+what matters is the abstract-state transformation.) -/
+def Realizes {σ : Type} (γ : GName) [HasHeap γ GF F] (repr : σ → IProp GF)
+    (f : σ → σ) (e : Expr) : Prop :=
+  ∀ s, repr s ⊢ wp (F := F) γ e (fun _ => repr (f s))
+
+/-- **Consequence for realization.** A program realizing `f` on `repr` also
+realizes it after weakening the representation pointwise. -/
+theorem realizes_mono {σ : Type} (γ : GName) [HasHeap γ GF F]
+    {repr repr' : σ → IProp GF} {f : σ → σ} {e : Expr}
+    (h : Realizes (F := F) γ repr f e) (hr : ∀ s, repr s ⊢ repr' s)
+    (hr' : ∀ s, repr' s ⊢ repr s) : Realizes (F := F) γ repr' f e := by
+  intro s
+  exact (hr' s).trans ((h s).trans (wp_mono γ e _ _ (fun _ => hr (f s))))
+
+/-- **The general bridge.** Given a logically-atomic triple `t : LAT P Q` and a
+program `e` that realizes its commit on a representation `repr`, the real `wp`
+establishes the *abstract* postcondition `Q` at the representation level: from a
+heap representing a `P`-state, running `e` ends in a heap representing some
+`Q`-state. The abstract LP of `LAT` (core Lean) and the verified `wp` proof
+(iris-lean) name the same atomic effect — for *any* operation, not just `push`. -/
+theorem lat_realized {σ : Type} {P Q : σ → Prop} (t : LAT P Q)
+    (γ : GName) [HasHeap γ GF F] (repr : σ → IProp GF) (e : Expr)
+    (hreal : Realizes (F := F) γ repr t.commit e) (s : σ) (hP : P s) :
+    repr s ⊢ wp (F := F) γ e (fun _ => iprop(∃ s', ⌜Q s'⌝ ∗ repr s')) := by
+  refine (hreal s).trans (wp_mono γ e _ _ ?_)
+  intro _
+  iintro H
+  iexists (t.commit s)
+  isplitl []
+  · ipure_intro; exact t.commits s hP
+  · iexact H
+
+/-! ## `push`, through the general bridge -/
+
+/-- `push` realizes the abstract LIFO commit on the heap-level stack predicate
+`isStack γ s` (head existentially bound — pushing rebinds it to the fresh node).
+`hclosed` is the well-formedness side-condition that heap values are
+substitution-closed; it holds for the first-order fragment (locs/ints/unit and
+pairs thereof) that a stack actually stores. -/
+theorem push_realizes (γ : GName) [HasHeap γ GF F] (s : Nat) (v : Val)
+    (hclv : ∀ (x : String) (w : Val), substV x w v = v)
+    (hclosed : ∀ (u : Val) (x : String) (w : Val), substV x w u = u) :
+    Realizes (F := F) γ (isStack γ s) (v :: ·) (pushBody s v) := by
+  intro xs
+  show iprop(∃ hd, s ↦[γ] hd ∗ listRep γ hd xs) ⊢
+      wp (F := F) γ (pushBody s v) (fun _ => isStack γ s (v :: xs))
+  iintro ⟨%hd, Hs, Hrep⟩
+  iapply (push_body_spec γ s v hd xs hclv (fun x w => hclosed hd x w))
+  isplitl [Hs]
+  · iexact Hs
+  · iexact Hrep
+
+/-- **End-to-end, through the general bridge.** From a stack holding `xs0`,
+running `push` ends in a heap representing some list `ys` satisfying the abstract
+postcondition `ys = v :: xs0` — `push`'s abstract `LAT` postcondition discharged
+on the real `wp` via `lat_realized`. -/
+theorem push_establishes_post (γ : GName) [HasHeap γ GF F] (s : Nat) (v : Val)
+    (xs0 : List Val)
+    (hclv : ∀ (x : String) (w : Val), substV x w v = v)
+    (hclosed : ∀ (u : Val) (x : String) (w : Val), substV x w u = u) :
+    isStack γ s xs0 ⊢
+      wp (F := F) γ (pushBody s v)
+        (fun _ => iprop(∃ ys, ⌜ys = v :: xs0⌝ ∗ isStack γ s ys)) :=
+  lat_realized (pushAbstract v xs0) γ (isStack γ s) (pushBody s v)
+    (push_realizes γ s v hclv hclosed) xs0 rfl
+
 end LeanliftIris.PhaseC

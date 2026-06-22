@@ -38,3 +38,5 @@ open LeanliftIris.PhaseC
 #print axioms proph_predicts_future           -- C2 operational: prophecy predicts the future
 #print axioms hoare_push_cas                  -- C1↔wp: linearization point as a Hoare triple
 #print axioms push_realizes_commit            -- C1↔wp: abstract LAT commit realized by real wp
+#print axioms lat_realized                    -- C1↔wp: general bridge (any LAT's Q on real wp)
+#print axioms push_establishes_post           -- C1↔wp: push's abstract Q, end-to-end via the bridge
