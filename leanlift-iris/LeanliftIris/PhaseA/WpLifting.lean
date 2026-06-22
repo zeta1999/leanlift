@@ -191,6 +191,33 @@ theorem prim_step_cas_inv {l : Nat} {v1 v2 : Val} {σ : Heap} {e' : Expr} {σ' :
   | casS hσ he => exact ⟨_, hσ, Or.inl ⟨he, hK', rfl, rfl⟩⟩
   | casF hσ hne => exact ⟨_, hσ, Or.inr ⟨hne, hK', rfl, rfl⟩⟩
 
+/-- **Context inversion for `faa`** (both arguments values). -/
+theorem ctx_nil_of_faa {K : List Frame} {a : Expr} {l : Nat} {n : Int}
+    (ha : toVal a = none) (h : fill K a = .faa (.val (.loc l)) (.val (.int n))) :
+    K = [] ∧ a = .faa (.val (.loc l)) (.val (.int n)) := by
+  cases K with
+  | nil => exact ⟨rfl, by simpa [fill] using h⟩
+  | cons fr K' =>
+    exfalso
+    have hnv : toVal (fill K' a) = none := fill_toVal_none ha K'
+    simp only [fill, List.foldr_cons] at h hnv
+    cases fr <;> simp_all [fill1, toVal]
+
+/-- **Step inversion for `faa`.** Fetch-and-add reads the integer `m` at `l`,
+writes `m + n`, and returns the old `m`. -/
+theorem prim_step_faa_inv {l : Nat} {n : Int} {σ : Heap} {e' : Expr} {σ' : Heap}
+    {efs : List Expr} (h : prim_step (.faa (.val (.loc l)) (.val (.int n))) σ e' σ' efs) :
+    ∃ m, σ l = some (.int m) ∧ e' = .val (.int m) ∧
+      σ' = σ.set l (.int (m + n)) ∧ efs = [] := by
+  obtain ⟨K, a, a', hK, hK', hHead⟩ := h
+  have ha := head_toVal_none hHead
+  obtain ⟨hKnil, haeq⟩ := ctx_nil_of_faa ha hK.symm
+  subst hKnil
+  subst haeq
+  simp only [fill] at hK'
+  cases hHead with
+  | faa hσ => exact ⟨_, hσ, hK', rfl, rfl⟩
+
 /-- **Context inversion for `alloc`.** -/
 theorem ctx_nil_of_alloc {K : List Frame} {a : Expr} {v : Val} (ha : toVal a = none)
     (h : fill K a = .alloc (.val v)) :
@@ -489,6 +516,69 @@ theorem wp_store (γ : GName) [HasHeap γ GF F] (l : Nat) (v_old v_new : Val)
         (Auth (own one) (toAgreeHeap (σ.set l v_new))
           • Frag l (own one) (toAgree (⟨v_new⟩ : LeibnizO Val))))
       ⊢ (stateInterp (F := F) γ (σ.set l v_new) ∗ (l ↦[γ] v_new)) :=
+    iOwn_op.mp
+  iintro !>
+  ihave Hcomb := Hcomb_lem $$ [Hsi, Hpt]
+  · isplitl [Hsi] <;> iassumption
+  ihave Hupd := Hupd_lem $$ [Hcomb]
+  · iexact Hcomb
+  imod Hupd with Hnew
+  ihave ⟨HA, HF⟩ := Hsplit_lem $$ [Hnew]
+  · iexact Hnew
+  iintro !>
+  isplitl [HA]
+  · iexact HA
+  · iapply wp_value
+    iapply HΦ
+    iexact HF
+
+/-- **Fetch-and-add rule.** Owning `l ↦ int m`, `FAA(l, n)` atomically writes
+`int (m + n)` and returns the old `int m` — an arithmetic read-modify-write. Like
+`wp_store` (frame-preserving ghost update) but it also reads (heap agreement pins
+the old value) and returns it. -/
+theorem wp_faa (γ : GName) [HasHeap γ GF F] (l : Nat) (m n : Int)
+    (Φ : Val → IProp GF) :
+    (l ↦[γ] (.int m)) ∗ ((l ↦[γ] (.int (m + n))) -∗ |==> Φ (.int m)) ⊢
+      wp (F := F) γ (.faa (.val (.loc l)) (.val (.int n))) Φ := by
+  iintro ⟨Hpt, HΦ⟩
+  iapply wp_unfold
+  simp only [wpF, toVal]
+  iintro %σ Hsi
+  iintro !>
+  ihave %Hag := stateInterp_pointsTo_agree (γ := γ) σ l (.int m) $$ [Hsi, Hpt]
+  · isplitl [Hsi] <;> iassumption
+  iintro %e' %σ' %efs %Hstep
+  obtain ⟨m', hσl, he', hσ', hefs⟩ := prim_step_faa_inv Hstep
+  have hmm : m = m' := by
+    have h2 := Option.some.inj (Hag.symm.trans hσl)
+    injection h2
+  subst hmm
+  subst he'; subst hσ'; subst hefs
+  have hval : ✓ (toAgree (⟨.int (m + n)⟩ : LeibnizO Val)) :=
+    CMRA.valid_op_left (toAgree_op_valid_iff_eq.mpr rfl)
+  have Hrepl := update_replace (F := F) (H := (Nat → Option ·)) (k := l)
+    (m1 := toAgreeHeap σ) (v1 := toAgree (⟨.int m⟩ : LeibnizO Val))
+    (v2 := toAgree (⟨.int (m + n)⟩ : LeibnizO Val)) hval
+  rw [insert_toAgreeHeap] at Hrepl
+  have Hcomb_lem :
+      (stateInterp (F := F) γ σ ∗ (l ↦[γ] (.int m)))
+      ⊢ iOwn (GF := GF) (F := FHeap (F := F)) γ
+          (Auth (own one) (toAgreeHeap σ)
+            • Frag l (own one) (toAgree (⟨.int m⟩ : LeibnizO Val))) :=
+    iOwn_op.mpr
+  have Hupd_lem :
+      (iOwn (GF := GF) (F := FHeap (F := F)) γ
+        (Auth (own one) (toAgreeHeap σ)
+          • Frag l (own one) (toAgree (⟨.int m⟩ : LeibnizO Val))))
+      ⊢ |==> iOwn (GF := GF) (F := FHeap (F := F)) γ
+        (Auth (own one) (toAgreeHeap (σ.set l (.int (m + n))))
+          • Frag l (own one) (toAgree (⟨.int (m + n)⟩ : LeibnizO Val))) :=
+    iOwn_update Hrepl
+  have Hsplit_lem :
+      (iOwn (GF := GF) (F := FHeap (F := F)) γ
+        (Auth (own one) (toAgreeHeap (σ.set l (.int (m + n))))
+          • Frag l (own one) (toAgree (⟨.int (m + n)⟩ : LeibnizO Val))))
+      ⊢ (stateInterp (F := F) γ (σ.set l (.int (m + n))) ∗ (l ↦[γ] (.int (m + n)))) :=
     iOwn_op.mp
   iintro !>
   ihave Hcomb := Hcomb_lem $$ [Hsi, Hpt]

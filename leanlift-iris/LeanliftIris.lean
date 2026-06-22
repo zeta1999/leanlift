@@ -10,6 +10,7 @@ import LeanliftIris.PhaseA.WpLifting
 import LeanliftIris.PhaseA.Adequacy
 import LeanliftIris.PhaseA.Examples
 import LeanliftIris.PhaseA.Treiber
+import LeanliftIris.PhaseA.Counter
 import LeanliftIris.PhaseB.WeakMem
 import LeanliftIris.PhaseB.Machine
 import LeanliftIris.PhaseB.Logic

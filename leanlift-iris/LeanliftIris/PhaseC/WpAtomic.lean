@@ -26,6 +26,7 @@ So the logically-atomic spec (abstract, core Lean) and the verified `wp` proof
 (concrete, iris-lean) name the *same* atomic effect. Sorry-free.
 -/
 import LeanliftIris.PhaseA.Treiber
+import LeanliftIris.PhaseA.Counter
 import LeanliftIris.PhaseC.LogAtom
 
 namespace LeanliftIris.PhaseC
@@ -222,5 +223,44 @@ theorem pop_realizes_commit (γ : GName) [HasHeap γ GF F] (s : Nat) (x nxt : Va
       (popBody s)
       (fun r => iprop(⌜r = x⌝ ∗ isStack γ s ((popAbstract x xs).commit (x :: xs)))) :=
   pop_body_spec γ s x nxt l xs hclx hclnxt
+
+/-! ## A third operation: the FAA counter (a *total* op, through `Realizes`)
+
+The counter increment exercises an arithmetic read-modify-write (`FAA`), not a
+`CAS`, and — unlike `pop` — it is **total** (defined for every counter value). So
+it goes through the bridge via the `∀`-quantified `Realizes` wrapper, exactly like
+`push`: the same interface absorbs CAS-linking, head-removal, and arithmetic RMW
+operations, total and partial alike. -/
+
+/-- The abstract atomic increment as a core-Lean logically-atomic triple: on count
+`k0` it commits to `k0 + 1`, linearization point `(· + 1)`. -/
+def incrAbstract (k0 : Int) : LAT (· = k0) (· = k0 + 1) where
+  pre := []
+  commit := (· + 1)
+  post := []
+  pre_frame := fun _ hf => absurd hf List.not_mem_nil
+  post_frame := fun _ hf => absurd hf List.not_mem_nil
+  commits := fun _ hs => by rw [hs]
+
+/-- `incr` realizes the abstract increment commit on the heap-level counter
+predicate `isCounter γ s` — total, so the `∀`-`Realizes` form applies. -/
+theorem incr_realizes (γ : GName) [HasHeap γ GF F] (s : Nat) :
+    Realizes (F := F) γ (isCounter γ s) (· + 1) (incrBody s) := by
+  intro k
+  refine (incr_spec γ s k).trans (wp_mono γ (incrBody s) _ _ ?_)
+  intro _
+  iintro ⟨_, H⟩
+  iexact H
+
+/-- **End-to-end, through the general bridge.** From a counter holding `k0`,
+running `incr` ends in a heap representing some count `k'` with `k' = k0 + 1` —
+the abstract `LAT` postcondition of the atomic increment, discharged on the real
+`wp` via `lat_realized`. -/
+theorem incr_establishes_post (γ : GName) [HasHeap γ GF F] (s : Nat) (k0 : Int) :
+    isCounter γ s k0 ⊢
+      wp (F := F) γ (incrBody s)
+        (fun _ => iprop(∃ k', ⌜k' = k0 + 1⌝ ∗ isCounter γ s k')) :=
+  lat_realized (incrAbstract k0) γ (isCounter γ s) (incrBody s)
+    (incr_realizes γ s) k0 rfl
 
 end LeanliftIris.PhaseC
