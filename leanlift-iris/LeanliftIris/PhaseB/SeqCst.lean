@@ -163,4 +163,172 @@ theorem sb_sc_blocks_stale_load (hxy : x ≠ y) :
 
 end SB
 
+/-! ## The full universal: no SC execution of SB yields the weak outcome
+
+The results above show the *one* stale step is blocked. The genuine theorem is
+universal: **no** interleaving of the all-`sc` SB program ends with both reads
+`0`. The generic list-pool `SCStep` is awkward to induct over, so we model SB on
+an explicit two-thread transition system whose store/load transitions mirror
+`scStore`/`canLoadSC` exactly, and prove impossibility by an invariant. -/
+
+/-! Two reusable memory facts about an SC store. -/
+section MemLemmas
+
+/-- An SC store to `l` keeps every existing value-`v` write at `l` (those with
+`ts ≥ 1`) and its own fresh write is also `v` — so a single-published-value
+location stays single-valued. -/
+theorem scStore_preserves_val (M : Mem) (V Vsc : View) (l : Loc) (v : Int)
+    (hM : ∀ m, m ∈ M l → 1 ≤ m.ts → m.val = v) :
+    ∀ m, m ∈ (scStore M V Vsc l v).1 l → 1 ≤ m.ts → m.val = v := by
+  intro m hm hts
+  simp only [scStore, push] at hm
+  split at hm
+  · rcases List.mem_cons.mp hm with h | h
+    · rw [h]
+    · exact hM m h hts
+  · exact hM m hm hts
+
+/-- An SC store to `l` leaves any *other* location's history untouched. -/
+theorem scStore_other (M : Mem) (V Vsc : View) (l : Loc) (v : Int) (l' : Loc) (h : l ≠ l') :
+    (scStore M V Vsc l v).1 l' = M l' := by
+  simp [scStore, push, Ne.symm h]
+
+end MemLemmas
+
+/-- An explicit two-thread state for the SB program. `pc ∈ {0:pre-store,
+1:stored, 2:done}`; `r1`/`r2` record the read results; `V1`/`V2` the thread
+views; `M`/`Vsc` the shared memory and global SC frontier. -/
+structure SBState where
+  pc1 : Nat
+  pc2 : Nat
+  M   : Mem
+  Vsc : View
+  V1  : View
+  V2  : View
+  r1  : Option Int
+  r2  : Option Int
+
+namespace SBState
+/-- The SB initial state: both threads at pc 0, fresh memory, no reads. -/
+def init : SBState := ⟨0, 0, initMem, View.bot, View.bot, View.bot, none, none⟩
+end SBState
+
+/-- One SC step of the SB program. Stores/loads are exactly `scStore`/`canLoadSC`:
+T1 does `x:=1`(sc) then `r1:=y`(sc); T2 does `y:=1`(sc) then `r2:=x`(sc). -/
+inductive SBStep (x y : Loc) : SBState → SBState → Prop where
+  | st1 (s : SBState) (h : s.pc1 = 0) :
+      SBStep x y s
+        { s with pc1 := 1,
+                 M   := (scStore s.M s.V1 s.Vsc x 1).1,
+                 V1  := (scStore s.M s.V1 s.Vsc x 1).2.1,
+                 Vsc := (scStore s.M s.V1 s.Vsc x 1).2.2 }
+  | st2 (s : SBState) (h : s.pc2 = 0) :
+      SBStep x y s
+        { s with pc2 := 1,
+                 M   := (scStore s.M s.V2 s.Vsc y 1).1,
+                 V2  := (scStore s.M s.V2 s.Vsc y 1).2.1,
+                 Vsc := (scStore s.M s.V2 s.Vsc y 1).2.2 }
+  | ld1 (s : SBState) (m : Msg) (h : s.pc1 = 1) (hcl : canLoadSC s.M s.V1 s.Vsc y m) :
+      SBStep x y s { s with pc1 := 2, V1 := scLoadView s.V1 s.Vsc m, r1 := some m.val }
+  | ld2 (s : SBState) (m : Msg) (h : s.pc2 = 1) (hcl : canLoadSC s.M s.V2 s.Vsc x m) :
+      SBStep x y s { s with pc2 := 2, V2 := scLoadView s.V2 s.Vsc m, r2 := some m.val }
+
+/-- Reflexive-transitive closure of `SBStep`. -/
+inductive SBSteps (x y : Loc) : SBState → SBState → Prop where
+  | refl (s : SBState) : SBSteps x y s s
+  | step {s s' s'' : SBState} : SBStep x y s s' → SBSteps x y s' s'' → SBSteps x y s s''
+
+/-- The reachability invariant. The last conjunct is the goal; the others (each
+store raises its frontier; each location stays single-valued; an unfinished read
+is `none`) are the supporting facts that keep it inductive. -/
+def Inv (x y : Loc) (s : SBState) : Prop :=
+  (1 ≤ s.pc1 → 1 ≤ s.Vsc x) ∧
+  (1 ≤ s.pc2 → 1 ≤ s.Vsc y) ∧
+  (∀ m, m ∈ s.M x → 1 ≤ m.ts → m.val = 1) ∧
+  (∀ m, m ∈ s.M y → 1 ≤ m.ts → m.val = 1) ∧
+  (s.pc1 < 2 → s.r1 = none) ∧
+  (s.pc2 < 2 → s.r2 = none) ∧
+  ¬ (s.r1 = some 0 ∧ s.r2 = some 0)
+
+/-- The invariant holds initially. -/
+theorem Inv_init (x y : Loc) : Inv x y SBState.init := by
+  refine ⟨fun h => ?_, fun h => ?_, ?_, ?_, fun _ => rfl, fun _ => rfl, by simp [SBState.init]⟩
+  · exact absurd h (by decide)
+  · exact absurd h (by decide)
+  · intro m hm hts
+    simp only [SBState.init, initMem, List.mem_singleton] at hm
+    subst hm; exact absurd hts (by decide)
+  · intro m hm hts
+    simp only [SBState.init, initMem, List.mem_singleton] at hm
+    subst hm; exact absurd hts (by decide)
+
+/-- The invariant is preserved by every SC step. The two load cases are the crux:
+a read whose frontier already reflects the *other* thread's store (because that
+store has run) is forced off the stale `0`. -/
+theorem Inv_step (x y : Loc) (hxy : x ≠ y) {s s' : SBState}
+    (hI : Inv x y s) (hstep : SBStep x y s s') : Inv x y s' := by
+  cases hstep with
+  | st1 ht =>
+      obtain ⟨ha, hb, hfx, hfy, hi1, hi2, hc⟩ := hI
+      refine ⟨fun _ => scStore_publishes s.M s.V1 s.Vsc x 1,
+              fun hp => Nat.le_trans (hb hp) (scStore_Vsc_mono s.M s.V1 s.Vsc x 1 y),
+              scStore_preserves_val s.M s.V1 s.Vsc x 1 hfx, ?_,
+              fun _ => hi1 (by omega), hi2, hc⟩
+      intro m hm hts
+      change m ∈ (scStore s.M s.V1 s.Vsc x 1).1 y at hm
+      rw [scStore_other s.M s.V1 s.Vsc x 1 y hxy] at hm
+      exact hfy m hm hts
+  | st2 ht =>
+      obtain ⟨ha, hb, hfx, hfy, hi1, hi2, hc⟩ := hI
+      refine ⟨fun hp => Nat.le_trans (ha hp) (scStore_Vsc_mono s.M s.V2 s.Vsc y 1 x),
+              fun _ => scStore_publishes s.M s.V2 s.Vsc y 1, ?_,
+              scStore_preserves_val s.M s.V2 s.Vsc y 1 hfy,
+              hi1, fun _ => hi2 (by omega), hc⟩
+      intro m hm hts
+      change m ∈ (scStore s.M s.V2 s.Vsc y 1).1 x at hm
+      rw [scStore_other s.M s.V2 s.Vsc y 1 x (Ne.symm hxy)] at hm
+      exact hfx m hm hts
+  | ld1 m ht hcl =>
+      obtain ⟨ha, hb, hfx, hfy, hi1, hi2, hc⟩ := hI
+      refine ⟨fun _ => ha (by omega), hb, hfx, hfy,
+              fun h => absurd h (Nat.lt_irrefl 2), hi2, ?_⟩
+      rintro ⟨h1, h2⟩
+      have e0 : m.val = 0 := by simpa using h1
+      have hpc2 : 1 ≤ s.pc2 := by
+        rcases Nat.lt_or_ge s.pc2 1 with hlt | hge
+        · exfalso; have hr : s.r2 = none := hi2 (by omega); rw [hr] at h2; simp at h2
+        · exact hge
+      have e1 : m.val = 1 := hfy m hcl.1 (Nat.le_trans (hb hpc2) hcl.2.2)
+      omega
+  | ld2 m ht hcl =>
+      obtain ⟨ha, hb, hfx, hfy, hi1, hi2, hc⟩ := hI
+      refine ⟨ha, fun _ => hb (by omega), hfx, hfy,
+              hi1, fun h => absurd h (Nat.lt_irrefl 2), ?_⟩
+      rintro ⟨h1, h2⟩
+      have e0 : m.val = 0 := by simpa using h2
+      have hpc1 : 1 ≤ s.pc1 := by
+        rcases Nat.lt_or_ge s.pc1 1 with hlt | hge
+        · exfalso; have hr : s.r1 = none := hi1 (by omega); rw [hr] at h1; simp at h1
+        · exact hge
+      have e1 : m.val = 1 := hfx m hcl.1 (Nat.le_trans (ha hpc1) hcl.2.2)
+      omega
+
+/-- The invariant is preserved along any SC execution. -/
+theorem Inv_steps (x y : Loc) (hxy : x ≠ y) {s s' : SBState}
+    (h : SBSteps x y s s') : Inv x y s → Inv x y s' := by
+  induction h with
+  | refl _ => exact id
+  | step hstep _ ih => exact fun hI => ih (Inv_step x y hxy hI hstep)
+
+/-- **Store buffering is forbidden under seq_cst (universal).** No interleaved SC
+execution of the all-`sc` SB program `x:=1; r1:=y ∥ y:=1; r2:=x` ends with both
+reads `0`. Each SC store raises the global SC frontier, and a read whose frontier
+already reflects the other store is forced off the stale value — closing the
+`st < ld < st < ld < st` cycle the weak outcome would need. Contrast
+`sb_admits_reorder`, where release/acquire admits exactly this outcome: this is
+the StoreLoad guarantee the Chase–Lev deque's `seq_cst` fence buys. -/
+theorem sb_sc_no_both_zero (x y : Loc) (hxy : x ≠ y) {s : SBState}
+    (h : SBSteps x y SBState.init s) : ¬ (s.r1 = some 0 ∧ s.r2 = some 0) :=
+  (Inv_steps x y hxy h (Inv_init x y)).2.2.2.2.2.2
+
 end LeanliftIris.PhaseB
