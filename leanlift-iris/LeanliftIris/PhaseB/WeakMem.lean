@@ -1,0 +1,139 @@
+/-
+Phase B (step 1) — a view-based release/acquire weak-memory model for `λ-conc`.
+
+Phase A's semantics is sequentially consistent; the corpus' interesting members
+(SPSC ring #1, seqlock #3, SPMC #5, Chase–Lev #8) are *weak-memory* and cannot be
+expressed there. This file starts the weak-memory layer with the standard
+view-based operational model (à la iRC11 / ORC11):
+
+  * every location carries a **modification order** — a history of write messages,
+    each with a timestamp and a *released view*;
+  * every thread has a **view** — the latest timestamp it has observed per
+    location;
+  * a **release** store attaches the writer's view to its message; an **acquire**
+    load absorbs the message's view; **relaxed** accesses only move the
+    single-location timestamp.
+
+We validate the model on the **message-passing (MP)** litmus — the publish-then-
+read edge that the corpus' SPSC ring (`spsc_ring.hpp`) relies on: *"the payload
+write is published before the counter advance (release), observed by the other
+side (acquire)."* The theorem `message_passing` shows that after that
+release/acquire handshake, the consumer is *forced* to observe the published
+payload (it cannot read the stale initial value).
+
+Core Lean only (no Iris): this is the operational substrate a weak-memory program
+logic (B2) will later be built over. Sorry-free.
+-/
+namespace LeanliftIris.PhaseB
+
+/-- C11 memory orderings (the subset the corpus uses). -/
+inductive MemOrd | rlx | rel | acq | sc
+deriving DecidableEq, Repr
+
+abbrev Time := Nat
+abbrev Loc := Nat
+
+/-- A thread/message **view**: the latest timestamp observed per location. -/
+abbrev View := Loc → Time
+
+namespace View
+/-- The initial view — nothing observed. -/
+def bot : View := fun _ => 0
+/-- Pointwise max (the join of the observation lattice). -/
+def join (V W : View) : View := fun l => max (V l) (W l)
+/-- The view that has observed exactly timestamp `t` at `l`. -/
+def singleton (l : Loc) (t : Time) : View := fun l' => if l' = l then t else 0
+end View
+
+/-- A write **message** in a location's modification order. -/
+structure Msg where
+  val   : Int
+  ts    : Time
+  /-- the view this write releases (carried to acquire-readers). -/
+  rview : View
+
+/-- **Memory**: each location's modification order (newest first). -/
+abbrev Mem := Loc → List Msg
+
+/-- The empty/initial memory: every location holds a single value-`0` write at
+timestamp `0` with the bottom view. -/
+def initMem : Mem := fun _ => [⟨0, 0, View.bot⟩]
+
+/-- The greatest timestamp currently written at `l`. -/
+def maxTs (M : Mem) (l : Loc) : Time := (M l).foldl (fun acc m => max acc m.ts) 0
+
+/-- Append a message to `l`'s history. -/
+def push (M : Mem) (l : Loc) (m : Msg) : Mem :=
+  fun l' => if l' = l then m :: M l' else M l'
+
+/-- **Store** of `v` at `l` with ordering `o` by a thread with view `V`. Picks a
+fresh timestamp after every existing write; a release/seq-cst store attaches the
+writer's full view, a relaxed store only its own new timestamp. Returns the new
+memory and the writer's advanced view. -/
+def store (M : Mem) (V : View) (l : Loc) (v : Int) (o : MemOrd) : Mem × View :=
+  let t := maxTs M l + 1
+  let base : View := if o = .rel ∨ o = .sc then V else View.bot
+  let rv := View.join base (View.singleton l t)
+  (push M l ⟨v, t, rv⟩, View.join V (View.singleton l t))
+
+/-- A thread with view `V` may **load** message `m` from `l` iff `m` is in the
+history and is not older than what the thread has already observed there. -/
+def canLoad (M : Mem) (V : View) (l : Loc) (m : Msg) : Prop :=
+  m ∈ M l ∧ V l ≤ m.ts
+
+/-- The view a thread holds after loading `m` from `l` with ordering `o`: an
+acquire/seq-cst load absorbs `m`'s released view, a relaxed load only the
+single-location timestamp. -/
+def loadView (V : View) (l : Loc) (m : Msg) (o : MemOrd) : View :=
+  View.join V (if o = .acq ∨ o = .sc then m.rview else View.singleton l m.ts)
+
+/-! ## Message passing (the SPSC publish-then-read edge)
+
+Locations `d` (data/payload) and `f` (flag/counter). Producer: write `d := 42`
+relaxed, then `f := 1` **release**. Consumer: **acquire**-load `f`, then load
+`d`. Claim: once the consumer has acquire-read the producer's release write, any
+`d`-message it can still read carries the published value `42` — never the stale
+initial `0`. -/
+
+section MP
+variable (d f : Loc)
+
+/-- Memory after the producer's two writes (`d := 42` relaxed, `f := 1` release).
+-/
+def mpMem : Mem :=
+  let (M1, V1) := store initMem View.bot d 42 .rlx
+  (store M1 V1 f 1 .rel).1
+
+/-- The producer's view after both writes. -/
+def mpProdView : View :=
+  let (_, V1) := store initMem View.bot d 42 .rlx
+  (store (store initMem View.bot d 42 .rlx).1 V1 f 1 .rel).2
+
+/-- The release message the producer published at the flag `f`. -/
+def mpFlagMsg : Msg :=
+  let (M1, V1) := store initMem View.bot d 42 .rlx
+  ⟨1, maxTs M1 f + 1, View.join V1 (View.singleton f (maxTs M1 f + 1))⟩
+
+/-- **Message passing.** After the consumer (starting from the bottom view)
+acquire-loads the producer's release write on `f`, every `d`-message it can then
+load carries the published value `42`. The release/acquire handshake forces the
+payload to be visible — exactly the SPSC ring's correctness argument. -/
+theorem message_passing (hdf : d ≠ f) :
+    ∀ m : Msg,
+      canLoad (mpMem d f) (loadView View.bot f (mpFlagMsg d f) .acq) d m → m.val = 42 := by
+  intro m hm
+  obtain ⟨hmem, hts⟩ := hm
+  -- the consumer's observed timestamp at `d` is 1 (gained via the acquire load)
+  have hview : loadView View.bot f (mpFlagMsg d f) .acq d = 1 := by
+    simp [loadView, mpFlagMsg, store, View.join, View.bot, View.singleton, maxTs,
+      initMem, push, hdf, Ne.symm hdf]
+  rw [hview] at hts
+  -- `d`'s history is [⟨42,1,_⟩, ⟨0,0,bot⟩]; only the ts-1 (published) write has 1 ≤ ts
+  simp [mpMem, store, push, maxTs, initMem, hdf, Ne.symm hdf] at hmem
+  rcases hmem with h | h <;> subst h
+  · rfl
+  · simp at hts
+
+end MP
+
+end LeanliftIris.PhaseB
