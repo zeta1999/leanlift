@@ -63,7 +63,9 @@ namespace LeanliftIris.PhaseA
 #print axioms wp_adequacy_val
 #print axioms ex_alloc_load
 #print axioms push_cas_step
+#print axioms push_body_spec
 #print axioms wp_mono
 #print axioms wp_let
+#print axioms wp_pair
 
 end LeanliftIris.PhaseA

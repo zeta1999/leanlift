@@ -55,15 +55,20 @@ def pushV : Val :=
         (.alloc (.pairE (.var "v") (.var "head"))))))
       (.load (.var "s")))))
 
-/-- `push`'s body with `s := loc s` and `v := v` substituted in (and the retry
-inlined as `unit`, which the single-owner proof never reaches). -/
+/-- `push`'s body with `s := loc s` and `v := v` plugged in, in A-normal form
+(every operation bound by a `let`, so the proof is a clean chain of `wp_let`s).
+`let head = !s in let p = (v, head) in let node = alloc p in
+ let b = CAS(s, head, node) in if b then () else ()`. The retry is inlined as
+`()` (dead in the single-owner proof). -/
 def pushBody (s : Nat) (v : Val) : Expr :=
   .app (.val (.clos "_" "head"
-    (.app (.val (.clos "_" "node"
-      (.ite (.cas (.val (.loc s)) (.var "head") (.var "node"))
-            (.val .unit)
-            (.val .unit))))
-      (.alloc (.pairE (.val v) (.var "head"))))))
+    (.app (.val (.clos "_" "p"
+      (.app (.val (.clos "_" "node"
+        (.app (.val (.clos "_" "b"
+          (.ite (.var "b") (.val .unit) (.val .unit))))
+          (.cas (.val (.loc s)) (.var "head") (.var "node")))))
+        (.alloc (.var "p")))))
+      (.pairE (.val v) (.var "head")))))
     (.load (.val (.loc s)))
 
 /-! ## Property: the linking CAS establishes the stack invariant
@@ -94,5 +99,69 @@ theorem push_cas_step (γ : GName) [HasHeap γ GF F] (s : Nat) (v hd : Val) (l :
       · isplitl [Hnode]
         · iexact Hnode
         · iexact Hrep
+
+/-! ## Property: full `push` body — *push prepends*
+
+The single end-to-end theorem: running `push`'s body (`head = !s; node =
+alloc(v, head); CAS(s, head, node)`) on a stack holding `xs` yields a stack
+holding `v :: xs`. Composes every rule: `wp_let`/`wp_bind` (sequencing),
+`wp_load`, `wp_pair`, `wp_alloc`, `wp_cas_suc`, `wp_if_true`, `wp_value`. -/
+theorem push_body_spec (γ : GName) [HasHeap γ GF F] (s : Nat) (v hd : Val) (xs : List Val)
+    (hclv : ∀ (x : String) (w : Val), substV x w v = v)
+    (hclhd : ∀ (x : String) (w : Val), substV x w hd = hd) :
+    (s ↦[γ] hd) ∗ listRep γ hd xs ⊢
+      wp (F := F) γ (pushBody s v) (fun _ => isStack γ s (v :: xs)) := by
+  simp only [pushBody]
+  iintro ⟨Hs, Hrep⟩
+  -- let head = !s   (head ↦ hd)
+  iapply wp_let
+  iapply (wp_load γ s hd)
+  isplitl [Hs]
+  · iexact Hs
+  · iintro Hs2
+    iintro !>
+    iintro !>
+    simp [substE, substV, hclv, hclhd]
+    -- let p = (v, hd)
+    iapply wp_let
+    iapply wp_pair
+    iintro !>
+    iapply wp_value
+    iintro !>
+    iintro !>
+    simp [substE, substV, hclv, hclhd]
+    -- let node = alloc (v, hd)
+    iapply wp_let
+    iapply (wp_alloc γ (.pair v hd))
+    iintro %l Hnode
+    iintro !>
+    iintro !>
+    simp [substE, substV, hclv, hclhd]
+    -- let b = CAS(s, hd, loc l)
+    iapply wp_let
+    iapply (wp_cas_suc γ s hd (.loc l))
+    isplitl [Hs2]
+    · iexact Hs2
+    · iintro Hs3
+      iintro !>
+      iintro !>
+      simp [substE, substV, hclv, hclhd]
+      -- if b (= true) then () else ()
+      iapply wp_if_true
+      iintro !>
+      iapply wp_value
+      iintro !>
+      -- reassemble isStack γ s (v :: xs)
+      simp only [isStack]
+      iexists (.loc l)
+      isplitl [Hs3]
+      · iexact Hs3
+      · simp only [listRep]
+        iexists l, hd
+        isplitl []
+        · ipure_intro; rfl
+        · isplitl [Hnode]
+          · iexact Hnode
+          · iexact Hrep
 
 end LeanliftIris.PhaseA
