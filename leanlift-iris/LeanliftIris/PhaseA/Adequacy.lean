@@ -196,4 +196,74 @@ theorem wp_adequacy_seq (γ : GName) [HasHeap γ GF F] (e : Expr) (σ : Heap)
     iexact H
   exact sfupdN_pure_soundness k (h.trans (hpres.trans (sfupdN_mono k hpayload)))
 
+/-! ## Heap-ghost initialization + a fully-closed operational theorem
+
+To *apply* adequacy from nothing we must produce the initial `stateInterp` — the
+authoritative heap — out of thin air. `iOwn_alloc` allocates a fresh ghost name
+owning the full authoritative heap (valid by `auth_one_valid`). Combined with a
+closed `wp` proof and adequacy, this yields a fully-closed meta-level fact about a
+real program, with no remaining iProp hypotheses. -/
+
+/-- **Heap-ghost initialization.** The authoritative heap for any `σ` can be
+allocated under a fresh ghost name. -/
+theorem heap_init (σ : Heap) :
+    ⊢ (iprop(|==> ∃ γ : GName, stateInterp (F := F) γ σ) : IProp GF) :=
+  iOwn_alloc _ HeapView.auth_one_valid
+
+/-- A length-indexed fork-free run (the step count is explicit, so it is uniform
+across a later `∃ γ`). -/
+inductive primStepsN : Nat → Expr → Heap → Expr → Heap → Prop where
+  | refl {e σ} : primStepsN 0 e σ e σ
+  | tail {n e σ e' σ' e'' σ''} :
+      primStepsN n e σ e' σ' → prim_step e' σ' e'' σ'' [] →
+      primStepsN (n + 1) e σ e'' σ''
+
+/-- A fork-free run has some explicit length. -/
+theorem primStepsN_of_primSteps {e : Expr} {σ : Heap} {e' : Expr} {σ' : Heap}
+    (h : primSteps e σ e' σ') : ∃ n, primStepsN n e σ e' σ' := by
+  induction h with
+  | refl => exact ⟨0, .refl⟩
+  | tail _ hstep ih => obtain ⟨n, hn⟩ := ih; exact ⟨n + 1, hn.tail hstep⟩
+
+/-- **Multi-step preservation, explicit count.** Same as `wp_primSteps_pres` but
+the tower height is the run's length `n` — fixed independently of any ghost name. -/
+theorem wp_primStepsN_pres (γ : GName) [HasHeap γ GF F] (Φ : Val → IProp GF)
+    {n : Nat} {e : Expr} {σ : Heap} {e' : Expr} {σ' : Heap}
+    (h : primStepsN n e σ e' σ') :
+    iprop(stateInterp γ σ ∗ wp (F := F) γ e Φ) ⊢
+      sfupdN n iprop(stateInterp γ σ' ∗ wp (F := F) γ e' Φ) := by
+  induction h with
+  | refl => exact BIUpdate.intro
+  | @tail n e σ e1 σ1 e2 σ2 _hsteps hstep ih =>
+      have hone :
+          iprop(stateInterp γ _ ∗ wp (F := F) γ _ Φ) ⊢ sfupdN 1 iprop(stateInterp γ _ ∗ wp (F := F) γ _ Φ) :=
+        wp_step_pres γ _ _ _ _ [] Φ (toVal_none_of_prim_step hstep) hstep
+      exact ih.trans ((sfupdN_mono n hone).trans (sfupdN_compose n 1 _))
+
+/-- **Closed adequacy.** If — *from nothing* — one can `|==>`-allocate a ghost
+heap interpreting `σ` together with a `wp` proof of a pure `φ` (the shape
+`heap_init` plus a closed `wp` produce), and the program runs fork-free to a value
+`v`, then `φ v` holds. No iProp hypotheses remain — a fully self-contained
+meta-level guarantee. The step count is fixed by the run, so it is uniform under
+the existential over the freshly-allocated ghost name. -/
+theorem wp_adequacy_closed {e : Expr} {σ : Heap} {v : Val} {σ' : Heap}
+    {φ : Val → Prop} (hrun : primSteps e σ (.val v) σ')
+    (h : (iprop(True) : IProp GF) ⊢
+      iprop(|==> ∃ γ : GName,
+        stateInterp γ σ ∗ wp (F := F) γ e (fun w => iprop(⌜φ w⌝)))) : φ v := by
+  obtain ⟨n, hn⟩ := primStepsN_of_primSteps hrun
+  refine sfupdN_pure_soundness n (h.trans ((BIUpdate.mono ?_).trans (sfupdN_bupd_absorb n _)))
+  iintro ⟨%γ, Hpre⟩
+  -- per ghost name: preservation to the final value, then the payload collapses
+  have bpe : (iprop(|==> ⌜φ v⌝) : IProp GF) ⊢ iprop(⌜φ v⌝) :=
+    (BIUpdate.mono plainly_pure.mpr).trans BIBUpdatePlainly.bupd_plainly
+  have hpayload :
+      iprop(stateInterp γ σ' ∗ wp (F := F) γ (.val v) (fun w => iprop(⌜φ w⌝))) ⊢
+        iprop(⌜φ v⌝) := by
+    iintro ⟨_, H⟩
+    iapply ((wp_value_inv γ v (fun w => iprop(⌜φ w⌝))).trans bpe)
+    iexact H
+  iapply ((wp_primStepsN_pres γ (fun w => iprop(⌜φ w⌝)) hn).trans (sfupdN_mono n hpayload))
+  iexact Hpre
+
 end LeanliftIris.PhaseA

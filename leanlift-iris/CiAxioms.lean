@@ -45,3 +45,6 @@ open LeanliftIris.PhaseC
 #print axioms LeanliftIris.PhaseA.wp_primSteps_pres    -- A2: multi-step wp preservation
 #print axioms LeanliftIris.PhaseA.sfupdN_pure_soundness -- A2: step-update tower collapse (model)
 #print axioms LeanliftIris.PhaseA.wp_adequacy_seq       -- A2: sequential adequacy (trust anchor)
+#print axioms LeanliftIris.PhaseA.heap_init             -- A2: heap-ghost initialization
+#print axioms LeanliftIris.PhaseA.wp_adequacy_closed    -- A2: closed adequacy (no iProp hyps)
+#print axioms LeanliftIris.PhaseA.ex_alloc_load_closed_input -- A2: closed pipeline input from nothing
