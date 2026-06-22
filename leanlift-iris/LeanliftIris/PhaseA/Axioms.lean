@@ -10,6 +10,7 @@ import LeanliftIris.PhaseA.HeapRes
 import LeanliftIris.PhaseA.Wp
 import LeanliftIris.PhaseA.WpLifting
 import LeanliftIris.PhaseA.Adequacy
+import LeanliftIris.PhaseA.Examples
 
 namespace LeanliftIris.PhaseA
 
@@ -59,5 +60,6 @@ namespace LeanliftIris.PhaseA
 #print axioms fill_step_inv
 #print axioms wp_step_pres
 #print axioms wp_adequacy_val
+#print axioms ex_alloc_load
 
 end LeanliftIris.PhaseA
