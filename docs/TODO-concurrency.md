@@ -49,7 +49,8 @@ unblocked) → fork/progress `wpF` extensions. Then Phase B (weak memory, gated)
       - code: `pushV`/`pushBody` — Treiber `push` encoded in `λ-conc` (matches `treiber_hazard.cpp`).
       - annotation: `listRep`/`isStack` (the cell `s` points to a linked list spelling a Lean `List Val`).
       - property: **`push_cas_step`** — the linking `CAS` (succeeds in the single-owner SC setting) re-establishes `isStack γ s (v :: xs)` ("push prepends"). Plus `ex_alloc_load` shows `wp_bind`+`alloc`+`load` composing on a real program.
-      - remaining (mechanical): the single end-to-end `push_body_spec` chaining `load`+`alloc`+`cas` over the `let`s — cleanest via a `wp_let` helper (needs `wp_mono`, provable by Löb like `wp_bind`). Then: linearizable/concurrent version = logical-atomicity (Phase C); reclamation deferred.
+      - **`push_body_spec` DONE** — the single end-to-end theorem: `(s ↦ hd ∗ listRep hd xs) ⊢ wp γ (pushBody s v) {isStack γ s (v :: xs)}` (`push` prepends), chaining `wp_let` (head/pair/node/CAS-result, A-normal form) + `wp_load`/`wp_pair`/`wp_alloc`/`wp_cas_suc`/`wp_if_true`/`wp_value`. Needed helpers `wp_mono`/`wp_let`/`wp_pair` (all proven). Annotation includes closedness of the pushed value + head pointer (true for runtime values). **The objective — real lock-free code + annotations → proved property — is demonstrated end-to-end.**
+      - remaining: linearizable/concurrent version = logical-atomicity (Phase C); reclamation deferred; `pop` analogous.
 
 ## Phase B — weak-memory layer (long pole; GATE after Phase A go/no-go)
 - [ ] B1 C11 release-acquire+relaxed op-sem for `λ-conc` (prefer operational view-based, à la iRC11)

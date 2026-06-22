@@ -242,6 +242,31 @@ theorem prim_step_beta_inv {f x : String} {body : Expr} {w : Val} {σ : Heap}
   cases hHead with
   | beta => exact ⟨hK', rfl, rfl⟩
 
+/-- **Context inversion for `pairE`** (both components values). -/
+theorem ctx_nil_of_pair {K : List Frame} {a : Expr} {x y : Val} (ha : toVal a = none)
+    (h : fill K a = .pairE (.val x) (.val y)) :
+    K = [] ∧ a = .pairE (.val x) (.val y) := by
+  cases K with
+  | nil => exact ⟨rfl, by simpa [fill] using h⟩
+  | cons fr K' =>
+    exfalso
+    have hnv : toVal (fill K' a) = none := fill_toVal_none ha K'
+    simp only [fill, List.foldr_cons] at h hnv
+    cases fr <;> simp_all [fill1, toVal]
+
+/-- **Step inversion for `pairE`.** -/
+theorem prim_step_pair_inv {x y : Val} {σ : Heap} {e' : Expr} {σ' : Heap} {efs : List Expr}
+    (h : prim_step (.pairE (.val x) (.val y)) σ e' σ' efs) :
+    e' = .val (.pair x y) ∧ σ' = σ ∧ efs = [] := by
+  obtain ⟨K, a, a', hK, hK', hHead⟩ := h
+  have ha := head_toVal_none hHead
+  obtain ⟨hKnil, haeq⟩ := ctx_nil_of_pair ha hK.symm
+  subst hKnil
+  subst haeq
+  simp only [fill] at hK'
+  cases hHead with
+  | pair => exact ⟨hK', rfl, rfl⟩
+
 /-! ## Generic lifting -/
 
 variable {F} [UFraction F] {GF} [ElemG GF (FHeap (F := F))]
@@ -286,6 +311,13 @@ theorem wp_if_true (γ : GName) [HasHeap γ GF F] (e1 e2 : Expr) (Φ : Val → I
   apply wp_pure_det (hnv := rfl)
   intro σ e' σ' efs h
   exact prim_step_ite_true_inv h
+
+/-- **Pair rule.** Building a pair of two values. -/
+theorem wp_pair (γ : GName) [HasHeap γ GF F] (x y : Val) (Φ : Val → IProp GF) :
+    ▷ wp (F := F) γ (.val (.pair x y)) Φ ⊢ wp (F := F) γ (.pairE (.val x) (.val y)) Φ := by
+  apply wp_pure_det (hnv := rfl)
+  intro σ e' σ' efs h
+  exact prim_step_pair_inv h
 
 /-- **β rule.** Applying a closure substitutes and steps to the body. -/
 theorem wp_beta (γ : GName) [HasHeap γ GF F] (f x : String) (body : Expr) (w : Val)
