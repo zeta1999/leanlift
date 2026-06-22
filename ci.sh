@@ -71,6 +71,42 @@ else
 fi
 
 # ---------------------------------------------------------------------------- #
+# [IRIS] weak-memory / linearizability lane (PLAN-concurrency.md D1). This lane is
+# NOT a `lift` subcommand; it is a separate sorry-free Lean proof package. CI does
+# the cheap gate only: the package builds (elaborates) and its marquee theorems are
+# kernel-checked sorry-free — NOT a full re-elaboration of the world.
+sect "[IRIS] weak-memory lane — leanlift-iris builds + is sorry-free"
+IRIS="$ROOT/leanlift-iris"
+if have lake && [ -f "$IRIS/lakefile.toml" ]; then
+  # 1. the proof package builds (incremental; deps are cached).
+  if (cd "$IRIS" && lake build) >"$TMP/iris.build" 2>&1; then
+    pass "lake build  (leanlift-iris, $(grep -oE '[0-9]+ jobs' "$TMP/iris.build" | tail -1))"
+  else
+    bad "lake build (leanlift-iris)"; tail -30 "$TMP/iris.build"
+  fi
+  # 2. teeth: #print axioms of the marquee theorems must not depend on sorryAx
+  #    (a transitive sorry anywhere beneath them surfaces here).
+  if (cd "$IRIS" && lake env lean CiAxioms.lean) >"$TMP/iris.ax" 2>&1; then
+    if grep -q "sorryAx" "$TMP/iris.ax"; then
+      bad "[IRIS] sorry-free gate: a marquee theorem depends on sorryAx"; grep -n "sorryAx" "$TMP/iris.ax"
+    else
+      pass "sorry-free  ($(grep -cE 'depends on axioms|does not depend' "$TMP/iris.ax") marquee theorems, no sorryAx)"
+    fi
+  else
+    bad "[IRIS] axiom check failed to elaborate"; tail -30 "$TMP/iris.ax"
+  fi
+  # 3. source guard: no sorry/admit tokens (excluding "sorry-free" doc prose).
+  if grep -rInE '\b(sorry|admit)\b' "$IRIS/LeanliftIris" --include='*.lean' | grep -vE 'sorry-free' | grep -q .; then
+    bad "[IRIS] sources contain a sorry/admit token"
+    grep -rInE '\b(sorry|admit)\b' "$IRIS/LeanliftIris" --include='*.lean' | grep -vE 'sorry-free'
+  else
+    pass "no sorry/admit tokens in sources"
+  fi
+else
+  skip "[IRIS] lane (lake not on PATH or leanlift-iris absent)"
+fi
+
+# ---------------------------------------------------------------------------- #
 sect "M1 — check (native models + standard formats, auto-detected)"
 for f in tiny mcl dock mission resource; do
   if "$LIFT" model check "$M/$f.model.toml" --out "$TMP/r.json" >"$TMP/o" 2>&1; then
