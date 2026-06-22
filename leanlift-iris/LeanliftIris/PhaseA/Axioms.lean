@@ -68,6 +68,7 @@ namespace LeanliftIris.PhaseA
 
 -- Phase B (weak memory)
 #print axioms LeanliftIris.PhaseB.message_passing
+#print axioms LeanliftIris.PhaseB.mp_relaxed_admits_stale
 #print axioms wp_mono
 #print axioms wp_let
 #print axioms wp_pair

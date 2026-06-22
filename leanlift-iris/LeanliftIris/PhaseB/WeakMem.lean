@@ -134,6 +134,20 @@ theorem message_passing (hdf : d ≠ f) :
   · rfl
   · simp at hts
 
+/-- **Acquire is necessary.** If the consumer loads the flag `f` only *relaxed*
+(not acquire), it gains nothing at `d`, so it may still read the **stale** initial
+`0` — the message-passing guarantee fails. This is the genuine weakness the model
+must (and does) exhibit: `rlx ≠ acq`. -/
+theorem mp_relaxed_admits_stale (hdf : d ≠ f) :
+    ∃ m : Msg,
+      canLoad (mpMem d f) (loadView View.bot f (mpFlagMsg d f) .rlx) d m ∧ m.val = 0 := by
+  refine ⟨⟨0, 0, View.bot⟩, ⟨?_, ?_⟩, rfl⟩
+  · -- the stale initial write is still in `d`'s history
+    simp [mpMem, store, push, maxTs, initMem, hdf, Ne.symm hdf]
+  · -- a relaxed load of `f` leaves the consumer's view at `d` equal to 0
+    simp [loadView, mpFlagMsg, store, View.join, View.bot, View.singleton, maxTs,
+      initMem, push, hdf, Ne.symm hdf]
+
 end MP
 
 end LeanliftIris.PhaseB
