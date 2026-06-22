@@ -189,8 +189,12 @@ iris-lean.
   `chase_lev_sc_no_double_claim` (seq_cst forbids the double-claim for every
   interleaving). Still to do: the full deque structure (array + wrap-around) and
   growable buffer beyond the single-element linearization point.
-- **B6 — reclamation under weak memory.** `#7` hazard-pointer safety: the
-  publish-then-revalidate StoreLoad argument; bounded garbage. (EBR optional.)
+- **B6 — reclamation under weak memory.** ✅ *Safety done* (`PhaseB/HazardPtr.lean`).
+  `#7` hazard-pointer safety as two-sided store buffering: the reader's
+  publish-then-revalidate ∥ the reclaimer's retire-then-scan. `hp_use_after_free_relacq`
+  (rel/acq admits use-after-free — reader derefs a node the reclaimer frees) and
+  `hp_sc_no_use_after_free` (seq_cst forbids it for every interleaving). Still to
+  do: bounded-garbage accounting; EBR optional.
 
 Exit B: the weak-memory obligations leanlift cannot express are kernel-checked for
 SPSC, seqlock, SPMC, Chase–Lev, and HP-reclamation. **Gate:** B1–B2 are a major
