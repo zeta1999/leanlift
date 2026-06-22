@@ -187,8 +187,11 @@ iris-lean.
   proves both halves: `chase_lev_double_claim_relacq` (rel/acq lets owner **and**
   thief claim the same element — the Lê et al. bug) and
   `chase_lev_sc_no_double_claim` (seq_cst forbids the double-claim for every
-  interleaving). Still to do: the full deque structure (array + wrap-around) and
-  growable buffer beyond the single-element linearization point.
+  interleaving). The sequential structure (`PhaseB/ChaseLevDeque.lean`) is also
+  done: a fixed-capacity circular buffer with owner LIFO (`popBottom_pushBottom_val`),
+  single-element steal, size/`top≤bot` invariants, and a concrete `cap=2`
+  wrap-around run where a vacated slot is reused and the thief still reads every
+  element back in FIFO order. Still to do: the growable (doubling) buffer.
 - **B6 — reclamation under weak memory.** ✅ *Safety done* (`PhaseB/HazardPtr.lean`).
   `#7` hazard-pointer safety as two-sided store buffering: the reader's
   publish-then-revalidate ∥ the reclaimer's retire-then-scan. `hp_use_after_free_relacq`
