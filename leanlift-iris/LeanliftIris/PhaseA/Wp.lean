@@ -117,4 +117,15 @@ theorem bupd_wp (γ : GName) [HasHeap γ GF F] (e : Expr) (Φ : Val → IProp GF
   ((BIUpdate.mono (wp_unfold_fwd γ e Φ)).trans (bupd_wpF γ (wp (F := F) γ) e Φ)).trans
     (equiv_iff.mp (wp_unfold γ e Φ)).mpr
 
+/-- The step case of `wp`, exposed as a usable entailment (for non-values). -/
+theorem wp_step (γ : GName) [HasHeap γ GF F] (e : Expr) (Φ : Val → IProp GF)
+    (hnv : toVal e = none) :
+    wp (F := F) γ e Φ ⊢
+      ∀ σ, stateInterp γ σ -∗ |==>
+        (∀ e' σ' efs, ⌜prim_step e σ e' σ' efs⌝ -∗ ▷ |==> (stateInterp γ σ' ∗ wp (F := F) γ e' Φ)) := by
+  refine (wp_unfold_fwd γ e Φ).trans ?_
+  simp only [wpF, hnv]
+  iintro H
+  iexact H
+
 end LeanliftIris.PhaseA
