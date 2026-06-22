@@ -138,6 +138,31 @@ theorem prim_step_cas_inv {l : Nat} {v1 v2 : Val} {σ : Heap} {e' : Expr} {σ' :
   | casS hσ he => exact ⟨_, hσ, Or.inl ⟨he, hK', rfl, rfl⟩⟩
   | casF hσ hne => exact ⟨_, hσ, Or.inr ⟨hne, hK', rfl, rfl⟩⟩
 
+/-- **Context inversion for `alloc`.** -/
+theorem ctx_nil_of_alloc {K : List Frame} {a : Expr} {v : Val} (ha : toVal a = none)
+    (h : fill K a = .alloc (.val v)) :
+    K = [] ∧ a = .alloc (.val v) := by
+  cases K with
+  | nil => exact ⟨rfl, by simpa [fill] using h⟩
+  | cons fr K' =>
+    exfalso
+    have hnv : toVal (fill K' a) = none := fill_toVal_none ha K'
+    simp only [fill, List.foldr_cons] at h hnv
+    cases fr <;> simp_all [fill1, toVal]
+
+/-- **Step inversion for `alloc`.** Allocation picks some fresh location. -/
+theorem prim_step_alloc_inv {v : Val} {σ : Heap} {e' : Expr} {σ' : Heap} {efs : List Expr}
+    (h : prim_step (.alloc (.val v)) σ e' σ' efs) :
+    ∃ l, σ l = none ∧ e' = .val (.loc l) ∧ σ' = σ.set l v ∧ efs = [] := by
+  obtain ⟨K, a, a', hK, hK', hHead⟩ := h
+  have ha := head_toVal_none hHead
+  obtain ⟨hKnil, haeq⟩ := ctx_nil_of_alloc ha hK.symm
+  subst hKnil
+  subst haeq
+  simp only [fill] at hK'
+  cases hHead with
+  | alloc hσ => exact ⟨_, hσ, hK', rfl, rfl⟩
+
 /-! ## Generic lifting -/
 
 variable {F} [UFraction F] {GF} [ElemG GF (FHeap (F := F))]
@@ -376,5 +401,50 @@ theorem wp_cas_suc (γ : GName) [HasHeap γ GF F] (l : Nat) (v1 v2 : Val)
       iapply HΦ
       iexact HF
   · exact absurd hv0 hne
+
+/-- **Alloc rule.** Allocation returns a fresh location holding `v`; the
+continuation receives the new points-to for whichever fresh `l` was chosen
+(extends the authoritative heap via `update_one_alloc`). -/
+theorem wp_alloc (γ : GName) [HasHeap γ GF F] (v : Val) (Φ : Val → IProp GF) :
+    (∀ l, (l ↦[γ] v) -∗ |==> Φ (.loc l)) ⊢ wp (F := F) γ (.alloc (.val v)) Φ := by
+  iintro Hcont
+  iapply wp_lift_step
+  iintro %σ Hsi
+  iintro %e' %σ' %efs %Hstep
+  obtain ⟨l, hfresh, he', hσ', hefs⟩ := prim_step_alloc_inv Hstep
+  subst he'
+  subst hσ'
+  subst hefs
+  have hval : ✓ (toAgree (⟨v⟩ : LeibnizO Val)) :=
+    CMRA.valid_op_left (toAgree_op_valid_iff_eq.mpr rfl)
+  have Halloc := update_one_alloc (F := F) (H := (Nat → Option ·)) (k := l)
+    (m1 := toAgreeHeap σ) (dq := own one) (v1 := toAgree (⟨v⟩ : LeibnizO Val))
+    (by simp [Std.PartialMap.get?, Std.instPartialMapFun, toAgreeHeap, hfresh])
+    valid_own_one hval
+  rw [insert_toAgreeHeap] at Halloc
+  have Hupd_lem :
+      (stateInterp (F := F) γ σ)
+      ⊢ |==> iOwn (GF := GF) (F := FHeap (F := F)) γ
+          (Auth (own one) (toAgreeHeap (σ.set l v))
+            • Frag l (own one) (toAgree (⟨v⟩ : LeibnizO Val))) :=
+    iOwn_update Halloc
+  have Hsplit_lem :
+      (iOwn (GF := GF) (F := FHeap (F := F)) γ
+        (Auth (own one) (toAgreeHeap (σ.set l v))
+          • Frag l (own one) (toAgree (⟨v⟩ : LeibnizO Val))))
+      ⊢ (stateInterp (F := F) γ (σ.set l v) ∗ (l ↦[γ] v)) :=
+    iOwn_op.mp
+  iintro !>
+  ihave Hupd := Hupd_lem $$ [Hsi]
+  · iexact Hsi
+  imod Hupd with Hnew
+  ihave ⟨HA, HF⟩ := Hsplit_lem $$ [Hnew]
+  · iexact Hnew
+  iintro !>
+  isplitl [HA]
+  · iexact HA
+  · iapply wp_value
+    iapply Hcont
+    iexact HF
 
 end LeanliftIris.PhaseA
