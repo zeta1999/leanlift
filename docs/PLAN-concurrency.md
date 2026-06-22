@@ -168,13 +168,21 @@ iris-lean.
 - **B2 — the weak-memory assertions.** Release/acquire points-to, the "objective
   vs subjective" proposition split, fence reasoning, the **StoreLoad** edge that
   only `seq_cst` provides. This is the bulk of the build.
-- **B3 — `#1 SPSC` under acq/rel.** The smallest honest weak-memory proof:
+- **B3 — `#1 SPSC` under acq/rel.** ✅ *Done* (`PhaseB/Logic.lean`,
+  `spsc_consumer_reads_payload`). The smallest honest weak-memory proof:
   payload-before-publish release/acquire pairing, relaxed self-counter loads.
-- **B4 — `#3 seqlock` + `#5 SPMC`.** Torn-read freedom under the fence discipline;
-  the per-slot stamp seqlock fanned across a ring.
-- **B5 — `#8 Chase–Lev`, the marquee.** Prove correctness *with* the `seq_cst`
-  fence and **exhibit that acquire/release is insufficient** (the Lê et al. bug)
-  — the demonstration that this lane sees the memory model.
+- **B4 — `#3 seqlock`** ✅ *Done* (`PhaseB/Seqlock.lean`) **+ `#5 SPMC`** (todo).
+  Torn-read freedom proved both ways: `seqlock_consistent_read` (acquire + even
+  parity ⇒ no torn snapshot) and `seqlock_torn_without_validation` (bare relaxed
+  reads admit a torn `[42,0]` machine run). SPMC = the per-slot stamp seqlock
+  fanned across a ring, still to do.
+- **B5 — `seq_cst` + `#8 Chase–Lev`, the marquee.** Model started
+  (`PhaseB/SeqCst.lean`): a global SC view (`scStore`/`canLoadSC`) whose
+  StoreLoad lower-bound **forbids store-buffering** — `sb_sc_no_both_zero` proves
+  *no* SC interleaving of SB yields the weak `r1=r2=0`, the exact outcome
+  `sb_admits_reorder` shows release/acquire admits. Still to do: lift this to the
+  full `#8` deque and **exhibit that acquire/release is insufficient** (the Lê et
+  al. bug) — the demonstration that this lane sees the memory model.
 - **B6 — reclamation under weak memory.** `#7` hazard-pointer safety: the
   publish-then-revalidate StoreLoad argument; bounded garbage. (EBR optional.)
 
