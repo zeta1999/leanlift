@@ -145,8 +145,14 @@ corpus' control flow.
   collapse over a pure proposition (`sfupdN_pure_soundness`) is proved at the
   `UPred` model level. This is the trust anchor that closes leanlift's model-code
   gap *for this lane* — every sequential `wp` result (Treiber `push`/`pop`, the
-  C1 bridge) now entails a real operational guarantee. *Still to do:* the
-  concurrent thread-pool (`steps`/fork) adequacy.
+  C1 bridge) now entails a real operational guarantee. The pipeline is also
+  **closed end-to-end**: `heap_init` allocates the authoritative heap from nothing
+  (`iOwn_alloc` + `auth_one_valid`), `wp_adequacy_closed` consumes
+  `True ⊢ |==> ∃ γ, stateInterp γ σ ∗ wp γ e ⌜φ⌝` (no iProp hypotheses), and
+  `ex_alloc_load_closed_input` discharges that input for `load (alloc v)` from
+  `True` — so a worked program's spec provably constrains the real machine with no
+  ghost-state assumptions. *Still to do:* the concurrent thread-pool (`steps`/fork)
+  adequacy.
 - **A3 — first functional proofs (SC).** Verify the **#9 order-book** invariant
   (`best = max occupied level`, fall-back correctness) and the **#10 sweep**
   (exact 128-bit notional, `Q==0`/over-ask/drained-level cases, `best_ask ≤ VWAP
