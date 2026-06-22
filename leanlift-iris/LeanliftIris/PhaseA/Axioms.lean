@@ -12,6 +12,7 @@ import LeanliftIris.PhaseA.WpLifting
 import LeanliftIris.PhaseA.Adequacy
 import LeanliftIris.PhaseA.Examples
 import LeanliftIris.PhaseA.Treiber
+import LeanliftIris.PhaseB.WeakMem
 
 namespace LeanliftIris.PhaseA
 
@@ -64,6 +65,9 @@ namespace LeanliftIris.PhaseA
 #print axioms ex_alloc_load
 #print axioms push_cas_step
 #print axioms push_body_spec
+
+-- Phase B (weak memory)
+#print axioms LeanliftIris.PhaseB.message_passing
 #print axioms wp_mono
 #print axioms wp_let
 #print axioms wp_pair
