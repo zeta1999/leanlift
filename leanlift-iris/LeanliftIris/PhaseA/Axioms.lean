@@ -11,6 +11,7 @@ import LeanliftIris.PhaseA.Wp
 import LeanliftIris.PhaseA.WpLifting
 import LeanliftIris.PhaseA.Adequacy
 import LeanliftIris.PhaseA.Examples
+import LeanliftIris.PhaseA.Treiber
 
 namespace LeanliftIris.PhaseA
 
@@ -61,5 +62,6 @@ namespace LeanliftIris.PhaseA
 #print axioms wp_step_pres
 #print axioms wp_adequacy_val
 #print axioms ex_alloc_load
+#print axioms push_cas_step
 
 end LeanliftIris.PhaseA
