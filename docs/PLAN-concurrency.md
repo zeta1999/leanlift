@@ -216,12 +216,27 @@ go/no-go review. If B stalls, Phase A alone is already a shippable capability.
 
 ## Phase C — linearizability & future-dependent linearization points
 
-- **C1 — logical atomicity, generalized.** Lift A4's pattern to a reusable
-  `⟨P⟩ e ⟨Q⟩` logically-atomic triple library so client proofs compose.
-- **C2 — prophecy variables.** Port the Iris prophecy mechanism for structures
-  whose linearization point depends on the future: **#2 MPSC** (stamp publish) and
-  **#8** last-element race. Without this their linearizability specs can't be
-  stated honestly.
+- **C1 — logical atomicity, generalized.** 🚧 *Foundation done* (`PhaseC/LogAtom.lean`).
+  A reusable logically-atomic-triple library `LAT P Q` over an abstract state:
+  framing-prefix `pre` + single linearization point `commit` (`P → Q`) +
+  framing-suffix `post`, with the payoff `LAT.atomic_commit` (running the whole
+  operation from a `P`-state lands in `Q`) and the structural rules `LAT.refl`
+  (no-op) and `LAT.frameL` (frame). Instantiated for Chase–Lev `take`: `takeLAT`
+  (one-element `take` linearizes by removing the element, index read/write as
+  framing steps) and `take_linearizes`. *Still to do:* integrate with the Phase-A
+  `wp`/adequacy so the abstract commit is tied to the real `λ-conc` execution
+  (here the run is an abstract micro-step list); generalize beyond the deque.
+- **C2 — prophecy variables.** 🚧 *Foundation done* (`PhaseC/Prophecy.lean`). The
+  prophecy mechanism in the small + the Chase–Lev last-element LP: the obstruction
+  `lp_not_present_determined` (the LP is genuinely future-dependent — no present-only
+  effect is correct), soundness `proph_sound` (the prophesied value may always be
+  chosen equal to its physical resolution, uniquely) and faithfulness
+  `takeLP_proph_correct`, and the payoff `owner_claim_lp` — under seq_cst, a
+  `take` that physically claims linearizes (by the prophecy-resolved LP) as
+  "owner took it" with the thief excluded, discharged via
+  `chase_lev_sc_no_double_claim`. *Still to do:* **#2 MPSC** (stamp-publish LP) and
+  the prophecy-resolution *operational* step in the machine (here resolution is
+  modeled as a function of the physical `SBState`).
 
 ## Phase D — integration with leanlift (the seam)
 
