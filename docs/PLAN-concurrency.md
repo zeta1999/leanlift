@@ -151,10 +151,16 @@ corpus' control flow.
   `True ⊢ |==> ∃ γ, stateInterp γ σ ∗ wp γ e ⌜φ⌝` (no iProp hypotheses), and
   `ex_alloc_load_closed_input` discharges that input for `load (alloc v)` from
   `True` — so a worked program's spec provably constrains the real machine with no
-  ghost-state assumptions. The run relation is the genuine semantics:
-  `primSteps_imp_steps` shows a fork-free run *is* a thread-pool `steps` run of the
-  singleton pool, so adequacy consumes the real single-thread fragment, not an
-  abstraction. *Still to do:* the concurrent thread-pool (`steps`/fork) adequacy.
+  ghost-state assumptions. Adequacy now runs over the **real thread-pool `steps`**
+  (`PhaseA/ForkFree.lean`): for a fork-free program, `wp_adequacy_steps` takes a
+  genuine `steps` run and yields the meta-level fact. The bridge is
+  `steps_singleton_forkFree` (a fork-free singleton pool stays a singleton and its
+  `steps` run *is* a `primSteps` run), resting on `prim_step_preserves_forkFree`
+  (reduction preserves fork-freedom given a fork-free heap — with fork-freedom
+  preserved under substitution, `forkFreeE_substE`, and contexts, `forkFreeE_fill`).
+  So the spec constrains the actual operational semantics. *Still to do:* the
+  *forking* thread-pool adequacy (programs that spawn threads) — needs the `wpF`
+  fork/progress extension.
 - **A3 — first functional proofs (SC).** Verify the **#9 order-book** invariant
   (`best = max occupied level`, fall-back correctness) and the **#10 sweep**
   (exact 128-bit notional, `Q==0`/over-ask/drained-level cases, `best_ask ≤ VWAP
