@@ -187,4 +187,40 @@ theorem push_establishes_post (γ : GName) [HasHeap γ GF F] (s : Nat) (v : Val)
   lat_realized (pushAbstract v xs0) γ (isStack γ s) (pushBody s v)
     (push_realizes γ s v hclv hclosed) xs0 rfl
 
+/-! ## A second operation through the bridge: Treiber `pop`
+
+`pop` is *partial* — it removes the head, defined only on a non-empty stack — so
+it does not fit the total `∀`-quantified `Realizes` wrapper the way `push` does.
+It bridges through the per-state `LAT` + `HoareTriple` interface instead,
+demonstrating the machinery handles a state-*shrinking* operation and validating
+that the bridge is not push-specific. -/
+
+/-- The abstract LIFO pop as a core-Lean logically-atomic triple: on a non-empty
+abstract stack `x :: xs0` it commits to `xs0`, its linearization point being
+`List.tail` (the head node's unlink). -/
+def popAbstract (x : Val) (xs0 : List Val) : LAT (· = x :: xs0) (· = xs0) where
+  pre := []
+  commit := List.tail
+  post := []
+  pre_frame := fun _ hf => absurd hf List.not_mem_nil
+  post_frame := fun _ hf => absurd hf List.not_mem_nil
+  commits := fun _ hs => by subst hs; rfl
+
+/-- **Realization — the bridge for `pop`.** Treiber `pop`'s verified `wp` proof
+establishes exactly the abstract `LAT`'s commit on the heap-level stack predicate:
+from a heap whose head node is `l ↦ (x, nxt)` over a tail representing `xs`,
+running `pop` returns `x` and ends in a heap representing
+`(popAbstract x xs).commit (x :: xs)` (= `List.tail (x :: xs)` = `xs`). The
+abstract pop LP and the concrete iris-lean proof name the same atomic effect.
+(Repackages `pop_body_spec`.) -/
+theorem pop_realizes_commit (γ : GName) [HasHeap γ GF F] (s : Nat) (x nxt : Val)
+    (l : Nat) (xs : List Val)
+    (hclx : ∀ (y : String) (w : Val), substV y w x = x)
+    (hclnxt : ∀ (y : String) (w : Val), substV y w nxt = nxt) :
+    HoareTriple (F := F) γ
+      iprop((s ↦[γ] (.loc l)) ∗ (l ↦[γ] (.pair x nxt)) ∗ listRep γ nxt xs)
+      (popBody s)
+      (fun r => iprop(⌜r = x⌝ ∗ isStack γ s ((popAbstract x xs).commit (x :: xs)))) :=
+  pop_body_spec γ s x nxt l xs hclx hclnxt
+
 end LeanliftIris.PhaseC
