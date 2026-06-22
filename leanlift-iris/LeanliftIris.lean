@@ -23,3 +23,4 @@ import LeanliftIris.PhaseB.ChaseLevDeque
 import LeanliftIris.PhaseC.Prophecy
 import LeanliftIris.PhaseC.LogAtom
 import LeanliftIris.PhaseC.MPSC
+import LeanliftIris.PhaseC.ProphMachine

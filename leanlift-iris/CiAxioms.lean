@@ -34,3 +34,5 @@ open LeanliftIris.PhaseC
 #print axioms mpsc_distinct_slots             -- #2 MPSC exclusive cells
 #print axioms mpsc_consumer_reads_payload     -- #2 MPSC stamp handoff
 #print axioms mpsc_order_proph                -- #2 MPSC enqueue-order prophecy
+#print axioms resolved_stable                 -- C2 operational: resolution permanent
+#print axioms proph_predicts_future           -- C2 operational: prophecy predicts the future
