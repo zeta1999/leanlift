@@ -163,6 +163,32 @@ theorem prim_step_alloc_inv {v : Val} {σ : Heap} {e' : Expr} {σ' : Heap} {efs 
   cases hHead with
   | alloc hσ => exact ⟨_, hσ, hK', rfl, rfl⟩
 
+/-- **Context inversion for `app`** (function and argument both values). -/
+theorem ctx_nil_of_app {K : List Frame} {a : Expr} {f x : String} {body : Expr} {w : Val}
+    (ha : toVal a = none) (h : fill K a = .app (.val (.clos f x body)) (.val w)) :
+    K = [] ∧ a = .app (.val (.clos f x body)) (.val w) := by
+  cases K with
+  | nil => exact ⟨rfl, by simpa [fill] using h⟩
+  | cons fr K' =>
+    exfalso
+    have hnv : toVal (fill K' a) = none := fill_toVal_none ha K'
+    simp only [fill, List.foldr_cons] at h hnv
+    cases fr <;> simp_all [fill1, toVal]
+
+/-- **Step inversion for β** (application of a closure to a value). -/
+theorem prim_step_beta_inv {f x : String} {body : Expr} {w : Val} {σ : Heap}
+    {e' : Expr} {σ' : Heap} {efs : List Expr}
+    (h : prim_step (.app (.val (.clos f x body)) (.val w)) σ e' σ' efs) :
+    e' = substE x w (substE f (.clos f x body) body) ∧ σ' = σ ∧ efs = [] := by
+  obtain ⟨K, a, a', hK, hK', hHead⟩ := h
+  have ha := head_toVal_none hHead
+  obtain ⟨hKnil, haeq⟩ := ctx_nil_of_app ha hK.symm
+  subst hKnil
+  subst haeq
+  simp only [fill] at hK'
+  cases hHead with
+  | beta => exact ⟨hK', rfl, rfl⟩
+
 /-! ## Generic lifting -/
 
 variable {F} [UFraction F] {GF} [ElemG GF (FHeap (F := F))]
@@ -204,6 +230,15 @@ theorem wp_if_true (γ : GName) [HasHeap γ GF F] (e1 e2 : Expr) (Φ : Val → I
   apply wp_pure_det
   intro σ e' σ' efs h
   exact prim_step_ite_true_inv h
+
+/-- **β rule.** Applying a closure substitutes and steps to the body. -/
+theorem wp_beta (γ : GName) [HasHeap γ GF F] (f x : String) (body : Expr) (w : Val)
+    (Φ : Val → IProp GF) :
+    ▷ wp (F := F) γ (substE x w (substE f (.clos f x body) body)) Φ ⊢
+      wp (F := F) γ (.app (.val (.clos f x body)) (.val w)) Φ := by
+  apply wp_pure_det
+  intro σ e' σ' efs h
+  exact prim_step_beta_inv h
 
 /-- **Heap agreement.** Owning the authoritative heap and a points-to forces the
 heap to contain that value at that location — the bridge from `stateInterp` to a
