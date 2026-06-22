@@ -66,4 +66,44 @@ theorem mp_via_logic (d f : Loc) (Vcons : View) :
   have h := seen_after_store initMem View.bot d 42 .rlx
   simpa [seen, maxTs, initMem] using h
 
+/-! ## Read determinism: a synchronized consumer reads the published value
+
+`readsAs M V l v` says the thread (view `V`) can only read value `v` at `l` — no
+torn or stale read is possible. The key rule: if the thread has `seen l t` and
+*every* write at `l` from timestamp `t` on has value `v` (the single-writer
+published value), then it reads `v`. -/
+
+/-- The thread (view `V`) is determined to read value `v` at `l`. -/
+def readsAs (M : Mem) (V : View) (l : Loc) (v : Int) : Prop :=
+  ∀ m, canLoad M V l m → m.val = v
+
+/-- **Read-determinism.** Synchronization (`seen l t`) plus a single published
+value from timestamp `t` on forces the read. -/
+theorem reads_determined (M : Mem) (V : View) (l : Loc) (t : Time) (v : Int)
+    (hseen : seen l t V) (hwrites : ∀ m, m ∈ M l → t ≤ m.ts → m.val = v) :
+    readsAs M V l v := by
+  intro m hm
+  obtain ⟨hmem, hts⟩ := hm
+  exact hwrites m hmem (Nat.le_trans hseen hts)
+
+/-- **Full SPSC ring guarantee, in the logic.** After the producer publishes
+`d := 42` (rlx) ; `f := 1` (rel), a consumer that acquire-loads `f` is
+*determined* to read the payload `42` at `d` — it cannot read the stale initial
+value. This composes `ra_transfer` (synchronizes-with) and `reads_determined`,
+proving the corpus' SPSC ring (`spsc_ring.hpp`) handoff entirely in the
+weak-memory program logic. -/
+theorem spsc_consumer_reads_payload (d f : Loc) (hdf : d ≠ f) (Vcons : View) :
+    readsAs
+      ((store (store initMem View.bot d 42 .rlx).1
+          (store initMem View.bot d 42 .rlx).2 f 1 .rel).1)
+      (loadView Vcons f
+        (storeMsg (store initMem View.bot d 42 .rlx).1
+          (store initMem View.bot d 42 .rlx).2 f 1 .rel) .acq) d 42 := by
+  refine reads_determined _ _ _ 1 _ (mp_via_logic d f Vcons) ?_
+  intro m hmem hts
+  simp [store, push, maxTs, initMem, hdf, Ne.symm hdf] at hmem
+  rcases hmem with h | h <;> subst h
+  · rfl
+  · simp at hts
+
 end LeanliftIris.PhaseB
