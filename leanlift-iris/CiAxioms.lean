@@ -42,3 +42,6 @@ open LeanliftIris.PhaseC
 #print axioms push_establishes_post           -- C1↔wp: push's abstract Q, end-to-end via the bridge
 #print axioms LeanliftIris.PhaseA.pop_body_spec  -- A4: Treiber pop (second lock-free op)
 #print axioms pop_realizes_commit             -- C1↔wp: pop's abstract LAT commit realized by real wp
+#print axioms LeanliftIris.PhaseA.wp_primSteps_pres    -- A2: multi-step wp preservation
+#print axioms LeanliftIris.PhaseA.sfupdN_pure_soundness -- A2: step-update tower collapse (model)
+#print axioms LeanliftIris.PhaseA.wp_adequacy_seq       -- A2: sequential adequacy (trust anchor)

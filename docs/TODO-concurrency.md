@@ -19,8 +19,10 @@ and for the Iris-model proofs also `Classical.choice`; never `sorryAx`):
   `prim_step` inversion for every op; **`step_by_val`**; and **`wp_bind`** (the
   `wp` composes).
 
-In progress / next: **A2.4 adequacy** (the trust anchor) → **A4 Treiber** (now
-unblocked) → fork/progress `wpF` extensions. Then Phase B (weak memory, gated).
+In progress / next: ~~A2.4 adequacy~~ **done (sequential)** — see below. Next:
+fork/progress `wpF` extensions (concurrent thread-pool adequacy) and the
+fupd/invariant layer for true logical atomicity. Phase B (weak memory) + Phase C
+(linearizability/prophecy) already built on top.
 
 ## Phase 0 — adopt the foundation
 - [x] 0.1 iris-lean as a Lake dep, pinned v4.28.0 (core `Iris`, no Mathlib), `lake build` green
@@ -39,7 +41,7 @@ unblocked) → fork/progress `wpF` extensions. Then Phase B (weak memory, gated)
       - [~] A2.4 adequacy — `LeanliftIris/PhaseA/Adequacy.lean`. Both halves done & sorry-free:
         - **`wp_step_pres`** (preservation): one `prim_step` of a non-value turns `stateInterp γ σ ∗ wp γ e Φ` into `|==> ▷ |==> (stateInterp γ σ' ∗ wp γ e' Φ)`.
         - **`wp_adequacy_val`** (value extraction): `(⊢ wp γ (val v) (fun w => ⌜φ w⌝)) → φ v`, via `wp_value_inv` → `plainly_pure`+`BIBUpdatePlainly.bupd_plainly` → `UPred.pure_soundness` (using `IProp GF = UPred (IResUR GF)` and `biaffine_iff_true_emp`).
-        - remaining: the **full theorem** combining them over `steps` — needs the n-fold `|==>`/`▷` collapse, which requires a `bupd_later` commute (`|==> ▷ P ⊢ ▷ |==> P`) that iris-lean does **not** ship; must be proved at the `UPred` model level first (then iterate `later_soundness`). Also: heap-ghost init via `iOwn_alloc` + `auth_one_valid`. This is the deep model-level piece.
+        - **DONE (sequential):** `wp_adequacy_seq` — `(stateInterp γ σ ∗ wp γ e ⌜φ⌝)` + a fork-free run `primSteps e σ (val v) σ'` ⟹ `φ v`. Built from: the step-update tower `sfupdN k X = (|==> ▷)^k |==> X` (with `sfupdN_mono`/`sfupdN_compose`/`sfupdN_bupd_absorb`), multi-step preservation `wp_primSteps_pres` (lifts the one-step `wp_step_pres` along a run), and the tower collapse `sfupdN_pure_soundness` proved **at the `UPred` model level** (the deep piece the old note predicted): evaluate the tower at step-index `k` and peel one `▷` per level via `bupd`'s frame-update def + `CMRA.unit_right_id`/`validN_of_le`; no `bupd_later` commute needed (it doesn't ship and isn't valid — the model proof sidesteps it). Sorry-free, only propext/Quot.sound/Classical.choice. Remaining for the *fully general* theorem: the concurrent thread-pool `steps` version (fork/`efs` + progress) and heap-ghost init via `iOwn_alloc`.
 - [x] A3 functional proofs (SC): order book #9 invariant (`best = max occupied`, fall-back) + sweep-VWAP #10 (exact 128-bit notional, Q==0 / over-ask / drained-level, `best_ask ≤ VWAP ≤ touch`)
       — done as standalone pure-Lean proofs (no Iris/program-logic dependency, as the plan intends for the "essentially pure-function" warm-up). Files: `leanlift-iris/LeanliftIris/PhaseA/{Sweep,OrderBook}.lean`; sorry-free (audit: `PhaseA/Axioms.lean`, only `propext`/`Quot.sound`).
       - [x] #10 sweep: exact `filled = min Q total`, completion ⇔ `Q ≤ total`, over-ask, drained-level skip, lower+upper VWAP bracket (`best_ask·filled ≤ notional ≤ touch·filled`, exact `Nat` = no overflow)

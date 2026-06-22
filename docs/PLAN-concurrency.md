@@ -137,10 +137,16 @@ corpus' control flow.
   `CAS`/`FAA`/load/store, `fork`, and (initially) **sequentially-consistent**
   semantics. Operational small-step in Lean. Keep it minimal — enough for
   Treiber/SPSC/order-book, no more.
-- **A2 — weakest precondition + adequacy.** Define `wp e {Φ}` over `λ-conc` in
-  iris-lean's logic; prove the **adequacy theorem** (provable `wp` ⇒ the real
-  small-step program is safe and meets `Φ`). This is the trust anchor that closes
-  leanlift's model-code gap *for this lane*.
+- **A2 — weakest precondition + adequacy.** ✅ *Sequential adequacy done.* `wp e
+  {Φ}` is defined over `λ-conc` in iris-lean's logic, and the **adequacy theorem**
+  is proved for fork-free runs: `wp_adequacy_seq` — a `wp` proof of a pure `φ`
+  plus a run reaching a value ⟹ the meta-level fact `φ v`. Built from multi-step
+  preservation (`wp_primSteps_pres`) over the step-update tower `sfupdN`, whose
+  collapse over a pure proposition (`sfupdN_pure_soundness`) is proved at the
+  `UPred` model level. This is the trust anchor that closes leanlift's model-code
+  gap *for this lane* — every sequential `wp` result (Treiber `push`/`pop`, the
+  C1 bridge) now entails a real operational guarantee. *Still to do:* the
+  concurrent thread-pool (`steps`/fork) adequacy.
 - **A3 — first functional proofs (SC).** Verify the **#9 order-book** invariant
   (`best = max occupied level`, fall-back correctness) and the **#10 sweep**
   (exact 128-bit notional, `Q==0`/over-ask/drained-level cases, `best_ask ≤ VWAP
