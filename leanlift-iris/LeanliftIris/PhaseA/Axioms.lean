@@ -9,6 +9,7 @@ import LeanliftIris.PhaseA.Lang
 import LeanliftIris.PhaseA.HeapRes
 import LeanliftIris.PhaseA.Wp
 import LeanliftIris.PhaseA.WpLifting
+import LeanliftIris.PhaseA.Adequacy
 
 namespace LeanliftIris.PhaseA
 
@@ -56,5 +57,6 @@ namespace LeanliftIris.PhaseA
 #print axioms wp_bind
 #print axioms bupd_wp
 #print axioms fill_step_inv
+#print axioms wp_step_pres
 
 end LeanliftIris.PhaseA
