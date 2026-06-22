@@ -67,6 +67,9 @@ namespace LeanliftIris.PhaseA
 #print axioms push_body_spec
 
 -- Phase B (weak memory)
+#print axioms LeanliftIris.PhaseB.store_view_mono
+#print axioms LeanliftIris.PhaseB.loadView_mono
+#print axioms LeanliftIris.PhaseB.release_acquire_hb
 #print axioms LeanliftIris.PhaseB.message_passing
 #print axioms LeanliftIris.PhaseB.mp_relaxed_admits_stale
 #print axioms wp_mono
