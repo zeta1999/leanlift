@@ -40,6 +40,18 @@ noncomputable def toMap : List (Nat × IProp GF) → (Nat → Option (Agree (Lat
   | [] => fun _ => none
   | (i, Q) :: L => fun j => if j = i then some (toAgree (LaterS.next Q)) else toMap L j
 
+/-- If a name is in the authoritative map, it is allocated in the list. -/
+theorem toMap_mem : ∀ (L : List (Nat × IProp GF)) {i : Nat},
+    (toMap L i).isSome → ∃ Q, (i, Q) ∈ L
+  | [], i, h => by simp [toMap] at h
+  | (a, Q) :: L, i, h => by
+      simp only [toMap] at h
+      by_cases hj : i = a
+      · exact ⟨Q, by subst hj; exact List.mem_cons_self ..⟩
+      · rw [if_neg hj] at h
+        obtain ⟨Q', hQ'⟩ := toMap_mem L h
+        exact ⟨Q', List.mem_cons_of_mem _ hQ'⟩
+
 /-- The per-invariant slot: body stored & disabled, or enabled token present. -/
 noncomputable def invSlot (γE γD : GName) (i : Nat) (Q : IProp GF) : IProp GF :=
   iprop( (▷ Q ∗ ownD (GF := GF) γD (eqset i)) ∨ ownE γE (eqset i) )
