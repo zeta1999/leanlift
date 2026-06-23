@@ -273,7 +273,9 @@ go/no-go review. If B stalls, Phase A alone is already a shippable capability.
   also **compose into larger programs**: `twoIncr_spec` chains `incr_spec` with
   itself under the new statement-sequencing rule `wp_seq` (`let _ = incr s in
   incr s` advances the count by two), showing the per-operation specs sequence via
-  the program logic. *Still to do:* the full
+  the program logic. The canonical correctness capstone `pushPop_spec` composes the
+  two CAS operations: on an empty stack, `let _ = push s v in pop s` returns `v` and
+  restores the empty stack (abstract state `[] → [v] → []`). *Still to do:* the full
   mask/atomic-update encoding (open the invariant at the LP, true `<<<P>>> e <<<Q>>>`
   against a concurrent context).
 - **C2 — prophecy variables.** 🚧 *Foundation done* (`PhaseC/Prophecy.lean`). The
