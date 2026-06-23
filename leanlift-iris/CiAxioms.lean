@@ -55,4 +55,5 @@ open LeanliftIris.PhaseC
 #print axioms LeanliftIris.PhaseA.primSteps.trans      -- A2: run relation composes (preorder)
 #print axioms LeanliftIris.PhaseA.prim_step_preserves_forkFree -- A2: fork-freedom preserved by reduction
 #print axioms LeanliftIris.PhaseA.wp_adequacy_steps    -- A2: adequacy over the real thread-pool steps
-#print axioms LeanliftIris.PhaseA.twoIncr_spec         -- A4: verified ops compose under wp_let
+#print axioms LeanliftIris.PhaseA.wp_seq               -- A2: statement-sequencing rule
+#print axioms LeanliftIris.PhaseA.twoIncr_spec         -- A4: verified ops compose (via wp_seq)

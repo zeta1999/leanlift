@@ -843,4 +843,15 @@ theorem wp_let (γ : GName) [HasHeap γ GF F] (x : String) (body e : Expr)
   intro w
   exact wp_beta γ "_" x body w Φ
 
-end LeanliftIris.PhaseA
+/-- **Sequencing rule.** `let _ = e1 in e2` (the result of `e1` discarded): verify
+`e1`, then `e2`. A specialization of `wp_let` for a closed continuation `e2` (no
+free `_`), packaging the substitution bookkeeping so client proofs compose verified
+statements directly. -/
+theorem wp_seq (γ : GName) [HasHeap γ GF F] (e1 e2 : Expr) (Φ : Val → IProp GF)
+    (hcl : ∀ w : Val, substE "_" w e2 = e2) :
+    wp (F := F) γ e1 (fun _ => iprop(▷ wp (F := F) γ e2 Φ)) ⊢
+      wp (F := F) γ (.app (.val (.clos "_" "_" e2)) e1) Φ := by
+  refine (wp_mono γ e1 _ _ ?_).trans (wp_let γ "_" e2 e1 Φ)
+  intro w
+  simp only [hcl]
+  iintro H; iexact H
