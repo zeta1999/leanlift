@@ -84,16 +84,22 @@ Files live under `leanlift-iris/LeanliftIris/PhaseA/Fupd/`, wired into `Leanlift
 - **Piece 4** `Fupd.lean` — `fupd` + all five laws (`frame_r`, `except0`, `trans`,
   `subset`, `mask_frame_r'`) + `ne`; **`instance : BIFUpdate (IProp GF) Nat`**.
 - **Piece 5** `Inv.lean` — `inv` (persistent), `bigSep_map_extract` (slot surgery),
-  **`atomic_acc`** (logically-atomic accessor → `<<<…>>>` triples now expressible).
+  `ownI_open` / `ownI_close` (wsat open/close), **`inv_acc`** (the full invariant-access
+  law, finite masks), **`atomic_acc`** (logically-atomic accessor → `<<<…>>>` triples
+  now expressible). Agreement/transport: `ownI_agree`, `iEq_later_transport(’)`,
+  `invAuth_lookup_keep`, `toMap_mem`.
 
 **Two iris-lean blockers found & fixed in-repo:** (1) `Auth.lean` not built → used the
 built `HeapView.HeapViewURF`; (2) `Later : Type (u+1)` bumps the universe while `iOwn`
 is universe-0-monomorphic → `LaterS` (`Type u`, same `DistLater` OFE).
 
-**Remaining (the only un-proven lemmas):** `inv_alloc` and `inv_acc` — the wsat
-open/close. They build on `bigSep_map_extract`, the `iEq` agreement `▷ (P ≡ Q)`, and a
-fresh disabled-token allocation (a GenMap frame-preserving `updateP` picking a free key,
-cf. `GenMap.valid_exists_fresh`).
+**Remaining (one lemma):** `inv_alloc` (invariant *creation*). Needs a fresh
+disabled-token allocation: a GenMap frame-preserving `updateP` minting `ownD {i}` for an
+`i` fresh in both the `γD` frame and `dom (toMap L)`. That rests on a list pigeonhole
+(`injective enum → ∃ k, enum k ∉ X`) which is **not in Lean core and there is no Mathlib
+dependency**, so it must be proven from primitives (`GenMap.Enum` + a `Nodup`/length
+counting lemma) — a self-contained sub-development. Everything else (incl. the harder
+`inv_acc` open/close) is done sorry-free.
 
 ## Order of work / commits
 
