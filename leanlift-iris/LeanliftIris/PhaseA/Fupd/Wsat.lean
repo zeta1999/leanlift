@@ -53,13 +53,16 @@ theorem toMap_mem : ∀ (L : List (Nat × IProp GF)) {i : Nat},
         exact ⟨Q', List.mem_cons_of_mem _ hQ'⟩
 
 /-- The per-invariant slot: body stored & disabled, or enabled token present. -/
-noncomputable def invSlot (γE γD : GName) (i : Nat) (Q : IProp GF) : IProp GF :=
+noncomputable abbrev invSlot (γE γD : GName) (i : Nat) (Q : IProp GF) : IProp GF :=
   iprop( (▷ Q ∗ ownD (GF := GF) γD (eqset i)) ∨ ownE γE (eqset i) )
+
+/-- The per-name world-satisfaction entry: invariant knowledge plus the slot. -/
+noncomputable abbrev slotF (γI γE γD : GName) (p : Nat × IProp GF) : IProp GF :=
+  iprop(ownI (F := F) γI p.1 p.2 ∗ invSlot γE γD p.1 p.2)
 
 /-- **World satisfaction.** -/
 noncomputable def wsat (γI γE γD : GName) : IProp GF :=
-  iprop( ∃ L, invAuth (F := F) γI (toMap L) ∗
-              [∗] (L.map (fun p => iprop(ownI (F := F) γI p.1 p.2 ∗ invSlot γE γD p.1 p.2))) )
+  iprop( ∃ L, invAuth (F := F) γI (toMap L) ∗ [∗] (L.map (slotF (F := F) γI γE γD)) )
 
 /-- The fixed ghost names and registrations the `fupd`/`inv` layer is parametric in.
 `F` is an `outParam` (determined by the chosen `WsatG` instance) so the `fupd` /
