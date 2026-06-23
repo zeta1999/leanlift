@@ -77,4 +77,9 @@ theorem iEq_later_transport {P Q : IProp GF} :
     iprop(▷ iEq (GF := GF) P Q ∗ ▷ Q) ⊢ (▷ P : IProp GF) :=
   later_sep.mpr.trans (later_mono iEq_transport)
 
+/-- Transport under `▷`, other direction (internal equality is symmetric). -/
+theorem iEq_later_transport' {P Q : IProp GF} :
+    iprop(▷ iEq (GF := GF) P Q ∗ ▷ P) ⊢ (▷ Q : IProp GF) :=
+  (sep_mono_l (later_mono iEq_sym)).trans iEq_later_transport
+
 end LeanliftIris.PhaseA.Fupd

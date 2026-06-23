@@ -51,12 +51,198 @@ theorem bigSep_map_extract {α : Type _} (f : α → IProp GF) (x : α) :
 
 variable {F} [UFraction F] [W : WsatG GF F]
 
+/-- **Open an invariant.** Trading the enable token `ownE {i}` for the stored body
+`▷ P` and the disable token `ownD {i}`; `wsat` is handed back with slot `i` now in its
+enabled state. The body comes back as `▷ P` (the client's proposition) by agreement
+with the stored body. -/
+theorem ownI_open {i : Nat} {P : IProp GF} :
+    iprop(ownI (F := F) W.γI i P ∗ wsat (F := F) W.γI W.γE W.γD ∗ ownE W.γE (eqset i))
+      ⊢ iprop(▷ P ∗ wsat (F := F) W.γI W.γE W.γD ∗ ownD W.γD (eqset i)) := by
+  simp only [wsat]
+  iintro Hin
+  icases Hin with ⟨#Hinv, Hw, HEi⟩
+  icases Hw with ⟨%L, HA, Hbig⟩
+  -- locate the slot for `i`
+  ihave Hcomb : iprop(invAuth (F := F) W.γI (toMap L) ∗ ownI (F := F) W.γI i P) $$ [HA]
+  · isplitl [HA]
+    · iexact HA
+    · iexact Hinv
+  ihave Hk := (invAuth_lookup_keep (GF := GF) (F := F) (γ := W.γI))
+  ispecialize Hk $$ Hcomb
+  icases Hk with ⟨%Hsome, HA2, _⟩
+  obtain ⟨Q, hmem⟩ := toMap_mem L Hsome
+  obtain ⟨pre, post, rfl⟩ := List.append_of_mem hmem
+  ihave Hext := (bigSep_map_extract (slotF (F := F) W.γI W.γE W.γD) (i, Q) pre post).1
+  ispecialize Hext $$ Hbig
+  icases Hext with ⟨Hslot, Hrest⟩
+  icases Hslot with ⟨#HownIQ, Hsl⟩
+  icases Hsl with (⟨HQbody, HownD⟩ | HEi_slot)
+  · -- slot was disabled: take the body and disable token, re-enable the slot
+    ihave Hag := (ownI_agree (F := F) (γ := W.γI) (i := i) (P := P) (Q := Q))
+    ihave Hpq : iprop(ownI (F := F) W.γI i P ∗ ownI (F := F) W.γI i Q) $$ []
+    · isplitl []
+      · iexact Hinv
+      · iexact HownIQ
+    ispecialize Hag $$ Hpq
+    ihave HPlater : iprop(▷ P) $$ [Hag, HQbody]
+    · iapply iEq_later_transport
+      isplitl [Hag]
+      · iexact Hag
+      · iexact HQbody
+    isplitl [HPlater]
+    · iexact HPlater
+    · isplitl [HA2 Hrest HEi]
+      · iexists (pre ++ (i, Q) :: post)
+        isplitl [HA2]
+        · iexact HA2
+        · ihave Hcomb2 := (bigSep_map_extract (slotF (F := F) W.γI W.γE W.γD) (i, Q) pre post).2
+          iapply Hcomb2
+          isplitl [HEi]
+          · isplitl []
+            · iexact HownIQ
+            · iright
+              iexact HEi
+          · iexact Hrest
+      · iexact HownD
+  · -- slot was enabled: two enable tokens for `i` — impossible
+    ihave Hd := (ownE_disjoint (GF := GF) (γ := W.γE) (E1 := eqset i) (E2 := eqset i))
+    ihave Hee : iprop(ownE W.γE (eqset i) ∗ ownE W.γE (eqset i)) $$ [HEi, HEi_slot]
+    · isplitl [HEi]
+      · iexact HEi
+      · iexact HEi_slot
+    ispecialize Hd $$ Hee
+    icases Hd with %Hd
+    exact (Hd i ⟨rfl, rfl⟩).elim
+
+/-- **Close an invariant.** Returning the body `▷ P` and the disable token `ownD {i}`
+re-disables slot `i` in `wsat` and hands back the enable token `ownE {i}`. -/
+theorem ownI_close {i : Nat} {P : IProp GF} :
+    iprop(ownI (F := F) W.γI i P ∗ wsat (F := F) W.γI W.γE W.γD ∗ ▷ P ∗ ownD W.γD (eqset i))
+      ⊢ iprop(wsat (F := F) W.γI W.γE W.γD ∗ ownE W.γE (eqset i)) := by
+  simp only [wsat]
+  iintro Hin
+  icases Hin with ⟨#Hinv, Hw, HPlater, HownD⟩
+  icases Hw with ⟨%L, HA, Hbig⟩
+  ihave Hcomb : iprop(invAuth (F := F) W.γI (toMap L) ∗ ownI (F := F) W.γI i P) $$ [HA]
+  · isplitl [HA]
+    · iexact HA
+    · iexact Hinv
+  ihave Hk := (invAuth_lookup_keep (GF := GF) (F := F) (γ := W.γI))
+  ispecialize Hk $$ Hcomb
+  icases Hk with ⟨%Hsome, HA2, _⟩
+  obtain ⟨Q, hmem⟩ := toMap_mem L Hsome
+  obtain ⟨pre, post, rfl⟩ := List.append_of_mem hmem
+  ihave Hext := (bigSep_map_extract (slotF (F := F) W.γI W.γE W.γD) (i, Q) pre post).1
+  ispecialize Hext $$ Hbig
+  icases Hext with ⟨Hslot, Hrest⟩
+  icases Hslot with ⟨#HownIQ, Hsl⟩
+  icases Hsl with (⟨HQbody, HownD_slot⟩ | HEi_slot)
+  · -- slot already disabled: two disable tokens for `i` — impossible
+    ihave Hd := (ownE_disjoint (GF := GF) (γ := W.γD) (E1 := eqset i) (E2 := eqset i))
+    ihave Hee : iprop(ownE W.γD (eqset i) ∗ ownE W.γD (eqset i)) $$ [HownD, HownD_slot]
+    · isplitl [HownD]
+      · iexact HownD
+      · iexact HownD_slot
+    ispecialize Hd $$ Hee
+    icases Hd with %Hd
+    exact (Hd i ⟨rfl, rfl⟩).elim
+  · -- slot enabled: take the enable token, re-disable with our body + disable token
+    ihave Hag := (ownI_agree (F := F) (γ := W.γI) (i := i) (P := P) (Q := Q))
+    ihave Hpq : iprop(ownI (F := F) W.γI i P ∗ ownI (F := F) W.γI i Q) $$ []
+    · isplitl []
+      · iexact Hinv
+      · iexact HownIQ
+    ispecialize Hag $$ Hpq
+    ihave HQlater : iprop(▷ Q) $$ [Hag, HPlater]
+    · iapply iEq_later_transport'
+      isplitl [Hag]
+      · iexact Hag
+      · iexact HPlater
+    isplitl [HA2 Hrest HQlater HownD]
+    · iexists (pre ++ (i, Q) :: post)
+      isplitl [HA2]
+      · iexact HA2
+      · ihave Hcomb2 := (bigSep_map_extract (slotF (F := F) W.γI W.γE W.γD) (i, Q) pre post).2
+        iapply Hcomb2
+        isplitl [HQlater HownD]
+        · isplitl []
+          · iexact HownIQ
+          · ileft
+            isplitl [HQlater]
+            · iexact HQlater
+            · iexact HownD
+        · iexact Hrest
+    · iexact HEi_slot
+
 /-- The persistent invariant assertion: name `i` guards `P`. -/
 noncomputable def inv (i : Nat) (P : IProp GF) : IProp GF := ownI (F := F) W.γI i P
 
 instance instPersistent_inv {i} {P : IProp GF} : BI.Persistent (inv (W := W) i P) := by
   unfold inv
   infer_instance
+
+/-- **Invariant access.** An invariant `inv i P` can be opened over any mask `E ∋ i`:
+shift to `E ∖ {i}`, obtain the body `▷ P`, and receive a closing update that, on return
+of `▷ P`, restores the mask to `E`. The Iris invariant-access law, for finite masks. -/
+theorem inv_acc {i : Nat} {P : IProp GF} {E : Iris.Set Nat} (hi : E i) :
+    inv (W := W) i P ⊢
+      fupd (W := W) E (mdiff E (eqset i))
+        iprop(▷ P ∗ (▷ P -∗ fupd (W := W) (mdiff E (eqset i)) E (emp : IProp GF))) := by
+  have hsub : Iris.Subset (eqset i) E := by
+    intro j hj
+    simp only [eqset] at hj
+    subst hj
+    exact hi
+  simp only [fupd, inv]
+  iintro #Hinv Hin
+  icases Hin with ⟨Hw, HE⟩
+  -- peel the enable token for `i` off the mask
+  ihave Hsplit := (ownE_subset_split (GF := GF) (γ := W.γE) hsub).1
+  ispecialize Hsplit $$ HE
+  icases Hsplit with ⟨HEi, HE'⟩
+  -- open the invariant
+  ihave Hpre : iprop(ownI (F := F) W.γI i P ∗ wsat (F := F) W.γI W.γE W.γD
+                      ∗ ownE W.γE (eqset i)) $$ [Hw, HEi]
+  · isplitl []
+    · iexact Hinv
+    · isplitl [Hw]
+      · iexact Hw
+      · iexact HEi
+  ihave Hopen := (ownI_open (W := W) (i := i) (P := P))
+  ispecialize Hopen $$ Hpre
+  icases Hopen with ⟨HPlater, Hw2, HownD⟩
+  iapply be_intro
+  isplitl [Hw2]
+  · iexact Hw2
+  · isplitl [HE']
+    · iexact HE'
+    · isplitl [HPlater]
+      · iexact HPlater
+      · -- the closing update, capturing the disable token `HownD`
+        iintro HP2 Hin2
+        icases Hin2 with ⟨Hw3, HE'2⟩
+        ihave Hpre2 : iprop(ownI (F := F) W.γI i P ∗ wsat (F := F) W.γI W.γE W.γD
+                            ∗ ▷ P ∗ ownD W.γD (eqset i)) $$ [Hw3, HP2, HownD]
+        · isplitl []
+          · iexact Hinv
+          · isplitl [Hw3]
+            · iexact Hw3
+            · isplitl [HP2]
+              · iexact HP2
+              · iexact HownD
+        ihave Hclose := (ownI_close (W := W) (i := i) (P := P))
+        ispecialize Hclose $$ Hpre2
+        icases Hclose with ⟨Hw4, HEi2⟩
+        iapply be_intro
+        isplitl [Hw4]
+        · iexact Hw4
+        · isplitl [HE'2 HEi2]
+          · ihave Hcombw := (ownE_subset_split (GF := GF) (γ := W.γE) hsub).2
+            iapply Hcombw
+            isplitl [HEi2]
+            · iexact HEi2
+            · iexact HE'2
+          · iemp_intro
 
 /-- **Logically-atomic accessor.** Expressible now that `fupd` exists: shift the public
 mask `Eo` to the private `Ei`, expose abstract state `α x`, and provide both an abort

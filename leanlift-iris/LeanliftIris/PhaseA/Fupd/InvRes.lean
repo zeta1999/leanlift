@@ -74,6 +74,14 @@ theorem invAuth_lookup {γ i} {m : Nat → Option (Agree (LaterS (IProp GF)))} {
   have Hmi : m i = some v' := Hl
   simp [Hmi]
 
+/-- Membership lookup keeping the authority (the fact is pure, hence free). -/
+theorem invAuth_lookup_keep {γ i} {m : Nat → Option (Agree (LaterS (IProp GF)))}
+    {P : IProp GF} :
+    invAuth (F := F) γ m ∗ ownI (F := F) γ i P ⊢
+      iprop(⌜(m i).isSome⌝ ∗ (invAuth (F := F) γ m ∗ ownI (F := F) γ i P)) :=
+  (and_intro invAuth_lookup .rfl).trans
+    (pure_elim_l fun hφ => emp_sep.2.trans (sep_mono_l (pure_intro hφ)))
+
 /-- **Invariant-knowledge agreement.** Two pieces of knowledge about the same name
 agree on the guarded proposition (up to a later) — the agreement of the two
 discarded-fraction `Agree (LaterS ·)` fragments. -/
