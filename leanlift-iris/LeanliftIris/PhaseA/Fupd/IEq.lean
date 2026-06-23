@@ -62,4 +62,19 @@ instance instPersistent_iEq {α : Type _} [OFE α] {a b : α} :
     BI.Persistent (iEq (GF := GF) a b) :=
   ⟨fun _ _ _ H => H⟩
 
+/-- Leibniz elimination, other direction: from `iEq P Q` and `Q` conclude `P`. -/
+theorem iEq_elim' {P Q : IProp GF} : BIBase.and (iEq (GF := GF) P Q) Q ⊢ P :=
+  (and_mono_l iEq_sym).trans iEq_elim
+
+/-- **Transport.** Equal propositions are interchangeable under separating
+conjunction. -/
+theorem iEq_transport {P Q : IProp GF} : iprop(iEq (GF := GF) P Q ∗ Q) ⊢ P :=
+  sep_and.trans iEq_elim'
+
+/-- **Transport under `▷`.** The form `inv_acc` uses to turn the stored body `▷ Q`
+into the client's `▷ P` given `▷ (P ≡ Q)`. -/
+theorem iEq_later_transport {P Q : IProp GF} :
+    iprop(▷ iEq (GF := GF) P Q ∗ ▷ Q) ⊢ (▷ P : IProp GF) :=
+  later_sep.mpr.trans (later_mono iEq_transport)
+
 end LeanliftIris.PhaseA.Fupd
