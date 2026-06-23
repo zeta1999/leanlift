@@ -73,6 +73,20 @@ Files live under `leanlift-iris/LeanliftIris/PhaseA/Fupd/`, wired into `Leanlift
   logically-atomic triple `<<< P >>> e @ E <<< Q >>>` (Texan-style notation) is definable
   and `inv`-clients typecheck. Namespaces `N` modelled as finite `Set Nat` (`↑N` finite).
 
+## STATUS (live)
+
+- **Done, committed, sorry-free:** infra `Functors.lean` (`idOF`, `LaterS`, `FProp`);
+  piece 1 `Masks.lean`; piece 2 `InvRes.lean` (`invAuth`, `ownI` persistent,
+  `invAuth_lookup`).
+- **Two iris-lean blockers found & fixed in-repo** (see commits): (1) `Auth.lean` is
+  not built into the library → use the built `HeapView.HeapViewURF`; (2) `Later` bumps
+  the universe (`Type (u+1)`) while `iOwn` is universe-0-monomorphic, making stored
+  props impossible → `LaterS` (a `Type u` single-field structure with the same
+  `DistLater` OFE).
+- **Remaining:** `IEq` (internal equality — none in iris-lean), `BigSep` over the
+  invariant map (only `List PROP` `bigSep` exists), then pieces 3 (wsat), 4 (fupd +
+  `BIFUpdate`), 5 (inv + LAT).
+
 ## Order of work / commits
 
 infra (`Functors` → `IEq` → `BigSep`) → `Masks` (piece 1) → `Wsat` auth (piece 2) →
