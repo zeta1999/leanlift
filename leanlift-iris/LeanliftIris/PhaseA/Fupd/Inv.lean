@@ -244,6 +244,45 @@ theorem inv_acc {i : Nat} {P : IProp GF} {E : Iris.Set Nat} (hi : E i) :
             · iexact HE'2
           · iemp_intro
 
+/-- **Invariant allocation.** Any `▷ P` can be sealed into a fresh invariant `inv i P`,
+under any mask. The Iris invariant-creation law. -/
+theorem inv_alloc {P : IProp GF} {E : Iris.Set Nat} :
+    (▷ P : IProp GF) ⊢ fupd (W := W) E E iprop(∃ i, inv (W := W) i P) := by
+  simp only [fupd, inv, wsat]
+  iintro HP Hin
+  icases Hin with ⟨Hw, HE⟩
+  icases Hw with ⟨%L, HA, Hbig⟩
+  -- mint a fresh disabled token avoiding the already-allocated names
+  ihave Halloc := (ownE_alloc (GF := GF) W.γD (L.map Prod.fst))
+  imod Halloc with Halloc
+  icases Halloc with ⟨%i, %hiX, HownD⟩
+  -- extend the authority with the fresh invariant
+  have hfresh : toMap L i = none := toMap_fresh L hiX
+  ihave Hauth := (invAuth_alloc (F := F) (γ := W.γI) (i := i) (P := P) (L := L) hfresh)
+  ispecialize Hauth $$ HA
+  imod Hauth with Hauth
+  icases Hauth with ⟨HA', #HownI⟩
+  iapply be_intro
+  isplitl [HA' Hbig HP HownD]
+  · -- world satisfaction with the new (disabled) slot prepended
+    iexists ((i, P) :: L)
+    isplitl [HA']
+    · iexact HA'
+    · rw [List.map_cons]
+      iapply bigOp_sep_cons.mpr
+      isplitl [HownI HP HownD]
+      · isplitl []
+        · iexact HownI
+        · ileft
+          isplitl [HP]
+          · iexact HP
+          · iexact HownD
+      · iexact Hbig
+  · isplitl [HE]
+    · iexact HE
+    · iexists i
+      iexact HownI
+
 /-- **Logically-atomic accessor.** Expressible now that `fupd` exists: shift the public
 mask `Eo` to the private `Ei`, expose abstract state `α x`, and provide both an abort
 (restore `α x`, regain `Pa`) and a commit (give up `β x`, obtain `Φ x`), each shifting
