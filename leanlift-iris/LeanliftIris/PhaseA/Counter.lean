@@ -59,11 +59,9 @@ theorem twoIncr_spec (γ : GName) [HasHeap γ GF F] (s : Nat) (k : Int) :
         (fun r => iprop(⌜r = .int (k + 1)⌝ ∗ isCounter γ s (k + 1 + 1))) := by
   simp only [twoIncrBody]
   refine (incr_spec γ s k).trans
-    ((wp_mono γ (incrBody s) _ _ ?_).trans (wp_let γ "_" (incrBody s) (incrBody s) _))
+    ((wp_mono γ (incrBody s) _ _ ?_).trans
+      (wp_seq γ (incrBody s) (incrBody s) _ (fun w => by simp [incrBody, substE, substV])))
   intro r
-  have hsub : substE "_" r (substE "_" (.clos "_" "_" (incrBody s)) (incrBody s))
-      = incrBody s := by simp [incrBody, substE, substV]
-  rw [hsub]
   iintro ⟨_, Hc⟩
   iintro !>
   iapply (incr_spec γ s (k + 1))
