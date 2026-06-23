@@ -57,3 +57,4 @@ open LeanliftIris.PhaseC
 #print axioms LeanliftIris.PhaseA.wp_adequacy_steps    -- A2: adequacy over the real thread-pool steps
 #print axioms LeanliftIris.PhaseA.wp_seq               -- A2: statement-sequencing rule
 #print axioms LeanliftIris.PhaseA.twoIncr_spec         -- A4: verified ops compose (via wp_seq)
+#print axioms LeanliftIris.PhaseA.pushPop_spec         -- A4: stack round-trip (push then pop = id)

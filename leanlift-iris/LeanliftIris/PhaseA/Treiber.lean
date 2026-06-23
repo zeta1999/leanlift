@@ -261,4 +261,51 @@ theorem pop_body_spec (γ : GName) [HasHeap γ GF F] (s : Nat) (x nxt : Val) (l 
           · iexact Hs3
           · iexact Hrep
 
+/-! ## Round-trip correctness: push then pop returns the pushed value
+
+The canonical stack property, end-to-end through the program logic: on an empty
+stack, `let _ = push s v in pop s` returns `v` and leaves the stack empty. The
+abstract state threads `[] → [v] → []`, composing the two CAS-based operations via
+the sequencing rule `wp_seq`. -/
+
+/-- `let _ = push s v in pop s`. -/
+def pushPopBody (s : Nat) (v : Val) : Expr :=
+  .app (.val (.clos "_" "_" (popBody s))) (pushBody s v)
+
+/-- **Push-then-pop round-trips.** From the empty stack, pushing `v` then popping
+returns `v` and restores the empty stack. Composes `push_body_spec` and
+`pop_body_spec` (abstract state `[] → [v] → []`) under `wp_seq`. -/
+theorem pushPop_spec (γ : GName) [HasHeap γ GF F] (s : Nat) (v : Val)
+    (hclv : ∀ (x : String) (w : Val), substV x w v = v) :
+    isStack γ s [] ⊢
+      wp (F := F) γ (pushPopBody s v) (fun r => iprop(⌜r = v⌝ ∗ isStack γ s [])) := by
+  simp only [pushPopBody]
+  refine Entails.trans ?_
+    (wp_seq γ (pushBody s v) (popBody s) _ (fun w => by simp [popBody, substE, substV]))
+  -- pop on a one-element stack returns v and empties it (under the later)
+  have hpop : isStack γ s [v] ⊢
+      iprop(▷ wp (F := F) γ (popBody s) (fun r => iprop(⌜r = v⌝ ∗ isStack γ s []))) := by
+    show iprop(∃ hd, s ↦[γ] hd ∗
+        ∃ l nxt, ⌜hd = Val.loc l⌝ ∗ l ↦[γ] (.pair v nxt) ∗ ⌜nxt = Val.unit⌝) ⊢ _
+    iintro ⟨%hd2, Hs2, %l, %nxt, %hhd2, Hnode, %hnxt⟩
+    subst hhd2
+    subst hnxt
+    iintro !>
+    iapply (pop_body_spec γ s v .unit l [] hclv (fun _ _ => rfl))
+    isplitl [Hs2]
+    · iexact Hs2
+    · isplitl [Hnode]
+      · iexact Hnode
+      · simp only [listRep]; ipure_intro; trivial
+  -- push on the empty stack yields the one-element stack
+  have hpush : isStack γ s [] ⊢ wp (F := F) γ (pushBody s v) (fun _ => isStack γ s [v]) := by
+    show iprop(∃ hd, s ↦[γ] hd ∗ ⌜hd = Val.unit⌝) ⊢ _
+    iintro ⟨%hd, Hs, %hhd⟩
+    subst hhd
+    iapply (push_body_spec γ s v .unit [] hclv (fun _ _ => rfl))
+    isplitl [Hs]
+    · iexact Hs
+    · simp only [listRep]; ipure_intro; trivial
+  exact hpush.trans (wp_mono γ (pushBody s v) _ _ (fun _ => hpop))
+
 end LeanliftIris.PhaseA
