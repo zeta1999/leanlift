@@ -73,19 +73,27 @@ Files live under `leanlift-iris/LeanliftIris/PhaseA/Fupd/`, wired into `Leanlift
   logically-atomic triple `<<< P >>> e @ E <<< Q >>>` (Texan-style notation) is definable
   and `inv`-clients typecheck. Namespaces `N` modelled as finite `Set Nat` (`↑N` finite).
 
-## STATUS (live)
+## STATUS (live) — all five pieces landed, sorry-free
 
-- **Done, committed, sorry-free:** infra `Functors.lean` (`idOF`, `LaterS`, `FProp`);
-  piece 1 `Masks.lean`; piece 2 `InvRes.lean` (`invAuth`, `ownI` persistent,
-  `invAuth_lookup`).
-- **Two iris-lean blockers found & fixed in-repo** (see commits): (1) `Auth.lean` is
-  not built into the library → use the built `HeapView.HeapViewURF`; (2) `Later` bumps
-  the universe (`Type (u+1)`) while `iOwn` is universe-0-monomorphic, making stored
-  props impossible → `LaterS` (a `Type u` single-field structure with the same
-  `DistLater` OFE).
-- **Remaining:** `IEq` (internal equality — none in iris-lean), `BigSep` over the
-  invariant map (only `List PROP` `bigSep` exists), then pieces 3 (wsat), 4 (fupd +
-  `BIFUpdate`), 5 (inv + LAT).
+- **Infra:** `Functors.lean` (`idOF`, `LaterS`, `FProp`); `IEq.lean` (internal equality
+  `iEq` + `iEq_elim`/`agree_iEq`/`iEq_laterS_fwd`).
+- **Piece 1** `Masks.lean` — `ownE`/`ownD`, splitting/exclusivity, `mdiff`,
+  `ownE_subset_split`, `ownE_disjoint_keep`.
+- **Piece 2** `InvRes.lean` — `invAuth`, `ownI` (persistent), `invAuth_lookup`.
+- **Piece 3** `Wsat.lean` — `wsat` + `WsatG` (fixed ghost names, `F` outParam).
+- **Piece 4** `Fupd.lean` — `fupd` + all five laws (`frame_r`, `except0`, `trans`,
+  `subset`, `mask_frame_r'`) + `ne`; **`instance : BIFUpdate (IProp GF) Nat`**.
+- **Piece 5** `Inv.lean` — `inv` (persistent), `bigSep_map_extract` (slot surgery),
+  **`atomic_acc`** (logically-atomic accessor → `<<<…>>>` triples now expressible).
+
+**Two iris-lean blockers found & fixed in-repo:** (1) `Auth.lean` not built → used the
+built `HeapView.HeapViewURF`; (2) `Later : Type (u+1)` bumps the universe while `iOwn`
+is universe-0-monomorphic → `LaterS` (`Type u`, same `DistLater` OFE).
+
+**Remaining (the only un-proven lemmas):** `inv_alloc` and `inv_acc` — the wsat
+open/close. They build on `bigSep_map_extract`, the `iEq` agreement `▷ (P ≡ Q)`, and a
+fresh disabled-token allocation (a GenMap frame-preserving `updateP` picking a free key,
+cf. `GenMap.valid_exists_fresh`).
 
 ## Order of work / commits
 
