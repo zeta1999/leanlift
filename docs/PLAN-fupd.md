@@ -73,7 +73,15 @@ Files live under `leanlift-iris/LeanliftIris/PhaseA/Fupd/`, wired into `Leanlift
   logically-atomic triple `<<< P >>> e @ E <<< Q >>>` (Texan-style notation) is definable
   and `inv`-clients typecheck. Namespaces `N` modelled as finite `Set Nat` (`↑N` finite).
 
-## STATUS (live) — all five pieces landed, sorry-free
+## STATUS — COMPLETE, sorry-free
+
+All five pieces **and** both invariant laws (`inv_acc` + `inv_alloc`) are done and
+committed; the whole `Fupd/` lane builds sorry-free. `inv_alloc` required a
+from-scratch list pigeonhole (`Fresh.lean`, no Mathlib) → GenMap fresh-key `updateP`
+(`genMap_alloc_updateP`) → token mint (`ownE_alloc`) → authority alloc
+(`invAuth_alloc`) → assembly. Nothing remains.
+
+## STATUS (history) — all five pieces landed, sorry-free
 
 - **Infra:** `Functors.lean` (`idOF`, `LaterS`, `FProp`); `IEq.lean` (internal equality
   `iEq` + `iEq_elim`/`agree_iEq`/`iEq_laterS_fwd`).
