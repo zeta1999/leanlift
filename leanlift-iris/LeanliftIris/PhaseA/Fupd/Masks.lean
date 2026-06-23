@@ -86,6 +86,14 @@ theorem ownE_disjoint {γ : GName} {E1 E2 : Iris.Set Nat} :
   ipure_intro
   exact tok_validN_disjoint H
 
+/-- Exclusivity, keeping the resources: extract the disjointness fact (it is pure,
+hence free) without consuming the two ownerships. -/
+theorem ownE_disjoint_keep {γ : GName} {E1 E2 : Iris.Set Nat} :
+    ownE (GF := GF) γ E1 ∗ ownE γ E2 ⊢
+      iprop(⌜Iris.Disjoint E1 E2⌝ ∗ (ownE γ E1 ∗ ownE γ E2)) :=
+  (and_intro ownE_disjoint .rfl).trans
+    (pure_elim_l fun hφ => emp_sep.2.trans (sep_mono_l (pure_intro hφ)))
+
 /-- The empty mask is ownable for free (up to update): it is the token unit. -/
 theorem ownE_empty_bupd {γ : GName} :
     ⊢ |==> ownE (GF := GF) γ (fun _ => False) := by
@@ -94,5 +102,38 @@ theorem ownE_empty_bupd {γ : GName} :
   haveI : IsUnit (GenMap.empty : GenMap Nat (Excl Unit)) :=
     inferInstanceAs (IsUnit (UCMRA.unit : GenMap Nat (Excl Unit)))
   exact iOwn_unit
+
+/-! ## Mask difference -/
+
+/-- Mask difference `E1 ∖ E2` (iris-lean's `Iris.Set` has no complement/difference). -/
+def mdiff (E1 E2 : Iris.Set Nat) : Iris.Set Nat := fun i => E1 i ∧ ¬ E2 i
+
+/-- A mask is disjoint from anything it is removed from. -/
+theorem mdiff_disjoint (E1 E2 : Iris.Set Nat) : Iris.Disjoint E2 (mdiff E1 E2) :=
+  fun _ ⟨h2, _, hn⟩ => hn h2
+
+/-- A subset and its complement reassemble the whole (classically, as predicates). -/
+theorem union_mdiff {E1 E2 : Iris.Set Nat} (h : Iris.Subset E2 E1) :
+    Iris.union E2 (mdiff E1 E2) = E1 := by
+  funext i
+  apply propext
+  constructor
+  · rintro (h2 | ⟨h1, _⟩)
+    · exact h i h2
+    · exact h1
+  · intro h1
+    by_cases h2 : E2 i
+    · exact Or.inl h2
+    · exact Or.inr ⟨h1, h2⟩
+
+/-- **Peel a sub-mask.** Splitting along `E2 ⊆ E1` separates `ownE E1` into the
+sub-mask `E2` and its complement `E1 ∖ E2`. The workhorse for the `subset` and
+`mask_frame_r'` fancy-update laws. -/
+theorem ownE_subset_split {γ : GName} {E1 E2 : Iris.Set Nat} (h : Iris.Subset E2 E1) :
+    ownE (GF := GF) γ E1 ⊣⊢ ownE γ E2 ∗ ownE γ (mdiff E1 E2) := by
+  have he : ownE (GF := GF) γ E1 = ownE γ (Iris.union E2 (mdiff E1 E2)) := by
+    rw [union_mdiff h]
+  rw [he]
+  exact ownE_op (GF := GF) (mdiff_disjoint E1 E2)
 
 end LeanliftIris.PhaseA.Fupd

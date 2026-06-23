@@ -16,6 +16,8 @@ import LeanliftIris.PhaseA.Fupd.Functors
 import LeanliftIris.PhaseA.Fupd.Masks
 import LeanliftIris.PhaseA.Fupd.InvRes
 import LeanliftIris.PhaseA.Fupd.IEq
+import LeanliftIris.PhaseA.Fupd.Wsat
+import LeanliftIris.PhaseA.Fupd.Fupd
 import LeanliftIris.PhaseB.WeakMem
 import LeanliftIris.PhaseB.Machine
 import LeanliftIris.PhaseB.Logic
