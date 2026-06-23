@@ -25,6 +25,7 @@ import Iris.Instances.IProp
 import Iris.Algebra
 import Iris.Std.HeapInstances
 import LeanliftIris.PhaseA.Fupd.Functors
+import LeanliftIris.PhaseA.Fupd.IEq
 
 namespace LeanliftIris.PhaseA.Fupd
 open Iris Iris.BI COFE HeapView One DFrac Agree OFE
@@ -72,5 +73,16 @@ theorem invAuth_lookup {γ i} {m : Nat → Option (Agree (LaterS (IProp GF)))} {
   obtain ⟨v', _, _, Hl, _, _⟩ := HeapView.auth_op_frag_validN_iff.mp H
   have Hmi : m i = some v' := Hl
   simp [Hmi]
+
+/-- **Invariant-knowledge agreement.** Two pieces of knowledge about the same name
+agree on the guarded proposition (up to a later) — the agreement of the two
+discarded-fraction `Agree (LaterS ·)` fragments. -/
+theorem ownI_agree {γ i} {P Q : IProp GF} :
+    ownI (F := F) γ i P ∗ ownI (F := F) γ i Q ⊢ (▷ iEq P Q : IProp GF) := by
+  refine iOwn_op.mpr.trans (iOwn_cmraValid.trans ?_)
+  refine (?step : (UPred.cmraValid _ : IProp GF) ⊢
+      UPred.cmraValid (toAgree (LaterS.next P) • toAgree (LaterS.next Q))).trans ?_
+  case step => exact fun n x _ H => (HeapView.frag_op_validN_iff.mp H).2
+  exact agree_iEq.trans iEq_laterS_fwd
 
 end LeanliftIris.PhaseA.Fupd
