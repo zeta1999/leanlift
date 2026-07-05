@@ -399,6 +399,11 @@ pub enum Lane {
     Ollama { model: String },
     /// A remote OpenAI-compatible chat endpoint (called via `curl`).
     OpenAiCompat { url: String, model: String, key: Option<String> },
+    /// le-harnais (`lh`) as an optional pluggable provider — single-shot completion via
+    /// `lh model chat`. le-harnais is closed-source and OPTIONAL: this lane exists only when the
+    /// `lh` binary is on PATH; otherwise `resolve` returns a skip, so a le-harnais-free checkout
+    /// builds and runs unchanged. (This is the note's "Tool mode: pluggable LLM client".)
+    Lh { model: String },
 }
 
 impl Lane {
@@ -430,7 +435,18 @@ impl Lane {
                     key: env("LEANLIFT_QWEN_KEY"),
                 })
             }
-            other => Err(format!("unknown lane `{other}` (have: claude, skill, gemma, qwen)")),
+            "lh" => {
+                // Skip (not fail) when the closed-source `lh` binary is absent — keeps this OSS
+                // checkout working with its own lanes when le-harnais isn't installed.
+                if !lh_available() {
+                    return Err("lane lh: the `lh` (le-harnais) CLI is not on PATH — skipping".into());
+                }
+                Ok(Lane::Lh {
+                    model: env("LEANLIFT_LH_MODEL")
+                        .unwrap_or_else(|| "qwen3.6:35b-a3b-bf16".into()),
+                })
+            }
+            other => Err(format!("unknown lane `{other}` (have: claude, skill, gemma, qwen, lh)")),
         }
     }
 
@@ -441,8 +457,21 @@ impl Lane {
             Lane::Skill { runner, .. } => format!("skill[{runner}]"),
             Lane::Ollama { model } => format!("ollama[{model}]"),
             Lane::OpenAiCompat { model, .. } => format!("openai[{model}]"),
+            Lane::Lh { model } => format!("lh[{model}]"),
         }
     }
+}
+
+/// True if the `lh` (le-harnais) CLI is on PATH — probed via `lh --version`. Lets the `lh` lane
+/// skip cleanly on a checkout where the closed-source binary isn't installed.
+fn lh_available() -> bool {
+    Command::new("lh")
+        .arg("--version")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
 }
 
 /// Query the active lane for a completion, with a lane-keyed content-addressed
@@ -467,9 +496,28 @@ fn query(lane: &Lane, prompt: &str, work_dir: &Path) -> Result<String, String> {
         Lane::Skill { runner, skill } => run_skill(runner, skill, prompt, work_dir)?,
         Lane::Ollama { model } => run_ollama(model, prompt)?,
         Lane::OpenAiCompat { url, model, key } => run_openai(url, model, key.as_deref(), prompt)?,
+        Lane::Lh { model } => run_lh(model, prompt, work_dir)?,
     };
     let _ = std::fs::write(&hit, &resp);
     Ok(resp)
+}
+
+/// The `lh` lane: le-harnais as an optional pluggable provider. A single-shot completion via
+/// `lh model chat` (local model, ollama-backed by default). Returns the model's answer on stdout,
+/// which the harness treats exactly like any other lane's completion (extract the Lean, then verify
+/// with our OWN oracle — le-harnais is the proposer here, leanlift is the checker).
+fn run_lh(model: &str, prompt: &str, work_dir: &Path) -> Result<String, String> {
+    let out = Command::new("lh")
+        .args(["--model", model, "model", "chat", prompt])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .output()
+        .map_err(|e| format!("failed to spawn lh: {e}"))?;
+    if !out.status.success() {
+        let _ = std::fs::write(work_dir.join("lh.err"), &out.stderr);
+        return Err(format!("lh exited with {}", out.status));
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).to_string())
 }
 
 /// Spawn `program args…`, write `prompt` to its stdin, return stdout.
@@ -667,4 +715,25 @@ fn extract_json_field(resp: &str, key: &str) -> Option<String> {
 
 fn cache_dir() -> PathBuf {
     PathBuf::from(".leanlift-cache")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // The `lh` lane's stable id is used for the cache key + run log; lock its shape.
+    #[test]
+    fn lh_lane_id() {
+        let lane = Lane::Lh { model: "qwen3.6:35b-a3b-bf16".into() };
+        assert_eq!(lane.id(), "lh[qwen3.6:35b-a3b-bf16]");
+    }
+
+    // `lh` is advertised in the unknown-lane help so users can discover it.
+    #[test]
+    fn unknown_lane_lists_lh() {
+        match Lane::resolve("definitely-not-a-lane") {
+            Err(err) => assert!(err.contains("lh"), "unknown-lane message should list `lh`: {err}"),
+            Ok(_) => panic!("bogus lane should not resolve"),
+        }
+    }
 }

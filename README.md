@@ -92,10 +92,16 @@ disposes identically. The lanes double as a model-quality comparison
 | `skill`  | same, driven from [`SKILL.md`](./SKILL.md) — proves the doc is self-sufficient | local |
 | `gemma`  | `gemma4:e4b` via ollama (16 GB class) | local |
 | `qwen`   | Qwen3 on an OpenAI-compatible endpoint | remote (env-configured, skipped until set) |
+| `lh`     | [le-harnais](https://github.com/) `lh model chat` (optional; model via `LEANLIFT_LH_MODEL`) | local (skipped unless `lh` is on PATH) |
 
 Responses are content-addressed under `.leanlift-cache/`, keyed by lane + prompt,
 so reruns don't re-query. See [`SKILL.md`](./SKILL.md) for the portable skill the
 lanes follow.
+
+The `lh` lane is **optional** — le-harnais is a separate (closed-source) tool. leanlift has **no
+build dependency** on it: the lane is a runtime shell-out that self-skips when `lh` isn't installed,
+so a le-harnais-free checkout builds and runs identically. It's the "pluggable LLM client" mode
+(le-harnais proposes a translation; leanlift's own differential oracle still decides L1).
 
 ## Quick start
 
