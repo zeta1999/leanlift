@@ -241,19 +241,43 @@ fn prove_cmd(a: Vec<String>) {
     println!("  axioms  : {}", rep.axioms.join(", "));
     println!("  sorry-free: {}", rep.sorry_free);
 
+    // Optional independent re-certification through the shared le-harnais Lean backend (P1.4).
+    // Runtime-optional: enabled by LEANLIFT_LH, and a clean skip when `lh` isn't installed.
+    let lh_complete = if std::env::var("LEANLIFT_LH").is_ok() {
+        let content = std::fs::read_to_string(work.join("Proofs.lean")).unwrap_or_default();
+        let aeneas_lean = frontend::aeneas_install().join("backends/lean");
+        match prove::lh_verify(&content, &aeneas_lean) {
+            Some(c) => {
+                println!("  lh cross-check: complete={c}  (independent, via `lh logic lean4`)");
+                Some(c)
+            }
+            None => {
+                eprintln!("  lh cross-check skipped (lh not on PATH or call failed)");
+                None
+            }
+        }
+    } else {
+        None
+    };
+
     let lib = std::fs::read_to_string(crate_dir.join("src/lib.rs")).unwrap_or_default();
     let crate_src = slice_rust_fn(&lib, &entrypoint).unwrap_or(lib);
     let recipe = PathBuf::from(format!("{}.recipe.md", ex.name));
     if prove::write_recipe(&recipe, ex.name, &crate_src, &def, &rep).is_ok() {
         eprintln!("  recipe  -> {}", recipe.display());
     }
+    let lh_field = match lh_complete {
+        Some(b) => b.to_string(),
+        None => "null".to_string(),
+    };
     let _ = std::fs::write(
         &out,
         format!(
-            "{{\n  \"fn\": \"{}\",\n  \"level\": \"{}\",\n  \"sorry_free\": {},\n  \"theorems\": [{}],\n  \"axioms\": [{}]\n}}\n",
+            "{{\n  \"fn\": \"{}\",\n  \"level\": \"{}\",\n  \"sorry_free\": {},\n  \"lh_complete\": {},\n  \"theorems\": [{}],\n  \"axioms\": [{}]\n}}\n",
             ex.fn_name,
             if rep.sorry_free { "L3_proved" } else { "L2_unverified" },
             rep.sorry_free,
+            lh_field,
             rep.theorems.iter().map(|t| format!("\"{t}\"")).collect::<Vec<_>>().join(", "),
             rep.axioms.iter().map(|x| format!("\"{x}\"")).collect::<Vec<_>>().join(", "),
         ),

@@ -77,6 +77,41 @@ pub fn prove_aeneas(
     Ok(ProofReport { theorems, axioms, sorry_free })
 }
 
+/// Optional independent re-certification of an emitted proof through the shared le-harnais Lean
+/// backend: `lh --json logic lean4 <code>` with `LH_LEAN_PROJECT` pointed at `lean_project` so lh
+/// elaborates in the same environment (mathlib or, here, Aeneas's `backends/lean`). Returns lh's
+/// `complete` verdict (compiles ∧ no sorry ∧ no errors — the same signal our `#print axioms`
+/// certification checks), or `None` when `lh` isn't installed / the call fails. le-harnais is a
+/// separate, OPTIONAL, closed-source tool: absence is a clean skip, never a failure, and leanlift
+/// carries no build dependency on it (this is a runtime shell-out).
+pub fn lh_verify(code: &str, lean_project: &Path) -> Option<bool> {
+    let out = Command::new("lh")
+        .args(["--json", "logic", "lean4", code])
+        .env("LH_LEAN_PROJECT", lean_project)
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    // The lh-contract envelope nests the verdict; `complete` is the load-bearing boolean.
+    json_bool_field(&stdout, "complete")
+}
+
+/// Read a JSON boolean field by key from `s` (naive scan — enough for lh's flat verdict envelope).
+fn json_bool_field(s: &str, key: &str) -> Option<bool> {
+    let needle = format!("\"{key}\"");
+    let after = &s[s.find(&needle)? + needle.len()..];
+    let after = after.trim_start().strip_prefix(':')?.trim_start();
+    if after.starts_with("true") {
+        Some(true)
+    } else if after.starts_with("false") {
+        Some(false)
+    } else {
+        None
+    }
+}
+
 /// Emit a worked `*.recipe.md` documenting the procedure (the deliverable from
 /// docs/PLAN-proofs.md §I.1 step 6).
 pub fn write_recipe(
@@ -105,4 +140,18 @@ pub fn write_recipe(
     ));
     s.push_str("\n`Classical.choice/propext/Quot.sound` are Lean's standard logical axioms; the absence of `sorryAx` means the kernel checked every step.\n");
     std::fs::write(path, s)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_complete_from_lh_envelope() {
+        let s = r#"{ "schema_version": "lh-contract/0.1", "op": "logic",
+                     "backend": "lean4", "verdict": { "ok": true, "complete": true, "sorry": false } }"#;
+        assert_eq!(json_bool_field(s, "complete"), Some(true));
+        assert_eq!(json_bool_field(r#"{"verdict":{"complete":false}}"#, "complete"), Some(false));
+        assert_eq!(json_bool_field("{}", "complete"), None);
+    }
 }
