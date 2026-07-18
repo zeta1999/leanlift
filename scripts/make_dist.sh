@@ -35,9 +35,13 @@ cp README.md SPEC.md SKILL.md "$DIST/"
 cp scripts/build_cpp2rust.sh scripts/build_aeneas.sh "$DIST/scripts/"
 cp tests/run.sh "$DIST/tests/"
 # Runtime assets. The engine resolves `lean/` and `examples/` relative to the
-# working directory, so the bundle root is the run directory.
-rsync -a --exclude '*.olean' lean "$DIST/"
-rsync -a --exclude 'target' --exclude '*.llbc' examples "$DIST/"
+# working directory, so the bundle root is the run directory. Exclusions track
+# .gitignore's artifact types (compiled/toolchain-locked or generated files) —
+# the bundle must carry sources, not this working tree's build state.
+rsync -a --exclude '*.olean' --exclude '*.ilean' --exclude '.lake' \
+  --exclude '*.gen.lean' lean "$DIST/"
+rsync -a --exclude 'target' --exclude '*.llbc' --exclude '.lake' \
+  --exclude '*.olean' --exclude '*.ilean' examples "$DIST/"
 
 # Optional vendored cpp2rust: statically linked against LLVM 22, so the binary
 # itself needs only base-system shared libs. Mirrors the checkout layout so

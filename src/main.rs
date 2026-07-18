@@ -340,6 +340,26 @@ fn verify_cmd(args: Args) {
         None => None,
     };
 
+    // Resolve the front-end FIRST: an unavailable optional tool must SKIP
+    // before we spend a support-lib compile and an oracle build on a box that
+    // (by design) may have neither `lean` nor `c++` — the skip contract is
+    // "clean exit 0", not "fail on an unrelated missing dependency".
+    let frontend = match &args.candidate {
+        Some(p) => frontend::Frontend::Prewritten {
+            runner: p.clone(),
+            lean_path: args.lean_path.clone(),
+        },
+        None => ex.frontend,
+    };
+    // The cpp2rust front-end is an optional external tool: not built is a
+    // clean SKIP (exit 0), same contract as an unconfigured LLM lane — CI
+    // records the lane as unavailable, not broken.
+    if matches!(frontend, frontend::Frontend::Cpp2Rust { .. }) && !frontend::cpp2rust_available() {
+        eprintln!("  cpp2rust not built — run scripts/build_cpp2rust.sh (or set LEANLIFT_CPP2RUST)");
+        println!("  level: SKIPPED (cpp2rust not available)");
+        exit(0);
+    }
+
     // 1. audited Lean support library.
     if let Err(e) = ensure_support_lib(&args.lean_path) {
         eprintln!("error: {e}");
@@ -359,24 +379,9 @@ fn verify_cmd(args: Args) {
         }
     };
 
-    // 4. Obtain the candidate via the front-end (the sound Rust path runs
-    //    Charon+Aeneas here), then run it over the same vectors — the L0 gate.
-    //    A --lean override swaps in an external candidate (e.g. LLM-generated).
-    let frontend = match &args.candidate {
-        Some(p) => frontend::Frontend::Prewritten {
-            runner: p.clone(),
-            lean_path: args.lean_path.clone(),
-        },
-        None => ex.frontend,
-    };
-    // The cpp2rust front-end is an optional external tool: not built is a
-    // clean SKIP (exit 0), same contract as an unconfigured LLM lane — CI
-    // records the lane as unavailable, not broken.
-    if matches!(frontend, frontend::Frontend::Cpp2Rust { .. }) && !frontend::cpp2rust_available() {
-        eprintln!("  cpp2rust not built — run scripts/build_cpp2rust.sh (or set LEANLIFT_CPP2RUST)");
-        println!("  level: SKIPPED (cpp2rust not available)");
-        exit(0);
-    }
+    // 4. Obtain the candidate via the front-end (resolved above; the sound
+    //    Rust path runs Charon+Aeneas here), then run it over the same
+    //    vectors — the L0 gate.
     let candidate = match &frontend {
         // The LLM path runs its own propose→difftest→repair loop (it needs the
         // oracle results), and returns the final candidate.

@@ -66,11 +66,13 @@ fn cpp2rust_bin() -> PathBuf {
     cpp2rust_dir().join("build/cpp2rust/cpp2rust")
 }
 
-/// Whether the optional cpp2rust translator is built. Absence is a SKIP, not a
-/// failure (same contract as the `lh` lane): the verify loop reports SKIPPED
-/// and exits 0 so CI records the lane as unavailable rather than broken.
+/// Whether the optional cpp2rust translator is USABLE (binary + preprocessed
+/// rules — a half-built checkout with no rules would fail, not skip). Absence
+/// is a SKIP, not a failure (same contract as the `lh` lane): the verify loop
+/// reports SKIPPED and exits 0 so CI records the lane as unavailable rather
+/// than broken.
 pub fn cpp2rust_available() -> bool {
-    cpp2rust_bin().exists()
+    cpp2rust_bin().exists() && cpp2rust_dir().join("build/rules").is_dir()
 }
 
 /// Run cpp2rust on `source` and wrap its output in a generated lib crate that
@@ -175,16 +177,17 @@ fn sanitize_cpp2rust_output(translated: &str, entrypoint: &str) -> Result<String
     let mut text = out.join("\n");
     // Aeneas's Lean Std models wrapping add/sub/mul/shl/shr but has no
     // `wrapping_div`/`wrapping_rem` — they'd extract as opaque axioms the
-    // runner cannot evaluate. On unsigned types they coincide exactly with
-    // `/` and `%` (truncating, fail on zero), which Aeneas does model. If a
-    // signed kernel ever hits the one divergent case (INT_MIN / -1), the
-    // differential oracle catches it at L1 — the rewrite cannot silently lie.
-    text = text.replace(".wrapping_div(", " / (").replace(".wrapping_rem(", " % (");
+    // runner cannot evaluate. On UNSIGNED types they coincide exactly with
+    // `/` and `%` (truncating, fail on zero), which Aeneas does model — and
+    // the lane only lifts unsigned kernels today. A signed kernel's one
+    // divergent case (MIN / -1) would NOT reliably surface under sampled
+    // vectors, so revisit this rewrite before admitting signed signatures.
+    text = rewrite_wrapping_divrem(&text)?;
     // cpp2rust disambiguates overloads as `<name>_0`; our kernels have one
     // definition, so fold the suffix back onto the true entrypoint name.
     let suffixed = format!("{entrypoint}_0");
     if !text.contains(&format!("fn {entrypoint}(")) && text.contains(&format!("fn {suffixed}(")) {
-        text = text.replace(&suffixed, entrypoint);
+        text = replace_ident(&text, &suffixed, entrypoint);
     }
     if text.contains("libcc2rs") || text.contains("Value<") || text.contains("Ptr<") {
         return Err(
@@ -204,6 +207,86 @@ fn sanitize_cpp2rust_output(translated: &str, entrypoint: &str) -> Result<String
         return Err(format!("cpp2rust output has no fn `{entrypoint}`"));
     }
     Ok(text.trim_start().to_string() + "\n")
+}
+
+/// Rewrite `<recv>.wrapping_div(args)` → `<recv> / (args)` (and `_rem` → `%`).
+/// The receiver is a postfix expression so it binds tighter than the new
+/// operator, and the argument is re-parenthesized — the one unsafe shape is
+/// something binding onto the RESULT (`.method(…)`, `?`, `as …`), which would
+/// silently reassociate; that is rejected loudly instead.
+fn rewrite_wrapping_divrem(text: &str) -> Result<String, String> {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    loop {
+        let (idx, op) = match (rest.find(".wrapping_div("), rest.find(".wrapping_rem(")) {
+            (None, None) => break,
+            (Some(a), None) => (a, '/'),
+            (None, Some(b)) => (b, '%'),
+            (Some(a), Some(b)) => {
+                if a < b {
+                    (a, '/')
+                } else {
+                    (b, '%')
+                }
+            }
+        };
+        let args_start = idx + ".wrapping_div(".len();
+        out.push_str(&rest[..idx]);
+        out.push(' ');
+        out.push(op);
+        out.push_str(" (");
+        let mut depth = 1usize;
+        let mut close = None;
+        for (i, c) in rest[args_start..].char_indices() {
+            match c {
+                '(' => depth += 1,
+                ')' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        close = Some(args_start + i);
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        let close = close.ok_or("unbalanced parens in cpp2rust wrapping_div/rem call")?;
+        out.push_str(&rest[args_start..close]);
+        out.push(')');
+        let after = rest[close + 1..].trim_start();
+        if after.starts_with('.') || after.starts_with('?') || after.starts_with("as ") {
+            return Err(
+                "cpp2rust output binds onto a wrapping_div/rem result — the `/` rewrite \
+                 would change precedence; kernel unsupported by the c2r lane"
+                    .into(),
+            );
+        }
+        rest = &rest[close + 1..];
+    }
+    out.push_str(rest);
+    Ok(out)
+}
+
+/// Replace whole-identifier occurrences of `from` with `to`. (A bare substring
+/// replace would corrupt neighbors sharing the prefix — `x<from>`, `<from>x` —
+/// and hit string literals; boundary-checking confines it to the identifier.)
+fn replace_ident(text: &str, from: &str, to: &str) -> String {
+    let is_ident = |c: Option<char>| c.is_some_and(|c| c.is_ascii_alphanumeric() || c == '_');
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(i) = rest.find(from) {
+        let before = rest[..i].chars().next_back();
+        let after = rest[i + from.len()..].chars().next();
+        out.push_str(&rest[..i]);
+        if is_ident(before) || is_ident(after) {
+            out.push_str(from);
+        } else {
+            out.push_str(to);
+        }
+        rest = &rest[i + from.len()..];
+    }
+    out.push_str(rest);
+    out
 }
 
 /// The built Aeneas install (`<dir>/bin/aeneas`, `<dir>/charon/bin/charon`).
@@ -268,8 +351,12 @@ pub fn extract_rust_def(
 
     // 2. Aeneas: LLBC -> Lean. Partial extraction (unknown stdlib -> axiom) is
     //    expected (§13); we don't fail on a nonzero exit, we check the output.
+    //    The dir is cleared first: it is shared across examples, "success" is
+    //    newest-file detection, and a crashed Aeneas after a different example
+    //    would otherwise silently certify THAT example's stale extraction.
     eprintln!("  front-end: Aeneas  (LLBC → Lean)…");
     let extract_dir = work_dir.join("rust-extract");
+    let _ = std::fs::remove_dir_all(&extract_dir);
     let _ = std::fs::create_dir_all(&extract_dir);
     let out = Command::new(&aeneas_bin)
         .args(["-backend", "lean"])
@@ -396,6 +483,26 @@ mod tests {
     #[test]
     fn rejects_missing_entrypoint() {
         assert!(sanitize_cpp2rust_output("fn other() {}\n", "avg").is_err());
+    }
+
+    #[test]
+    fn rejects_chained_wrapping_div_instead_of_misparsing() {
+        // `X.wrapping_div(y).wrapping_add(z)` textually rewritten would parse
+        // as `X / (y + z)` — must be a loud error, never a silent reassoc.
+        let raw = "pub fn f(a: u32, b: u32, c: u32) -> u32 {\n    (a).wrapping_div(b).wrapping_add(c)\n}\n";
+        assert!(sanitize_cpp2rust_output(raw, "f").unwrap_err().contains("precedence"));
+        let cast = "pub fn f(a: u32, b: u32) -> u64 {\n    (a).wrapping_div(b) as u64\n}\n";
+        assert!(sanitize_cpp2rust_output(cast, "f").is_err());
+    }
+
+    #[test]
+    fn suffix_rename_respects_identifier_boundaries() {
+        let raw = "pub unsafe fn avg_0(mut a: u32) -> u32 {\n    avg_0_helper(a) + xavg_0(a) + avg_0(a)\n}\nfn avg_0_helper(x: u32) -> u32 { x }\nfn xavg_0(x: u32) -> u32 { x }\n";
+        let out = sanitize_cpp2rust_output(raw, "avg").unwrap();
+        assert!(out.contains("pub fn avg("), "def renamed: {out}");
+        assert!(out.contains("avg(a)"), "call site renamed");
+        assert!(out.contains("avg_0_helper"), "longer identifier untouched");
+        assert!(out.contains("xavg_0"), "prefixed identifier untouched");
     }
 }
 

@@ -6,8 +6,18 @@
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
-cargo build --release --quiet || { echo "build failed"; exit 1; }
-LIFT=./target/release/lift
+# In a source checkout, build and use target/release/lift. In a make_dist.sh
+# bundle there is no Cargo.toml — use the shipped bin/lift. LIFT= overrides.
+if [ -n "${LIFT:-}" ]; then
+  :
+elif [ -f Cargo.toml ]; then
+  cargo build --release --quiet || { echo "build failed"; exit 1; }
+  LIFT=./target/release/lift
+elif [ -x bin/lift ]; then
+  LIFT=./bin/lift
+else
+  echo "no Cargo.toml and no bin/lift — set LIFT=/path/to/lift"; exit 1
+fi
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 fail=0

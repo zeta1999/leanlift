@@ -37,9 +37,12 @@ else
   if [ ! -x "$LLVM_LOCAL/bin/clang++" ]; then
     echo "downloading LLVM $LLVM_VER release tarball (~1.7 GB)…"
     mkdir -p "$ROOT/llvm22" && cd "$ROOT/llvm22"
-    curl -sLO "https://github.com/llvm/llvm-project/releases/download/llvmorg-$LLVM_VER/$LLVM_TARBALL" \
+    # -f: an HTTP error page must fail here, not get saved under the tarball
+    # name and produce a baffling extract/configure failure two steps later.
+    curl -fsSLO "https://github.com/llvm/llvm-project/releases/download/llvmorg-$LLVM_VER/$LLVM_TARBALL" \
       || { echo "download FAILED"; exit 1; }
-    tar xf "$LLVM_TARBALL" && rm -f "$LLVM_TARBALL"
+    tar xf "$LLVM_TARBALL" || { echo "extract FAILED (corrupt download?)"; exit 1; }
+    rm -f "$LLVM_TARBALL"
     cd "$C2R" || exit 1
   fi
   echo "using $LLVM_LOCAL"
