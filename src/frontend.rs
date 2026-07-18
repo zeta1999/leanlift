@@ -22,6 +22,12 @@ pub enum Frontend {
     /// one is driven from the verify loop (it needs the oracle for difftest), so
     /// `produce` is not used for it.
     Llm { max_iters: usize },
+    /// Translate C++ → Rust with the external `cpp2rust` tool, then reuse the
+    /// sound Rust path (Charon+Aeneas) on the generated crate. The translation
+    /// itself is untrusted — the differential oracle still disposes — but the
+    /// whole chain is deterministic (no LLM). Optional: self-skips when the
+    /// tool is not built (see `cpp2rust_available`).
+    Cpp2Rust { source: PathBuf, entrypoint: String },
 }
 
 impl Frontend {
@@ -38,8 +44,165 @@ impl Frontend {
             Frontend::Llm { .. } => {
                 Err("LLM front-end is driven from the verify loop, not produce()".into())
             }
+            Frontend::Cpp2Rust { source, entrypoint } => {
+                let crate_dir = cpp2rust_translate(source, entrypoint, work_dir)?;
+                extract_rust(&crate_dir, entrypoint, sig, work_dir)
+            }
         }
     }
+}
+
+/// The built cpp2rust checkout (`<dir>/build/cpp2rust/cpp2rust`).
+/// Override with `LEANLIFT_CPP2RUST`; defaults next to the Aeneas install.
+fn cpp2rust_dir() -> PathBuf {
+    if let Ok(d) = std::env::var("LEANLIFT_CPP2RUST") {
+        return PathBuf::from(d);
+    }
+    let home = std::env::var("HOME").unwrap_or_default();
+    PathBuf::from(home).join("work/_verif-tools/cpp2rust")
+}
+
+fn cpp2rust_bin() -> PathBuf {
+    cpp2rust_dir().join("build/cpp2rust/cpp2rust")
+}
+
+/// Whether the optional cpp2rust translator is built. Absence is a SKIP, not a
+/// failure (same contract as the `lh` lane): the verify loop reports SKIPPED
+/// and exits 0 so CI records the lane as unavailable rather than broken.
+pub fn cpp2rust_available() -> bool {
+    cpp2rust_bin().exists()
+}
+
+/// Run cpp2rust on `source` and wrap its output in a generated lib crate that
+/// Charon can consume. Returns the crate dir. The translation is untrusted —
+/// the differential oracle downstream is what disposes.
+fn cpp2rust_translate(
+    source: &Path,
+    entrypoint: &str,
+    work_dir: &Path,
+) -> Result<PathBuf, String> {
+    let bin = cpp2rust_bin();
+    if !bin.exists() {
+        return Err(format!(
+            "cpp2rust not built at {} — run scripts/build_cpp2rust.sh (or set LEANLIFT_CPP2RUST)",
+            bin.display()
+        ));
+    }
+    let crate_dir = work_dir.join("c2r-crate");
+    let src_dir = crate_dir.join("src");
+    let _ = std::fs::create_dir_all(&src_dir);
+    let out_rs = work_dir.join("c2r-translated.rs");
+
+    eprintln!("  front-end: cpp2rust  (C++ → Rust)…");
+    // `--model=unsafe` emits scalar Rust (plain locals, `wrapping_*` ops — the
+    // faithful C++ unsigned semantics). The default safe model wraps every
+    // local in `Rc<RefCell<_>>` via the libcc2rs runtime, which Aeneas cannot
+    // extract; for the pointer-free kernels leanlift lifts, the two models
+    // compute identically and the `unsafe` qualifier is vacuous (stripped
+    // below — cargo re-checks the result, so a body that truly needed unsafe
+    // fails loudly in charon.log, not silently).
+    let out = Command::new(&bin)
+        .arg(format!("--rules={}", cpp2rust_dir().join("build/rules").display()))
+        .arg("--model=unsafe")
+        .arg(format!("--file={}", source.display()))
+        .arg(format!("-o={}", out_rs.display()))
+        .output()
+        .map_err(|e| format!("failed to run cpp2rust: {e}"))?;
+    log_output(work_dir, "cpp2rust", &out);
+    if !out.status.success() {
+        return Err(format!("cpp2rust failed (see {}/cpp2rust.log)", work_dir.display()));
+    }
+    let translated = std::fs::read_to_string(&out_rs)
+        .map_err(|e| format!("cpp2rust produced no output: {e}"))?;
+    let lib_rs = sanitize_cpp2rust_output(&translated, entrypoint)?;
+    eprintln!("  front-end: cpp2rust emitted {} lines of Rust", lib_rs.lines().count());
+
+    std::fs::write(src_dir.join("lib.rs"), lib_rs)
+        .map_err(|e| format!("cannot write generated lib.rs: {e}"))?;
+    std::fs::write(
+        crate_dir.join("Cargo.toml"),
+        "[package]\nname = \"leanlift-c2r-kernel\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n\
+         [lib]\nname = \"c2r_kernel\"\npath = \"src/lib.rs\"\n",
+    )
+    .map_err(|e| format!("cannot write generated Cargo.toml: {e}"))?;
+    // Stale LLBC from a previous run would mask a failed re-translation
+    // (extract_rust picks the newest .llbc in the crate dir).
+    for e in std::fs::read_dir(&crate_dir).into_iter().flatten().flatten() {
+        if e.path().extension().and_then(|s| s.to_str()) == Some("llbc") {
+            let _ = std::fs::remove_file(e.path());
+        }
+    }
+    Ok(crate_dir)
+}
+
+/// Adapt raw cpp2rust `--model=unsafe` output to a dependency-free lib crate
+/// Charon+Aeneas can extract from:
+///   - drop the import preamble (`extern crate libc/libcc2rs`, `use …` — the
+///     generated crate has no deps; a body that really needed one fails in
+///     cargo/charon, loudly),
+///   - drop any generated `fn main`,
+///   - strip the blanket `unsafe` fn qualifier (cargo re-checks the body),
+///   - undo cpp2rust's `_0` overload suffix on the entrypoint,
+///   - ensure the entrypoint is `pub`,
+/// and reject output that still needs the libcc2rs pointer runtime (Aeneas
+/// cannot model `Rc<RefCell<_>>` cells — the kernel must be pointer-free).
+fn sanitize_cpp2rust_output(translated: &str, entrypoint: &str) -> Result<String, String> {
+    let mut out: Vec<String> = Vec::new();
+    let mut skip_depth: i32 = -1; // >=0 while inside a skipped `fn main` block
+    for line in translated.lines() {
+        let t = line.trim_start();
+        if skip_depth >= 0 {
+            skip_depth += line.matches('{').count() as i32;
+            skip_depth -= line.matches('}').count() as i32;
+            if skip_depth <= 0 {
+                skip_depth = -1;
+            }
+            continue;
+        }
+        if t.starts_with("extern crate ") || (t.starts_with("use ") && t.ends_with(';')) {
+            continue;
+        }
+        if t.starts_with("fn main(") || t.starts_with("pub fn main(") {
+            let opens = line.matches('{').count() as i32 - line.matches('}').count() as i32;
+            if opens > 0 {
+                skip_depth = opens;
+            }
+            continue;
+        }
+        out.push(line.replace("pub unsafe fn ", "pub fn ").replace("unsafe fn ", "fn "));
+    }
+    let mut text = out.join("\n");
+    // Aeneas's Lean Std models wrapping add/sub/mul/shl/shr but has no
+    // `wrapping_div`/`wrapping_rem` — they'd extract as opaque axioms the
+    // runner cannot evaluate. On unsigned types they coincide exactly with
+    // `/` and `%` (truncating, fail on zero), which Aeneas does model. If a
+    // signed kernel ever hits the one divergent case (INT_MIN / -1), the
+    // differential oracle catches it at L1 — the rewrite cannot silently lie.
+    text = text.replace(".wrapping_div(", " / (").replace(".wrapping_rem(", " % (");
+    // cpp2rust disambiguates overloads as `<name>_0`; our kernels have one
+    // definition, so fold the suffix back onto the true entrypoint name.
+    let suffixed = format!("{entrypoint}_0");
+    if !text.contains(&format!("fn {entrypoint}(")) && text.contains(&format!("fn {suffixed}(")) {
+        text = text.replace(&suffixed, entrypoint);
+    }
+    if text.contains("libcc2rs") || text.contains("Value<") || text.contains("Ptr<") {
+        return Err(
+            "cpp2rust output uses the libcc2rs pointer runtime — not extractable by \
+             Aeneas (kernel must be pointer-free)"
+                .into(),
+        );
+    }
+    // Make the entrypoint pub so the lib crate exports it for Charon.
+    let def = format!("fn {entrypoint}(");
+    if let Some(pos) = text.find(&def) {
+        let line_start = text[..pos].rfind('\n').map_or(0, |i| i + 1);
+        if !text[line_start..pos].contains("pub ") {
+            text.insert_str(pos, "pub ");
+        }
+    } else {
+        return Err(format!("cpp2rust output has no fn `{entrypoint}`"));
+    }
+    Ok(text.trim_start().to_string() + "\n")
 }
 
 /// The built Aeneas install (`<dir>/bin/aeneas`, `<dir>/charon/bin/charon`).
@@ -183,6 +346,56 @@ fn slice_def(text: &str, name: &str) -> Option<String> {
         i += 1;
     }
     Some(lines[start..end].join("\n").trim_end().to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::sanitize_cpp2rust_output;
+
+    /// The real shape of `cpp2rust --model=unsafe` output for examples/avg/avg.cpp.
+    const AVG_UNSAFE: &str = "extern crate libc;\nuse libc::*;\nextern crate libcc2rs;\nuse libcc2rs::*;\nuse std::rc::Rc;\npub unsafe fn avg_0(mut a: u32, mut b: u32) -> u32 {\n    return ((a).wrapping_add(b)).wrapping_div(2_u32);\n}\n";
+
+    #[test]
+    fn adapts_real_unsafe_model_output() {
+        let out = sanitize_cpp2rust_output(AVG_UNSAFE, "avg").unwrap();
+        assert!(out.starts_with("pub fn avg("), "got: {out}");
+        assert!(!out.contains("unsafe"));
+        assert!(!out.contains("use "));
+        assert!(!out.contains("extern crate"));
+        assert!(!out.contains("avg_0"));
+        assert!(out.contains("wrapping_add"));
+        // wrapping_div has no Aeneas model — must be rewritten to plain `/`.
+        assert!(!out.contains("wrapping_div"));
+        assert!(out.contains(" / (2_u32)"));
+    }
+
+    #[test]
+    fn strips_main_and_makes_entrypoint_pub() {
+        let raw = "fn avg(a: u32, b: u32) -> u32 {\n    (a + b) / 2\n}\n\nfn main() {\n    let _ = avg(1, 2);\n}\n";
+        let out = sanitize_cpp2rust_output(raw, "avg").unwrap();
+        assert!(out.contains("pub fn avg("));
+        assert!(!out.contains("fn main("));
+    }
+
+    #[test]
+    fn keeps_already_pub_entrypoint_and_helpers() {
+        let raw = "pub fn isqrt(n: u32) -> u32 { n }\nfn helper(x: u32) -> u32 { x }\n";
+        let out = sanitize_cpp2rust_output(raw, "isqrt").unwrap();
+        assert!(out.contains("pub fn isqrt("));
+        assert!(!out.contains("pub pub"));
+        assert!(out.contains("fn helper("));
+    }
+
+    #[test]
+    fn rejects_pointer_runtime_output() {
+        let raw = "fn f(p: Value<u32>) -> u32 { *p.borrow() }\n";
+        assert!(sanitize_cpp2rust_output(raw, "f").unwrap_err().contains("libcc2rs"));
+    }
+
+    #[test]
+    fn rejects_missing_entrypoint() {
+        assert!(sanitize_cpp2rust_output("fn other() {}\n", "avg").is_err());
+    }
 }
 
 /// Generate a Lean runner around an extracted entrypoint (any arity/width).

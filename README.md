@@ -40,6 +40,7 @@ L3  proved             a theorem on the extracted model, certified sorry-free
 | **Prewritten** | C++ | hand-written model (ground truth for tests) | oracle-checked |
 | **Sound (Rust)** | Rust | **extracted** by Charon + Aeneas (no hand-writing) | by construction |
 | **LLM** | C++ / Go / Solidity | an agent translates it, then propose→difftest→repair | oracle-checked |
+| **cpp2rust** | C++ | [cpp2rust](https://github.com/Cpp2Rust/cpp2rust) machine-translates C++→Rust, then Charon + Aeneas extract the Rust | oracle-checked, deterministic (no LLM) |
 
 ## What it verifies
 
@@ -123,6 +124,35 @@ The engine compiles the Lean support libraries (`LeanLift.Checked`,
 (`rust-streamed`, `rust-isqrt`, `rust-bisect`) needs Charon + Aeneas built —
 `scripts/build_aeneas.sh`.
 
+### The cpp2rust lane (`c2r-*`) — deterministic C++ → Lean
+
+[cpp2rust](https://github.com/Cpp2Rust/cpp2rust) (MIT, PLDI 2026) machine-translates
+C++ to Rust from the clang AST; leanlift then runs the generated crate through the
+same Charon + Aeneas extraction as the Rust path:
+
+```
+C++ ──cpp2rust──▶ Rust ──Charon+Aeneas──▶ Lean  (vs. the C++ binary, bit-exact)
+```
+
+Unlike the LLM lanes this chain is **deterministic and offline** — but the
+translation is still *untrusted*: the differential oracle compares the extracted
+Lean against the original C++ binary on the same vectors, so a mistranslation
+shows up as an L1 divergence, never as silent trust. Build the tool with
+`scripts/build_cpp2rust.sh` (fetches clang/LLVM 22 automatically if the system
+toolchain is older; no sudo needed); locate it with `LEANLIFT_CPP2RUST`. Like the
+`lh` lane, the `c2r-*` examples **self-skip** (exit 0) when the tool isn't built:
+
+```bash
+./target/release/lift verify c2r-avg      # C++ midpoint-overflow, via cpp2rust
+./target/release/lift verify c2r-isqrt    # C++ loop kernel, via cpp2rust
+./target/release/lift verify c2r-dot2     # C++ wrap-on-mul kernel, via cpp2rust
+```
+
+leanlift generates the crate from `cpp2rust --model=unsafe` output (scalar Rust,
+`wrapping_*` ops — the faithful C++ unsigned semantics; the safe model's
+`Rc<RefCell<_>>` cells are not extractable by Aeneas) and rejects any output that
+needs the libcc2rs pointer runtime — the lane is for pointer-free kernels.
+
 ## L3 — proof (`lift prove`)
 
 Beyond L1 conformance, `lift prove` discharges a theorem on the *extracted* model
@@ -164,7 +194,7 @@ src/
   sig.rs        machine value types (int + float) & signatures
   oracle.rs     C++/Go oracle: compile source + a typed runner (float = bit-pattern)
   harness.rs    the LLM front-end: 4 lanes + propose→difftest→repair loop
-  frontend.rs   how a candidate is obtained (prewritten / Charon+Aeneas / LLM)
+  frontend.rs   how a candidate is obtained (prewritten / Charon+Aeneas / LLM / cpp2rust)
   compare.rs    bit-exact comparator + divergence classifier + postconditions
   prove.rs      L3: assemble model + theorems, certify sorry-free
   models/       the behavioural-model axis (lift model)

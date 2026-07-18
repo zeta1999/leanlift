@@ -24,6 +24,9 @@ pub struct Example {
 pub const NAMES: &[&str] = &[
     "streamed", "avg", "rust-streamed", "cpp-streamed", "cpp-dot2", "go-avg", "sol-dot2",
     "rust-isqrt", "cpp-isqrt", "rust-bisect", "cpp-bisect", "quant", "cpp-quant", "models-fire",
+    // cpp2rust path: C++ → Rust (external cpp2rust tool) → Charon+Aeneas → Lean.
+    // Deterministic, no LLM; self-skips when cpp2rust is not built.
+    "c2r-avg", "c2r-isqrt", "c2r-dot2",
     "link-buffer", "rta-kernel",
     // float path (Phase 1 smoke + the optimization ladder)
     "fadd", "cpp-fadd",
@@ -200,6 +203,52 @@ pub fn lookup(name: &str) -> Option<Example> {
             profile: Profile::Bisect,
             gen: vectors::bisect_vectors,
             frontend: Frontend::Llm { max_iters: 4 },
+            proof_frag: None,
+        }),
+        // cpp2rust path: the C++ source is machine-translated to Rust by the
+        // external cpp2rust tool, then the generated crate goes through the
+        // sound Rust path (Charon+Aeneas). The translation is untrusted; the
+        // differential oracle (original C++ binary vs extracted Lean) disposes.
+        "c2r-avg" => Some(Example {
+            name: "c2r-avg",
+            lang: Lang::Cpp,
+            source: "examples/avg/avg.cpp".into(),
+            fn_name: "avg",
+            signature: u(IntType::U32, 2),
+            profile: Profile::Avg,
+            gen: vectors::avg_vectors,
+            frontend: Frontend::Cpp2Rust {
+                source: "examples/avg/avg.cpp".into(),
+                entrypoint: "avg".into(),
+            },
+            proof_frag: None,
+        }),
+        "c2r-isqrt" => Some(Example {
+            name: "c2r-isqrt",
+            lang: Lang::Cpp,
+            source: "examples/isqrt/isqrt.cpp".into(),
+            fn_name: "isqrt",
+            signature: u(IntType::U32, 1),
+            profile: Profile::Isqrt,
+            gen: vectors::isqrt_vectors,
+            frontend: Frontend::Cpp2Rust {
+                source: "examples/isqrt/isqrt.cpp".into(),
+                entrypoint: "isqrt".into(),
+            },
+            proof_frag: None,
+        }),
+        "c2r-dot2" => Some(Example {
+            name: "c2r-dot2",
+            lang: Lang::Cpp,
+            source: "examples/dot2/dot2.cpp".into(),
+            fn_name: "dot2",
+            signature: u(IntType::U32, 4),
+            profile: Profile::Dot2,
+            gen: vectors::dot2_vectors,
+            frontend: Frontend::Cpp2Rust {
+                source: "examples/dot2/dot2.cpp".into(),
+                entrypoint: "dot2".into(),
+            },
             proof_frag: None,
         }),
         // Parametric float-cast rounding: ONE quantizer across fp8 → f64 (the

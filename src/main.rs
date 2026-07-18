@@ -353,6 +353,14 @@ fn verify_cmd(args: Args) {
         },
         None => ex.frontend,
     };
+    // The cpp2rust front-end is an optional external tool: not built is a
+    // clean SKIP (exit 0), same contract as an unconfigured LLM lane — CI
+    // records the lane as unavailable, not broken.
+    if matches!(frontend, frontend::Frontend::Cpp2Rust { .. }) && !frontend::cpp2rust_available() {
+        eprintln!("  cpp2rust not built — run scripts/build_cpp2rust.sh (or set LEANLIFT_CPP2RUST)");
+        println!("  level: SKIPPED (cpp2rust not available)");
+        exit(0);
+    }
     let candidate = match &frontend {
         // The LLM path runs its own propose→difftest→repair loop (it needs the
         // oracle results), and returns the final candidate.

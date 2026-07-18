@@ -17,6 +17,12 @@ Go, and Solidity there is **no sound transpiler**, so we use an **LLM agent** to
 translate. An LLM translation is **never trusted**. It is a *hypothesis*, and the
 tool's job is to **discharge or refute it with an algorithm**:
 
+(For pointer-free C++ kernels there is additionally a **deterministic** chain —
+[cpp2rust](https://github.com/Cpp2Rust/cpp2rust) machine-translates C++→Rust,
+then Charon+Aeneas extract the Rust (`c2r-*` examples, optional, self-skipping).
+It replaces the LLM *proposer*, not the validator: the cpp2rust translation is
+still a hypothesis that the differential oracle discharges or refutes.)
+
 ```
             ┌─────────────┐   candidate Lean    ┌──────────────────────────────┐
  source  ─► │ front-end   │ ──────────────────► │ VALIDATION (the trust anchor)│

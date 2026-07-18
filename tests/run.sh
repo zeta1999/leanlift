@@ -87,6 +87,27 @@ else
   printf '  \033[33mSKIP\033[0m  rust-streamed + prove (aeneas not built — scripts/build_aeneas.sh)\n'
 fi
 
+echo "== cpp2rust path: C++ → Rust → Aeneas (if both built) =="
+C2R="${LEANLIFT_CPP2RUST:-$HOME/work/_verif-tools/cpp2rust}"
+if [ -x "$C2R/build/cpp2rust/cpp2rust" ] && [ -x "$AENEAS/bin/aeneas" ]; then
+  for ex in c2r-avg c2r-isqrt c2r-dot2; do
+    if "$LIFT" verify "$ex" --out "$TMP/$ex.json" >"$TMP/$ex.out" 2>&1; then
+      pass "$ex  ($(grep -o 'L1 conformant/[0-9]*' "$TMP/$ex.out"))"
+    else
+      bad "$ex did not verify"; tail -20 "$TMP/$ex.out"
+    fi
+  done
+  # teeth: with the tool pointed nowhere, the lane must SKIP (exit 0), not fail.
+  if LEANLIFT_CPP2RUST=/nonexistent "$LIFT" verify c2r-avg >"$TMP/c2r-skip.out" 2>&1 \
+     && grep -q 'SKIPPED' "$TMP/c2r-skip.out"; then
+    pass "c2r skip  (unbuilt tool ⇒ SKIPPED, exit 0)"
+  else
+    bad "c2r-avg with unbuilt cpp2rust did not skip cleanly"; tail -10 "$TMP/c2r-skip.out"
+  fi
+else
+  printf '  \033[33mSKIP\033[0m  c2r-* (cpp2rust or aeneas not built — scripts/build_cpp2rust.sh)\n'
+fi
+
 echo "== LLM path: claude -p translates C++ (cached → free + deterministic) =="
 SOL=""
 command -v forge >/dev/null 2>&1 && SOL="sol-dot2"
