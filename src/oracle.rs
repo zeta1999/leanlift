@@ -178,8 +178,11 @@ fn oracle_go(
         .map_err(|e| format!("cannot write go.mod: {e}"))?;
 
     let bin = dir.join("oracle_go");
+    // -buildvcs=false: the staged dir lives under the system temp dir; if any
+    // ancestor happens to be a git repo (or an unreadable one), go's VCS
+    // stamping fails the build for a binary that never needed stamping.
     let st = Command::new("go")
-        .args(["build", "-o"])
+        .args(["build", "-buildvcs=false", "-o"])
         .arg(&bin)
         .arg(".")
         .current_dir(&dir)

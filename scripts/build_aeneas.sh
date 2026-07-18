@@ -17,9 +17,9 @@ mark "1/6 clone aeneas"
 cd "$AENEAS" || exit 1
 
 mark "2/6 opam deps (into the 5.3.0 switch)"
-opam install -y ppx_deriving visitors easy_logging zarith yojson core_unix \
-  odoc ocamlgraph menhir ocamlformat.0.27.0 unionFind progress domainslib \
-  || { echo "opam install FAILED"; exit 1; }
+opam install -y ppx_deriving ppx_deriving_yojson visitors easy_logging zarith \
+  yojson core_unix odoc ocamlgraph menhir ocamlformat.0.27.0 unionFind progress \
+  domainslib || { echo "opam install FAILED"; exit 1; }
 
 mark "3/6 clone + pin charon"
 PIN="$(tail -1 charon-pin)"
