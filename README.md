@@ -119,6 +119,12 @@ cargo build --release
 cd ../numerical-algorithms/lean-opt && ./ci.sh
 ```
 
+`scripts/make_dist.sh` assembles a distributable bundle under `dist/` — the
+`lift` binary, its runtime assets (`lean/`, `examples/`, the suite), the pinned
+dep-build scripts, a generated `DIST.md` with a shared-library manifest (the
+engine needs base glibc only), and, when built on the host, a vendored
+statically-linked cpp2rust.
+
 The engine compiles the Lean support libraries (`LeanLift.Checked`,
 `LeanLift.Float`) to `.olean` on first run. The **sound Rust path**
 (`rust-streamed`, `rust-isqrt`, `rust-bisect`) needs Charon + Aeneas built —

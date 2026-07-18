@@ -21,3 +21,4 @@ target/
 
 # LLM response cache (content-addressed claude -p results)
 /.leanlift-cache
+dist/
