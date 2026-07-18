@@ -235,7 +235,9 @@ pub fn lookup(name: &str) -> Option<Example> {
                 source: "examples/isqrt/isqrt.cpp".into(),
                 entrypoint: "isqrt".into(),
             },
-            proof_frag: None,
+            // Same postcondition as rust-isqrt, proved over the extraction of
+            // the MACHINE-TRANSLATED Rust (wrapping ops instead of checked).
+            proof_frag: Some("examples/isqrt/C2rIsqrtProofs.lean".into()),
         }),
         "c2r-dot2" => Some(Example {
             name: "c2r-dot2",

@@ -196,18 +196,34 @@ fn prove_cmd(a: Vec<String>) {
         eprintln!("no proof obligation defined for `{}`", ex.name);
         exit(2);
     });
+    let work = std::env::temp_dir().join("leanlift-work");
+    let _ = std::fs::create_dir_all(&work);
     let (crate_dir, entrypoint) = match &ex.frontend {
         frontend::Frontend::RustAeneas { crate_dir, entrypoint } => {
             (crate_dir.clone(), entrypoint.clone())
+        }
+        // The cpp2rust chain proves over the same Aeneas extraction — just
+        // from the machine-translated crate. Same optional-tool contract as
+        // verify: not built is a clean SKIP.
+        frontend::Frontend::Cpp2Rust { source, entrypoint } => {
+            if !frontend::cpp2rust_available() {
+                eprintln!("  cpp2rust not built — run scripts/build_cpp2rust.sh (or set LEANLIFT_CPP2RUST)");
+                println!("  level: SKIPPED (cpp2rust not available)");
+                exit(0);
+            }
+            match frontend::cpp2rust_translate(source, entrypoint, &work) {
+                Ok(dir) => (dir, entrypoint.clone()),
+                Err(e) => {
+                    eprintln!("error in cpp2rust front-end: {e}");
+                    exit(1);
+                }
+            }
         }
         _ => {
             eprintln!("`lift prove` currently supports Aeneas-extracted (Rust) examples only");
             exit(2);
         }
     };
-
-    let work = std::env::temp_dir().join("leanlift-work");
-    let _ = std::fs::create_dir_all(&work);
     eprintln!("  proving `{}` (L3) — extract model, discharge obligations", ex.name);
 
     let def = match frontend::extract_rust_def(&crate_dir, &entrypoint, &work) {

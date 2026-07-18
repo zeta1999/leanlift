@@ -146,7 +146,15 @@ toolchain is older; no sudo needed); locate it with `LEANLIFT_CPP2RUST`. Like th
 ./target/release/lift verify c2r-avg      # C++ midpoint-overflow, via cpp2rust
 ./target/release/lift verify c2r-isqrt    # C++ loop kernel, via cpp2rust
 ./target/release/lift verify c2r-dot2     # C++ wrap-on-mul kernel, via cpp2rust
+./target/release/lift prove  c2r-isqrt    # L3: r·r ≤ n < (r+1)² over the MACHINE-TRANSLATED kernel
 ```
+
+The `c2r-isqrt` proof is the full ladder on a C++ source: cpp2rust renders the
+C++ as wrapping-ops Rust, Aeneas extracts it, and
+[`C2rIsqrtProofs.lean`](./examples/isqrt/C2rIsqrtProofs.lean) discharges the
+same postcondition as `rust-isqrt` — with mod-vanishes obligations (the
+invariant's `hi ≤ 65535` bound makes every wrap a no-op) in place of the
+checked path's no-overflow side goals. Sorry-free, kernel-checked.
 
 leanlift generates the crate from `cpp2rust --model=unsafe` output (scalar Rust,
 `wrapping_*` ops — the faithful C++ unsigned semantics; the safe model's

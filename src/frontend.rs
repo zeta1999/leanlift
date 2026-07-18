@@ -75,8 +75,9 @@ pub fn cpp2rust_available() -> bool {
 
 /// Run cpp2rust on `source` and wrap its output in a generated lib crate that
 /// Charon can consume. Returns the crate dir. The translation is untrusted —
-/// the differential oracle downstream is what disposes.
-fn cpp2rust_translate(
+/// the differential oracle downstream is what disposes. (Public so `lift
+/// prove` can stage the same crate before `extract_rust_def`.)
+pub fn cpp2rust_translate(
     source: &Path,
     entrypoint: &str,
     work_dir: &Path,

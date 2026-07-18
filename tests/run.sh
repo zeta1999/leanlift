@@ -97,6 +97,14 @@ if [ -x "$C2R/build/cpp2rust/cpp2rust" ] && [ -x "$AENEAS/bin/aeneas" ]; then
       bad "$ex did not verify"; tail -20 "$TMP/$ex.out"
     fi
   done
+  # L3 over the machine-translated kernel: same postcondition as rust-isqrt,
+  # proved on the extraction of cpp2rust's wrapping-ops Rust.
+  if "$LIFT" prove c2r-isqrt --out "$TMP/proof_c2r-isqrt.json" >"$TMP/prove_c2r.out" 2>&1; then
+    n=$(grep -c '✓' "$TMP/prove_c2r.out")
+    pass "prove c2r-isqrt  ($(grep -o 'L3 proved' "$TMP/prove_c2r.out"), $n obligations, sorry-free)"
+  else
+    bad "prove c2r-isqrt did not certify L3"; tail -15 "$TMP/prove_c2r.out"
+  fi
   # teeth: with the tool pointed nowhere, the lane must SKIP (exit 0), not fail.
   if LEANLIFT_CPP2RUST=/nonexistent "$LIFT" verify c2r-avg >"$TMP/c2r-skip.out" 2>&1 \
      && grep -q 'SKIPPED' "$TMP/c2r-skip.out"; then
