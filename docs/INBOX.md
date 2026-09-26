@@ -76,4 +76,20 @@ a second backlog.
   https://github.com/openai/NavierStokesAndEuler · https://github.com/openai/LongGapsBetweenPrimes
 - **Category Theory for Software Diagnostics** (Vostokov) — book entirely AI-synthesised from his
   CT-for-debugging work; user tagged "liftlean and more". Curiosity shelf.  https://lnkd.in/p/gseP2R9B
-- **Prove2Me** ★ — [title only], link unrecoverable; user to supply.
+- **Prove2Me** ★ — https://prove2.me/ (link recovered 2026-09-26; was unrecoverable in the
+  09-19 batch).
+
+## Routed from le-harnais-v0 triage — 2026-09-26 (25 Sep notes edition)
+
+- **FloatLib** `***` (lean-dojo) — https://github.com/lean-dojo/FloatLib — arbitrary-precision
+  **verified floating-point** arithmetic in Lean, with proofs, optimised backends, IEEE binary
+  and decimal, posits and custom formats. **The numerical-code half of leanlift**, and the one
+  the 09-19 batch missed.
+- **Velvet 2.0** `~` — https://velvetprover.dev/ — Lean verification **10× faster**, on Lean's
+  newest machinery: exception specs, ghost state, named proof goals; case studies from Dijkstra
+  to lazy segment trees. User tag: "velvetprover".
+- **ZIL** — https://github.com/jagg-ix/zil-lean — a relational knowledge language implemented in
+  **Lean 4** with a Clojure runtime and toolchain. User tag: "leanlift (ZIL)".
+- **Graph-Theory-LLM-Proofs** — https://github.com/graph-theory-AI/Graph-Theory-LLM-Proofs — 30+
+  open graph-theory conjectures with a complete proof or explicit counterexample, some
+  formalised in Rocq; open for reviewers. User tag: "graph theory".
