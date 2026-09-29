@@ -10,6 +10,7 @@ import LeanliftIris.PhaseA.HeapRes
 import LeanliftIris.PhaseA.Wp
 import LeanliftIris.PhaseA.WpLifting
 import LeanliftIris.PhaseA.Adequacy
+import LeanliftIris.PhaseA.PoolAdequacy
 import LeanliftIris.PhaseA.Examples
 import LeanliftIris.PhaseA.Treiber
 import LeanliftIris.PhaseB.WeakMem
@@ -86,5 +87,12 @@ namespace LeanliftIris.PhaseA
 #print axioms wp_mono
 #print axioms wp_let
 #print axioms wp_pair
+
+-- Concurrent thread-pool adequacy (A2, fork extension)
+#print axioms wp_fork
+#print axioms tp_step_pres
+#print axioms wp_adequacy_pool
+#print axioms wp_adequacy_pool_closed
+#print axioms forkThenFst_result
 
 end LeanliftIris.PhaseA

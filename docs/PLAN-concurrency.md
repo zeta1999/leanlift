@@ -158,9 +158,20 @@ corpus' control flow.
   `steps` run *is* a `primSteps` run), resting on `prim_step_preserves_forkFree`
   (reduction preserves fork-freedom given a fork-free heap — with fork-freedom
   preserved under substitution, `forkFreeE_substE`, and contexts, `forkFreeE_fill`).
-  So the spec constrains the actual operational semantics. *Still to do:* the
-  *forking* thread-pool adequacy (programs that spawn threads) — needs the `wpF`
-  fork/progress extension.
+  So the spec constrains the actual operational semantics. ✅ *Concurrent
+  adequacy done (2026-09-30).* The `wpF` step case now carries the forked-thread
+  obligation `forkObl wp efs` (every spawned thread verified against `True`), with
+  a `wp_fork` rule; every existing rule and downstream proof still builds.
+  `PhaseA/PoolAdequacy.lean` proves `tp_step_pres` (a scheduling step of the
+  whole pool preserves `stateInterp ∗ tpInterp` under `|==> ▷ |==>`, primary and
+  forked-thread cases) and the headline **`wp_adequacy_pool`** /
+  **`wp_adequacy_pool_closed`**: a `wp` proof for the primary thread plus *any*
+  thread-pool `steps` run — any interleaving, any forks — reaching `.val v :: tp'`
+  yields `φ v`. No fork-freedom side condition; `wp_adequacy_seq`/`wp_adequacy_steps`
+  are subsumed. Worked: `forkThenFst_result` (every run of `let _ = fork unit in
+  fst (3,4)` returns `3` on the primary thread). *Still omitted:* the progress
+  (`reducible`) conjunct — safety, i.e. verified programs never get stuck — which
+  would require every lifting rule to exhibit a step.
 - **A3 — first functional proofs (SC).** Verify the **#9 order-book** invariant
   (`best = max occupied level`, fall-back correctness) and the **#10 sweep**
   (exact 128-bit notional, `Q==0`/over-ask/drained-level cases, `best_ask ≤ VWAP

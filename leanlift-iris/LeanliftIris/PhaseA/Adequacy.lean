@@ -14,8 +14,8 @@ This file establishes the one-step preservation, lifts it to a whole fork-free
 run via the step-update tower `sfupdN`, collapses that tower over a pure
 postcondition at the `UPred` model level (`sfupdN_pure_soundness`), and assembles
 the headline **sequential adequacy** `wp_adequacy_seq`: a `wp` proof of a pure
-property + a fork-free run reaching a value ⟹ the meta-level fact. (The general
-concurrent/thread-pool `steps` adequacy is future work.) Sorry-free.
+property + a fork-free run reaching a value ⟹ the meta-level fact. The general
+concurrent thread-pool `steps` adequacy builds on this in `PoolAdequacy.lean`. Sorry-free.
 -/
 import LeanliftIris.PhaseA.WpLifting
 
@@ -31,7 +31,7 @@ theorem wp_step_pres (γ : GName) [HasHeap γ GF F] (e : Expr) (σ : Heap) (e' :
     (σ' : Heap) (efs : List Expr) (Φ : Val → IProp GF) (hnv : toVal e = none)
     (hstep : prim_step e σ e' σ' efs) :
     stateInterp γ σ ∗ wp (F := F) γ e Φ ⊢
-      |==> ▷ |==> (stateInterp γ σ' ∗ wp (F := F) γ e' Φ) := by
+      |==> ▷ |==> (stateInterp γ σ' ∗ wp (F := F) γ e' Φ ∗ forkObl (wp (F := F) γ) efs) := by
   iintro ⟨Hσ, Hwp⟩
   ihave H1 := (wp_step γ e Φ hnv) $$ [Hwp]
   · iexact Hwp
@@ -45,6 +45,18 @@ theorem wp_step_pres (γ : GName) [HasHeap γ GF F] (e : Expr) (σ : Heap) (e' :
   · ipure_intro; exact hstep
   iintro !>
   iexact H3
+
+/-- **Preservation, fork-free step.** When the step spawns nothing the fork
+obligation is `emp` and drops out. -/
+theorem wp_step_pres_nil (γ : GName) [HasHeap γ GF F] (e : Expr) (σ : Heap) (e' : Expr)
+    (σ' : Heap) (Φ : Val → IProp GF) (hnv : toVal e = none)
+    (hstep : prim_step e σ e' σ' []) :
+    stateInterp γ σ ∗ wp (F := F) γ e Φ ⊢
+      |==> ▷ |==> (stateInterp γ σ' ∗ wp (F := F) γ e' Φ) := by
+  refine (wp_step_pres γ e σ e' σ' [] Φ hnv hstep).trans ?_
+  refine BIUpdate.mono (later_mono (BIUpdate.mono ?_))
+  simp only [forkObl_nil]
+  exact sep_mono_r sep_emp.mp
 
 /-- **Adequacy, base case.** A value verified against a pure postcondition
 satisfies it at the meta level. Exercises the soundness path
@@ -128,7 +140,7 @@ theorem wp_primSteps_pres (γ : GName) [HasHeap γ GF F] (Φ : Val → IProp GF)
       refine ⟨k + 1, ?_⟩
       have hone :
           iprop(stateInterp γ _ ∗ wp (F := F) γ _ Φ) ⊢ sfupdN 1 iprop(stateInterp γ _ ∗ wp (F := F) γ _ Φ) :=
-        wp_step_pres γ _ _ _ _ [] Φ (toVal_none_of_prim_step hstep) hstep
+        wp_step_pres_nil γ _ _ _ _ Φ (toVal_none_of_prim_step hstep) hstep
       refine ih.trans ((sfupdN_mono k hone).trans ?_)
       exact sfupdN_compose k 1 _
 
@@ -265,7 +277,7 @@ theorem wp_primStepsN_pres (γ : GName) [HasHeap γ GF F] (Φ : Val → IProp GF
   | @tail n e σ e1 σ1 e2 σ2 _hsteps hstep ih =>
       have hone :
           iprop(stateInterp γ _ ∗ wp (F := F) γ _ Φ) ⊢ sfupdN 1 iprop(stateInterp γ _ ∗ wp (F := F) γ _ Φ) :=
-        wp_step_pres γ _ _ _ _ [] Φ (toVal_none_of_prim_step hstep) hstep
+        wp_step_pres_nil γ _ _ _ _ Φ (toVal_none_of_prim_step hstep) hstep
       exact ih.trans ((sfupdN_mono n hone).trans (sfupdN_compose n 1 _))
 
 /-- **Closed adequacy.** If — *from nothing* — one can `|==>`-allocate a ghost

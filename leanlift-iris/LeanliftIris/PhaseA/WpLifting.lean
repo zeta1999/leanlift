@@ -350,7 +350,8 @@ verify a non-value expression. The per-operation rules below are corollaries. -/
 theorem wp_lift_step (γ : GName) [HasHeap γ GF F] (e : Expr) (Φ : Val → IProp GF)
     (hnv : toVal e = none) :
     (∀ σ, stateInterp γ σ -∗ |==>
-      (∀ e' σ' efs, ⌜prim_step e σ e' σ' efs⌝ -∗ ▷ |==> (stateInterp γ σ' ∗ wp (F := F) γ e' Φ)))
+      (∀ e' σ' efs, ⌜prim_step e σ e' σ' efs⌝ -∗
+        ▷ |==> (stateInterp γ σ' ∗ wp (F := F) γ e' Φ ∗ forkObl (wp (F := F) γ) efs)))
     ⊢ wp (F := F) γ e Φ := by
   iintro H
   iapply wp_unfold
@@ -374,6 +375,7 @@ theorem wp_pure_det (γ : GName) [HasHeap γ GF F] (e etgt : Expr) (Φ : Val →
   subst he; subst hσ; subst hefs
   iintro !>
   iintro !>
+  iapply sep_sep_forkObl_nil
   isplitl [Hsi]
   · iexact Hsi
   · iexact H
@@ -457,6 +459,7 @@ theorem wp_load (γ : GName) [HasHeap γ GF F] (l : Nat) (v : Val) (Φ : Val →
   subst hwv; subst he'; subst hσ'; subst hefs
   iintro !>
   iintro !>
+  iapply sep_sep_forkObl_nil
   isplitl [Hsi]
   · iexact Hsi
   · iapply wp_value
@@ -526,6 +529,7 @@ theorem wp_store (γ : GName) [HasHeap γ GF F] (l : Nat) (v_old v_new : Val)
   ihave ⟨HA, HF⟩ := Hsplit_lem $$ [Hnew]
   · iexact Hnew
   iintro !>
+  iapply sep_sep_forkObl_nil
   isplitl [HA]
   · iexact HA
   · iapply wp_value
@@ -589,6 +593,7 @@ theorem wp_faa (γ : GName) [HasHeap γ GF F] (l : Nat) (m n : Int)
   ihave ⟨HA, HF⟩ := Hsplit_lem $$ [Hnew]
   · iexact Hnew
   iintro !>
+  iapply sep_sep_forkObl_nil
   isplitl [HA]
   · iexact HA
   · iapply wp_value
@@ -616,6 +621,7 @@ theorem wp_cas_fail (γ : GName) [HasHeap γ GF F] (l : Nat) (v_cur v1 v2 : Val)
   · subst he'; subst hσ'; subst hefs
     iintro !>
     iintro !>
+    iapply sep_sep_forkObl_nil
     isplitl [Hsi]
     · iexact Hsi
     · iapply wp_value
@@ -676,6 +682,7 @@ theorem wp_cas_suc (γ : GName) [HasHeap γ GF F] (l : Nat) (v1 v2 : Val)
     ihave ⟨HA, HF⟩ := Hsplit_lem $$ [Hnew]
     · iexact Hnew
     iintro !>
+    iapply sep_sep_forkObl_nil
     isplitl [HA]
     · iexact HA
     · iapply wp_value
@@ -724,6 +731,7 @@ theorem wp_alloc (γ : GName) [HasHeap γ GF F] (v : Val) (Φ : Val → IProp GF
   ihave ⟨HA, HF⟩ := Hsplit_lem $$ [Hnew]
   · iexact Hnew
   iintro !>
+  iapply sep_sep_forkObl_nil
   isplitl [HA]
   · iexact HA
   · iapply wp_value
@@ -772,12 +780,14 @@ theorem wp_bind (γ : GName) [HasHeap γ GF F] (K : List Frame) (e : Expr)
       ispecialize HwpInner $$ []
       · ipure_intro; exact hstep'
       iintro !>
-      imod HwpInner with ⟨Hsi', Hwe⟩
+      imod HwpInner with ⟨Hsi', Hwe, Hefs⟩
       iintro !>
       isplitl [Hsi']
       · iexact Hsi'
+      isplitl [Hwe IH]
       · iapply IH
         iexact Hwe
+      · iexact Hefs
     exact true_intro
   iintro Hwp
   iapply hcl
@@ -819,12 +829,14 @@ theorem wp_mono (γ : GName) [HasHeap γ GF F] (e : Expr) (Φ Ψ : Val → IProp
       ispecialize HwpI $$ []
       · ipure_intro; exact Hstep
       iintro !>
-      imod HwpI with ⟨Hsi, Hwe⟩
+      imod HwpI with ⟨Hsi, Hwe, Hefs⟩
       iintro !>
       isplitl [Hsi]
       · iexact Hsi
+      isplitl [Hwe IH]
       · iapply IH
         iexact Hwe
+      · iexact Hefs
     exact true_intro
   iintro Hwp
   iapply hcl
@@ -855,3 +867,57 @@ theorem wp_seq (γ : GName) [HasHeap γ GF F] (e1 e2 : Expr) (Φ : Val → IProp
   intro w
   simp only [hcl]
   iintro H; iexact H
+
+/-! ## `fork` -/
+
+/-- **Context inversion for `fork`.** No frame has a `fork` shape, so a redex that
+plugs to `fork e` sits in the empty context. -/
+theorem ctx_nil_of_fork {K : List Frame} {a : Expr} {e : Expr} (ha : toVal a = none)
+    (h : fill K a = .fork e) : K = [] ∧ a = .fork e := by
+  cases K with
+  | nil => exact ⟨rfl, by simpa [fill] using h⟩
+  | cons fr K' =>
+    exfalso
+    have hnv : toVal (fill K' a) = none := fill_toVal_none ha K'
+    simp only [fill, List.foldr_cons] at h hnv
+    cases fr <;> simp_all [fill1, toVal]
+
+/-- **Step inversion for `fork`.** The sole primitive step of `fork e` returns
+`unit`, leaves the heap unchanged, and spawns exactly `e`. -/
+theorem prim_step_fork_inv {e : Expr} {σ : Heap} {e' : Expr} {σ' : Heap}
+    {efs : List Expr} (h : prim_step (.fork e) σ e' σ' efs) :
+    e' = .val .unit ∧ σ' = σ ∧ efs = [e] := by
+  obtain ⟨K, a, a', hK, hK', hHead⟩ := h
+  obtain ⟨hKnil, ha⟩ := ctx_nil_of_fork (head_toVal_none hHead) hK.symm
+  subst hKnil; subst ha
+  simp only [fill_nil] at hK'
+  subst hK'
+  cases hHead with
+  | fork => exact ⟨rfl, rfl, rfl⟩
+
+/-- **Fork rule.** To verify `fork e`, verify the spawned `e` against the trivial
+postcondition and continue with `unit`. The spawned thread's `wp` is the
+obligation `forkObl` carries into the pool interpretation (`PoolAdequacy.lean`). -/
+theorem wp_fork (γ : GName) [HasHeap γ GF F] (e : Expr) (Φ : Val → IProp GF) :
+    ▷ wp (F := F) γ e (fun _ => iprop(True)) ∗ ▷ |==> Φ .unit ⊢
+      wp (F := F) γ (.fork e) Φ := by
+  iintro ⟨He, HΦ⟩
+  iapply wp_unfold
+  simp only [wpF, toVal]
+  iintro %σ Hsi
+  iintro !>
+  iintro %e' %σ' %efs %Hstep
+  obtain ⟨he', hσ', hefs⟩ := prim_step_fork_inv Hstep
+  subst he'; subst hσ'; subst hefs
+  iintro !>
+  iintro !>
+  simp only [forkObl_cons, forkObl_nil]
+  isplitl [Hsi]
+  · iexact Hsi
+  isplitl [HΦ]
+  · iapply wp_value
+    iexact HΦ
+  · iapply (sep_emp (P := wp (F := F) γ e (fun _ => iprop(True)))).mpr
+    iexact He
+
+end LeanliftIris.PhaseA

@@ -7,12 +7,16 @@ the heap interpreted by the authoritative resource `stateInterp` (from
 `Iris/Examples/IProp.lean` (Example 3), adapted to `λ-conc`'s **relational**
 `prim_step`.
 
-Scope of this milestone: the wp tracks the **primary thread** only — the step
-case quantifies over `prim_step e σ e' σ' efs` but does not yet impose the
-forked-thread obligation `[∗ list] ef ∈ efs, wp ef ⊤` (that needs a big-op `ne`
-lemma; tracked as the A2.2-fork extension). It also omits the progress
-(`reducible`) conjunct, exactly as the upstream template does. Both are additive
-extensions that do not change the fixpoint structure. Sorry-free.
+The step case quantifies over `prim_step e σ e' σ' efs` and imposes the
+**forked-thread obligation** `forkObl wp efs` (= `[∗ list] ef ∈ efs, wp ef True`):
+every thread spawned by the step must itself be verified (against the trivial
+postcondition), exactly as upstream Iris' `wp` does. This is what makes the
+thread-pool adequacy (`PoolAdequacy.lean`) possible — without it a forked thread
+could mutate the heap behind the primary thread's back. `forkObl` is a plain
+list recursion (not `bigSep`, whose singleton case is not definitional), so
+`forkObl wp [] = emp` and `forkObl wp (ef :: efs) = wp ef True ∗ forkObl wp efs`
+hold by `rfl`. The progress (`reducible`) conjunct is still omitted, as in the
+upstream template. Sorry-free.
 -/
 import LeanliftIris.PhaseA.HeapRes
 
@@ -39,10 +43,33 @@ points-to fragments (`HeapRes.pointsTo`) carve pieces out of this. -/
 def stateInterp (γ : GName) [HasHeap γ GF F] (σ : Heap) : IProp GF :=
   iOwn (GF := GF) (F := FHeap (F := F)) γ (Auth (own one) (toAgreeHeap σ))
 
+/-- **Forked-thread obligation.** Every thread in `efs` is verified by `wp`
+against the trivial postcondition. Defined by list recursion so both equations
+are definitional. -/
+def forkObl (wp : Expr → (Val → IProp GF) → IProp GF) : List Expr → IProp GF
+  | [] => iprop(emp)
+  | ef :: efs => iprop(wp ef (fun _ => iprop(True)) ∗ forkObl wp efs)
+
+@[simp] theorem forkObl_nil (wp : Expr → (Val → IProp GF) → IProp GF) :
+    forkObl wp [] = iprop(emp) := rfl
+
+@[simp] theorem forkObl_cons (wp : Expr → (Val → IProp GF) → IProp GF) (ef : Expr)
+    (efs : List Expr) :
+    forkObl wp (ef :: efs) = iprop(wp ef (fun _ => iprop(True)) ∗ forkObl wp efs) := rfl
+
+/-- `forkObl` is non-expansive in the `wp` argument, pointwise. -/
+theorem forkObl_dist {n : Nat} {wp1 wp2 : Expr → (Val → IProp GF) → IProp GF}
+    (h : ∀ e Φ, wp1 e Φ ≡{n}≡ wp2 e Φ) (efs : List Expr) :
+    forkObl wp1 efs ≡{n}≡ forkObl wp2 efs := by
+  induction efs with
+  | nil => exact .of_eq rfl
+  | cons ef efs ih => exact sep_ne.ne (h ef _) ih
+
 /-- The weakest-precondition functor, in the standard `match toVal e` shape so
 that `wp (val v)` is invertible (`= |==> Φ v`) and a leading update can be
-absorbed (`bupd_wp`), which `wp_bind` needs. `wp` recurs only under `▷`, so `wpF`
-is contractive. -/
+absorbed (`bupd_wp`), which `wp_bind` needs. The step case re-establishes the
+state interpretation, the primary continuation, and the forked-thread obligation.
+`wp` recurs only under `▷`, so `wpF` is contractive. -/
 def wpF (γ : GName) [HasHeap γ GF F]
     (wp : Expr → (Val → IProp GF) → IProp GF) (e : Expr) (Φ : Val → IProp GF) :
     IProp GF :=
@@ -50,7 +77,8 @@ def wpF (γ : GName) [HasHeap γ GF F]
   | some v => iprop(|==> Φ v)
   | none =>
     iprop(∀ σ, stateInterp γ σ -∗ |==>
-      (∀ e' σ' efs, ⌜prim_step e σ e' σ' efs⌝ -∗ ▷ |==> (stateInterp γ σ' ∗ wp e' Φ)))
+      (∀ e' σ' efs, ⌜prim_step e σ e' σ' efs⌝ -∗
+        ▷ |==> (stateInterp γ σ' ∗ wp e' Φ ∗ forkObl wp efs)))
 
 instance wpF_contractive (γ : GName) [HasHeap γ GF F] :
     Contractive (wpF (F := F) γ) where
@@ -68,7 +96,8 @@ instance wpF_contractive (γ : GName) [HasHeap γ GF F] :
       refine Contractive.distLater_dist (fun m Hm => ?_)
       refine BIUpdate.bupd_ne.ne ?_
       refine sep_ne.ne (.of_eq rfl) ?_
-      exact HL m Hm e' Φ
+      refine sep_ne.ne (HL m Hm e' Φ) ?_
+      exact forkObl_dist (fun e Ψ => HL m Hm e Ψ) efs
 
 /-- The weakest precondition: the guarded fixpoint of `wpF`. -/
 def wp (γ : GName) [HasHeap γ GF F] (e : Expr) (Φ : Val → IProp GF) : IProp GF :=
@@ -131,10 +160,18 @@ theorem wp_step (γ : GName) [HasHeap γ GF F] (e : Expr) (Φ : Val → IProp GF
     (hnv : toVal e = none) :
     wp (F := F) γ e Φ ⊢
       ∀ σ, stateInterp γ σ -∗ |==>
-        (∀ e' σ' efs, ⌜prim_step e σ e' σ' efs⌝ -∗ ▷ |==> (stateInterp γ σ' ∗ wp (F := F) γ e' Φ)) := by
+        (∀ e' σ' efs, ⌜prim_step e σ e' σ' efs⌝ -∗
+          ▷ |==> (stateInterp γ σ' ∗ wp (F := F) γ e' Φ ∗ forkObl (wp (F := F) γ) efs)) := by
   refine (wp_unfold_fwd γ e Φ).trans ?_
   simp only [wpF, hnv]
   iintro H
   iexact H
+
+/-- A step that forks nothing owes no fork obligation: `forkObl wp [] = emp` is
+absorbed. Used by every lifting rule whose inversion lemma yields `efs = []`. -/
+theorem sep_sep_forkObl_nil (wp : Expr → (Val → IProp GF) → IProp GF) (P Q : IProp GF) :
+    iprop(P ∗ Q) ⊢ iprop(P ∗ Q ∗ forkObl wp []) := by
+  simp only [forkObl_nil]
+  exact sep_mono_r sep_emp.mpr
 
 end LeanliftIris.PhaseA
