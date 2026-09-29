@@ -85,6 +85,7 @@ PLAN-concurrency on 2026-09-30 (B3–B6 had been done but left unchecked).
 - [ ] note: Aeneas itself covers ONLY the sequential slice — atomics/`unsafe` are outside its model (same boundary as C++)
 
 ## Cross-cutting (every phase)
+- [~] **dead-theorem gate** (prototype 2026-09-30, `leanlift-iris/ci-consumers.sh`, NOT yet wired into `ci.sh` — owner's call, it touches the CI contract and the same rule is proposed for aria/quantum): every theorem in `CiAxioms.lean`'s `#print axioms` list must have a code consumer or a `-- headline: <instantiated by …>` tag arguing its satisfiability. Rationale: a theorem nobody instantiates gets no pressure from use, so an unsatisfiable premise never surfaces — it type-checks, is sorry-free, prints a clean axiom set, and proves nothing (the three adequacy theorems, above). First run flags 20 of 45 marquee theorems as consumer-less; each needs either an instantiating example or a tag with an argument, which is a review task, not a mechanical one.
 - [ ] keep proofs sorry-free; verify with `#print axioms`
 - [ ] adversarial spec review + a "teeth" discrimination test per structure (a wrong variant must fail to verify)
 - [ ] watch the Lean generalized/setoid-rewriting gap (highest risk; flagged by Eileen and the community)
