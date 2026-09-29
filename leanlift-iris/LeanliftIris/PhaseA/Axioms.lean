@@ -90,6 +90,7 @@ namespace LeanliftIris.PhaseA
 
 -- Concurrent thread-pool adequacy (A2, fork extension)
 #print axioms wp_fork
+#print axioms step_head
 #print axioms tp_step_pres
 #print axioms wp_adequacy_pool
 #print axioms wp_adequacy_pool_closed

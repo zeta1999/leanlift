@@ -187,14 +187,16 @@ pure postcondition, plus a fork-free run that reaches a value, yields a meta-lev
 operational fact about the real `λ-conc` program. This closes the model/code gap
 for every sequential `wp` result in the lane (Treiber `push`/`pop`, the bridge). -/
 
-/-- **Sequential adequacy.** If `stateInterp γ σ ∗ wp γ e ⌜φ⌝` holds and the
-program `e` runs fork-free from heap `σ` to a value `v` (at heap `σ'`), then
-`φ v` holds at the meta level. -/
+/-- **Sequential adequacy.** If `stateInterp γ σ ∗ wp γ e ⌜φ⌝` is obtainable
+under an update (`|==>` — the authoritative heap is ghost state and can only be
+*allocated*, never held by `True` outright), and the program `e` runs fork-free
+from heap `σ` to a value `v` (at heap `σ'`), then `φ v` holds at the meta level.
+Partial correctness: nothing is claimed about runs that diverge or get stuck. -/
 theorem wp_adequacy_seq (γ : GName) [HasHeap γ GF F] (e : Expr) (σ : Heap)
     (v : Val) (σ' : Heap) (φ : Val → Prop)
     (hrun : primSteps e σ (.val v) σ')
     (h : (iprop(True) : IProp GF) ⊢
-      iprop(stateInterp γ σ ∗ wp (F := F) γ e (fun w => iprop(⌜φ w⌝)))) : φ v := by
+      iprop(|==> (stateInterp γ σ ∗ wp (F := F) γ e (fun w => iprop(⌜φ w⌝))))) : φ v := by
   obtain ⟨k, hpres⟩ := wp_primSteps_pres γ (fun w => iprop(⌜φ w⌝)) hrun
   -- the end payload (state interp + wp at the final value) entails the pure goal
   have bpe : (iprop(|==> ⌜φ v⌝) : IProp GF) ⊢ iprop(⌜φ v⌝) :=
@@ -206,7 +208,9 @@ theorem wp_adequacy_seq (γ : GName) [HasHeap γ GF F] (e : Expr) (σ : Heap)
     iintro ⟨_, H⟩
     iapply hwpv
     iexact H
-  exact sfupdN_pure_soundness k (h.trans (hpres.trans (sfupdN_mono k hpayload)))
+  exact sfupdN_pure_soundness k
+    (h.trans ((BIUpdate.mono (hpres.trans (sfupdN_mono k hpayload))).trans
+      (sfupdN_bupd_absorb k _)))
 
 /-! ## Heap-ghost initialization + a fully-closed operational theorem
 

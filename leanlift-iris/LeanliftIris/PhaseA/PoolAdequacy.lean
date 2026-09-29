@@ -16,7 +16,14 @@ is `wp_step_pres`, whose fork obligation is appended to `rest`; stepping a forke
 thread is the same lemma at the trivial postcondition inside `forkObl`. The tower
 `sfupdN` then collapses exactly as in the sequential case. This is what the
 forked-thread obligation in `wpF` buys: without it a forked thread could mutate
-the heap with no `wp` to account for it and preservation would fail. Sorry-free.
+the heap with no `wp` to account for it and preservation would fail.
+
+**Partial correctness.** As everywhere in this lane, `wpF` omits the progress
+(`reducible`) conjunct, so these theorems constrain the *result* of runs that
+reach a value; no thread is claimed to be non-stuck. The `wp` hypothesis is stated
+under `|==>`: the authoritative heap is ghost state that can only be allocated
+(`heap_init`), so `True ⊢ stateInterp ∗ …` without the update would be
+unsatisfiable and the theorem vacuous. Sorry-free.
 -/
 import LeanliftIris.PhaseA.Adequacy
 
@@ -53,6 +60,30 @@ theorem forkObl_join (wp : Expr → (Val → IProp GF) → IProp GF) (t1 t2 efs 
   induction t1 with
   | nil => exact emp_sep.mp.trans (sep_mono_r (forkObl_app wp t2 efs))
   | cons a t1 ih => exact sep_assoc.mp.trans (sep_mono_r ih)
+
+/-! ## Head stability
+
+The primary thread is the head of the pool, and `step` keeps it there: a step either
+reduces the head itself or leaves it untouched (a non-primary thread stepped; forks
+are appended at the end). This is the checked form of the "position 0 is stable"
+claim the pool interpretation relies on. -/
+
+/-- One scheduling step of a pool with head `e` yields a pool whose head is either
+`e` unchanged or a primitive successor of `e`. -/
+theorem step_head {e : Expr} {rest : List Expr} {σ : Heap} {c' : Cfg}
+    (h : step ⟨e :: rest, σ⟩ c') :
+    ∃ e' rest', c'.tp = e' :: rest' ∧ (e' = e ∨ ∃ efs, prim_step e σ e' c'.heap efs) := by
+  obtain ⟨t1, t2, ee, ee', efs, htp, hstep, htp'⟩ := h
+  cases t1 with
+  | nil =>
+      simp only [List.nil_append, List.cons.injEq] at htp
+      obtain ⟨hee, _⟩ := htp
+      subst hee
+      exact ⟨ee', t2 ++ efs, by rw [htp']; rfl, Or.inr ⟨efs, hstep⟩⟩
+  | cons e0 t1 =>
+      simp only [List.cons_append, List.cons.injEq] at htp
+      obtain ⟨he0, _⟩ := htp
+      exact ⟨e0, t1 ++ ee' :: t2 ++ efs, by rw [htp']; rfl, Or.inl he0.symm⟩
 
 /-! ## The thread-pool interpretation and its preservation -/
 
@@ -183,23 +214,25 @@ theorem tpInterp_val_pure (γ : GName) [HasHeap γ GF F] (v : Val) (σ' : Heap)
   iapply ((wp_value_inv γ v (fun w => iprop(⌜φ w⌝))).trans bpe)
   iexact H
 
-/-- **Concurrent adequacy.** If `stateInterp γ σ ∗ wp γ e ⌜φ⌝` holds and the
-thread pool `[e]` runs — under any interleaving, forking freely — to a
-configuration whose primary thread is the value `v`, then `φ v` holds at the meta
-level. Subsumes `wp_adequacy_seq`/`wp_adequacy_steps`: no fork-freedom is assumed. -/
+/-- **Concurrent adequacy.** If `stateInterp γ σ ∗ wp γ e ⌜φ⌝` is obtainable
+under an update, and the thread pool `[e]` runs — under any interleaving, forking
+freely — to a configuration whose primary thread is the value `v`, then `φ v`
+holds at the meta level. Subsumes `wp_adequacy_seq`/`wp_adequacy_steps`: no
+fork-freedom is assumed. Partial correctness (see the file header). -/
 theorem wp_adequacy_pool (γ : GName) [HasHeap γ GF F] (e : Expr) (σ : Heap)
     (v : Val) (σ' : Heap) (tp' : List Expr) (φ : Val → Prop)
     (hrun : steps ⟨[e], σ⟩ ⟨.val v :: tp', σ'⟩)
     (h : (iprop(True) : IProp GF) ⊢
-      iprop(stateInterp γ σ ∗ wp (F := F) γ e (fun w => iprop(⌜φ w⌝)))) : φ v := by
+      iprop(|==> (stateInterp γ σ ∗ wp (F := F) γ e (fun w => iprop(⌜φ w⌝))))) : φ v := by
   obtain ⟨n, hn⟩ := stepsN_of_steps hrun
-  have hinit : (iprop(True) : IProp GF) ⊢
-      iprop(stateInterp γ σ ∗ tpInterp (F := F) γ (fun w => iprop(⌜φ w⌝)) [e]) := by
+  have hinit :
+      iprop(stateInterp γ σ ∗ wp (F := F) γ e (fun w => iprop(⌜φ w⌝))) ⊢
+        iprop(stateInterp γ σ ∗ tpInterp (F := F) γ (fun w => iprop(⌜φ w⌝)) [e]) := by
     simp only [tpInterp_cons, forkObl_nil]
-    exact h.trans (sep_mono_r sep_emp.mpr)
+    exact sep_mono_r sep_emp.mpr
   exact sfupdN_pure_soundness n
-    (hinit.trans ((tp_stepsN_pres γ _ hn).trans
-      (sfupdN_mono n (tpInterp_val_pure γ v σ' tp' φ))))
+    (h.trans ((BIUpdate.mono (hinit.trans ((tp_stepsN_pres γ _ hn).trans
+      (sfupdN_mono n (tpInterp_val_pure γ v σ' tp' φ))))).trans (sfupdN_bupd_absorb n _)))
 
 /-- **Closed concurrent adequacy.** As `wp_adequacy_closed`, but over the real
 thread-pool semantics with forking: from nothing, allocate the ghost heap and a
@@ -258,11 +291,10 @@ theorem forkThenFst_wp (γ : GName) [HasHeap γ GF F] :
 /-- **Closed operational fact through a fork.** Every pool run of `forkThenFst`
 whose primary thread terminates returns `3`, whatever the spawned thread did and
 however the scheduler interleaved it. Obtained from `heap_init` + `forkThenFst_wp`
-via `wp_adequacy_pool_closed`, with no fork-freedom side condition. (`γ` only
-carries the ambient heap-logic setup, as in `ex_alloc_load_adequate`; the ghost name
-is allocated fresh inside.) -/
+via `wp_adequacy_pool_closed`, with no fork-freedom side condition. The ghost name
+is allocated fresh inside; only the functor setup is assumed. -/
 theorem forkThenFst_result {GF₀ : BundledGFunctors.{0, 0, 0}} [ElemG GF₀ (FHeap (F := F))]
-    (γ : GName) [HasHeap γ GF₀ F] (σ : Heap) (v : Val) (σ' : Heap) (tp' : List Expr)
+    (σ : Heap) (v : Val) (σ' : Heap) (tp' : List Expr)
     (hrun : steps ⟨[forkThenFst], σ⟩ ⟨.val v :: tp', σ'⟩) : v = .int 3 := by
   have hte : (iprop(True) : IProp GF₀) ⊢ (emp : IProp GF₀) :=
     biaffine_iff_true_emp.1 inferInstance

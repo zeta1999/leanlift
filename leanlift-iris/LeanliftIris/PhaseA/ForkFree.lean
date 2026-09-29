@@ -241,7 +241,8 @@ theorem wp_adequacy_steps {F} [UFraction F] {GF} (γ : GName) [HasHeap γ GF F]
     (e : Expr) (v : Val) (σ' : Heap) (φ : Val → Prop)
     (hff : forkFreeE e) (hrun : steps ⟨[e], emptyHeap⟩ ⟨[.val v], σ'⟩)
     (h : (iprop(True) : IProp GF) ⊢
-      iprop(stateInterp γ emptyHeap ∗ wp (F := F) γ e (fun w => iprop(⌜φ w⌝)))) : φ v := by
+      iprop(|==> (stateInterp γ emptyHeap ∗ wp (F := F) γ e (fun w => iprop(⌜φ w⌝))))) :
+    φ v := by
   have hemp : forkFreeHeap emptyHeap := by intro l w hw; simp [emptyHeap] at hw
   obtain ⟨e', htp, _, _, hps⟩ := steps_singleton_forkFree hemp hff hrun
   -- htp : [.val v] = [e'] ⇒ e' = .val v
