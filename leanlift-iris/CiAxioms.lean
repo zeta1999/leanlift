@@ -28,8 +28,10 @@ open LeanliftIris.PhaseC
 
 -- Phase C — linearizability / prophecy.
 #print axioms proph_sound                     -- C2 prophecy soundness
-#print axioms linearize                       -- C1 linearizability: any interleaving = its LP history
-#print axioms two_pushes_linearize            -- C1 instantiated: two concurrent Treiber pushes
+#print axioms linearizable_abstract           -- C1 linearizability at the abstract state (state eq + one LP per op + LPs are commits)
+#print axioms history_legal                   -- C1 pre/post at each LP of the sequential history
+#print axioms Interleave.flatten              -- C1 non-vacuity: every family of traces has an interleaving
+#print axioms two_pushes_linearize            -- C1 instantiated through the general theorem: two concurrent Treiber pushes
 #print axioms Realizes.seq                    -- C1 sequential composition through the real wp
 #print axioms owner_claim_lp                  -- C2 Chase–Lev LP, via SC safety
 #print axioms LAT.atomic_commit               -- C1 logically-atomic commit

@@ -307,22 +307,30 @@ go/no-go review. If B stalls, Phase A alone is already a shippable capability.
   restores the empty stack (abstract state `[] → [v] → []`). *Still to do:* the full
   mask/atomic-update encoding (open the invariant at the LP, true `<<<P>>> e <<<Q>>>`
   against a concurrent context).
-  **The payoff (2026-09-30, `PhaseC/Linearize.lean`):** `Interleave ls h` (any
-  scheduler: at each step take the head of any non-empty sequence), tagged
-  micro-steps `LAT.steps i t` (non-LP steps framing), and **`linearize`**: for any
-  interleaving `h` of the step sequences of a family of logically-atomic
-  operations, running `h` from any state ends where running *only the LPs, in the
-  order they occur in `h`*, ends — the concurrent run equals its sequential history
-  at the abstract state. `linearize_lat` states it over triples; `two_pushes_linearize`
-  is the consumer (any interleaving of two Treiber pushes ends in `v2 :: v1 :: xs` or
-  `v1 :: v2 :: xs`, never a lost push). Structural rules added: `LAT.frameR`,
-  `LAT.conseq`, and `Realizes.seq` (sequential composition realizes the composed
-  effect through the real `wp`). *Scope limit, stated in the file:* this is
-  linearizability at the abstract state; an Iris-style atomic triple that lets a
-  client open an invariant around another thread's LP needs `fupd` inside `wp`,
+  **The payoff (2026-09-30, `PhaseC/Linearize.lean`), after an unprimed cross-model
+  review (opus) found the first version "weaker than claimed" — an identity-erasure
+  lemma named linearizability, no LP uniqueness, no legality, consumer bypassing it —
+  and the file was strengthened to earn the name where the model allows:**
+  `Interleave ls h` (any scheduler of the given traces; `Interleave.flatten` certifies
+  it is inhabited, `Interleave.perm_flatten` that an interleaving is a permutation of
+  its sources), `AtomicOp` (each operation with its own `P`/`Q`), and
+  **`linearizable_abstract`**: for any interleaving of a family's traces, (1) the run
+  ends where its sequential history of LPs ends, (2) the history has **exactly one LP
+  per operation** (op-indices a permutation of `0…n-1`: no lost, no doubled op), (3)
+  every LP **is** its operation's commit. `history_legal` (each op's `P → Q` at its
+  LP) and `realtime_order` (an op whose steps all precede another's has the earlier
+  LP) follow. Consumer through the general theorem: `two_pushes_linearize` — two
+  Treiber pushes, each with framing steps around its `CAS`, under any interleaving end
+  in `v2 :: v1 :: xs` or `v1 :: v2 :: xs`. Structural rules: `LAT.frameR`, `LAT.conseq`,
+  `Realizes.seq`. *What it is not, stated in the file:* Herlihy–Wing linearizability
+  of *programs* — no invocation/response events or return values, no pending ops, and
+  each trace is a fixed list of state-independent effects (a CAS-retry loop is not an
+  `AtomicOp`). **Open (next C1 item): the erasure lemma** from a real thread-pool
+  `steps` run (`Lang`, `PoolAdequacy`) to an `Interleave` of abstract traces — today
+  the two schedulers are unconnected. Beyond that, an Iris-style atomic triple letting
+  a client open an invariant around another thread's LP needs `fupd` inside `wp`,
   which `PLAN-fupd.md` records as blocked by the `GenMap` mask representation
-  (`ownE ⊤` unrepresentable). `atomic_acc` makes such triples expressible; proving
-  programs against them waits on that representation.
+  (`ownE ⊤` unrepresentable); `atomic_acc` makes such triples expressible only.
 - **C2 — prophecy variables.** 🚧 *Foundation done* (`PhaseC/Prophecy.lean`). The
   prophecy mechanism in the small + the Chase–Lev last-element LP: the obstruction
   `lp_not_present_determined` (the LP is genuinely future-dependent — no present-only

@@ -109,9 +109,12 @@ namespace LeanliftIris.PhaseA
 #print axioms forkThenFst_result_unconditional
 #print axioms forkThenFst_safe_unconditional
 
--- C1: linearizability from logical atomicity
-#print axioms LeanliftIris.PhaseC.linearize
-#print axioms LeanliftIris.PhaseC.linearize_lat
+-- C1: linearizability at the abstract state, from logical atomicity
+#print axioms LeanliftIris.PhaseC.Interleave.perm_flatten
+#print axioms LeanliftIris.PhaseC.Interleave.flatten
+#print axioms LeanliftIris.PhaseC.linearizable_abstract
+#print axioms LeanliftIris.PhaseC.history_legal
+#print axioms LeanliftIris.PhaseC.realtime_order
 #print axioms LeanliftIris.PhaseC.two_pushes_linearize
 #print axioms LeanliftIris.PhaseC.Realizes.seq
 
