@@ -291,12 +291,12 @@ theorem tpInterp_thread (γ : GName) [HasHeap γ GF F] (Φ : Val → IProp GF)
 /-- **Safety.** In every configuration reachable from a verified program (any
 interleaving, any forks), every thread is either a value or can take a step: no
 thread is ever stuck. The `wp` hypothesis is the closed form (`heap_init` +
-`wp`), as in `wp_adequacy_pool_closed`. -/
-theorem wp_adequacy_safe {e : Expr} {σ : Heap} {φ : Val → Prop} (hinf : Heap.infFree σ)
+`wp`), as in `wp_adequacy_pool_closed`, at an *arbitrary* postcondition `Φ`:
+safety needs nothing from the postcondition. -/
+theorem wp_adequacy_safe {e : Expr} {σ : Heap} {Φ : Val → IProp GF} (hinf : Heap.infFree σ)
     {c : Cfg} (hrun : steps ⟨[e], σ⟩ c)
     (h : (iprop(True) : IProp GF) ⊢
-      iprop(|==> ∃ γ : GName,
-        stateInterp γ σ ∗ wp (F := F) γ e (fun w => iprop(⌜φ w⌝)))) :
+      iprop(|==> ∃ γ : GName, stateInterp γ σ ∗ wp (F := F) γ e Φ)) :
     ∀ t ∈ c.tp, toVal t ≠ none ∨ reducible t c.heap := by
   intro t ht
   by_cases hnv : toVal t = none
@@ -308,13 +308,13 @@ theorem wp_adequacy_safe {e : Expr} {σ : Heap} {φ : Val → Prop} (hinf : Heap
       (h.trans ((BIUpdate.mono ?_).trans (sfupdN_bupd_absorb (n + 0) _)))
     iintro ⟨%γ, Hpre⟩
     have hinit :
-        iprop(stateInterp γ σ ∗ wp (F := F) γ e (fun w => iprop(⌜φ w⌝))) ⊢
-          iprop(stateInterp γ σ ∗ tpInterp (F := F) γ (fun w => iprop(⌜φ w⌝)) [e]) := by
+        iprop(stateInterp γ σ ∗ wp (F := F) γ e Φ) ⊢
+          iprop(stateInterp γ σ ∗ tpInterp (F := F) γ Φ [e]) := by
       simp only [tpInterp_cons, forkObl_nil]
       exact sep_mono_r sep_emp.mpr
     -- at the end of the run: the thread's wp + the state interp give reducibility
     have hend :
-        iprop(stateInterp γ c.heap ∗ tpInterp (F := F) γ (fun w => iprop(⌜φ w⌝)) c.tp) ⊢
+        iprop(stateInterp γ c.heap ∗ tpInterp (F := F) γ Φ c.tp) ⊢
           iprop(|==> ⌜reducible t c.heap⌝) := by
       rw [htp]
       iintro ⟨Hsi, Htp⟩
@@ -389,7 +389,7 @@ theorem forkThenFst_safe {GF₀ : BundledGFunctors.{0, 0, 0}} [ElemG GF₀ (FHea
     ∀ t ∈ c.tp, toVal t ≠ none ∨ reducible t c.heap := by
   have hte : (iprop(True) : IProp GF₀) ⊢ (emp : IProp GF₀) :=
     biaffine_iff_true_emp.1 inferInstance
-  refine wp_adequacy_safe (F := F) (GF := GF₀) (φ := fun w => w = .int 3) emptyHeap_infFree
+  refine wp_adequacy_safe (F := F) (GF := GF₀) (Φ := fun w => iprop(⌜w = .int 3⌝)) emptyHeap_infFree
     hrun (hte.trans ((heap_init (F := F) (GF := GF₀) emptyHeap).trans (BIUpdate.mono ?_)))
   iintro ⟨%γ', Hsi⟩
   iexists γ'

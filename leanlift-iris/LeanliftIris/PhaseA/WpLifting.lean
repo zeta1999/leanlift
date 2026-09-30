@@ -960,4 +960,67 @@ theorem wp_fork (γ : GName) [HasHeap γ GF F] (e : Expr) (Φ : Val → IProp GF
   · iapply (sep_emp (P := wp (F := F) γ e (fun _ => iprop(True)))).mpr
     iexact He
 
+/-! ## `if false` and `binop` (pure rules the corpus was missing) -/
+
+/-- **Step inversion for `if false`.** The sole step selects the else-branch. -/
+theorem prim_step_ite_false_inv {e1 e2 : Expr} {σ : Heap} {e' : Expr} {σ' : Heap}
+    {efs : List Expr} (h : prim_step (.ite (.val (.bool false)) e1 e2) σ e' σ' efs) :
+    e' = e2 ∧ σ' = σ ∧ efs = [] := by
+  obtain ⟨K, a, a', hK, hK', hHead⟩ := h
+  have ha := head_toVal_none hHead
+  obtain ⟨hKnil, haeq⟩ := ctx_nil_of_ite ha hK.symm
+  subst hKnil
+  subst haeq
+  simp only [fill] at hK'
+  cases hHead with
+  | iteF => exact ⟨hK', rfl, rfl⟩
+
+/-- **`if false` rule.** -/
+theorem wp_if_false (γ : GName) [HasHeap γ GF F] (e1 e2 : Expr) (Φ : Val → IProp GF) :
+    ▷ wp (F := F) γ e2 Φ ⊢ wp (F := F) γ (.ite (.val (.bool false)) e1 e2) Φ := by
+  apply wp_pure_det (hnv := rfl) (hred := fun _ => ⟨_, _, _, prim_step.head Head.iteF⟩)
+  intro σ e' σ' efs h
+  exact prim_step_ite_false_inv h
+
+/-- **Context inversion for `binop`** (both arguments values). -/
+theorem ctx_nil_of_binop {K : List Frame} {a : Expr} {op : BinOp} {v1 v2 : Val}
+    (ha : toVal a = none) (h : fill K a = .binop op (.val v1) (.val v2)) :
+    K = [] ∧ a = .binop op (.val v1) (.val v2) := by
+  cases K with
+  | nil => exact ⟨rfl, by simpa [fill] using h⟩
+  | cons fr K' =>
+    exfalso
+    have hnv : toVal (fill K' a) = none := fill_toVal_none ha K'
+    simp only [fill, List.foldr_cons] at h hnv
+    cases fr <;> simp_all [fill1, toVal]
+
+/-- **Step inversion for `binop`.** The sole step evaluates the operator; the
+result is whatever `evalBinop` returns (a mismatched operator is stuck, and that
+is honest: there is no step, so no `wp` rule applies). -/
+theorem prim_step_binop_inv {op : BinOp} {v1 v2 : Val} {σ : Heap} {e' : Expr} {σ' : Heap}
+    {efs : List Expr} (h : prim_step (.binop op (.val v1) (.val v2)) σ e' σ' efs) :
+    (∃ v, evalBinop op v1 v2 = some v ∧ e' = .val v) ∧ σ' = σ ∧ efs = [] := by
+  obtain ⟨K, a, a', hK, hK', hHead⟩ := h
+  have ha := head_toVal_none hHead
+  obtain ⟨hKnil, haeq⟩ := ctx_nil_of_binop ha hK.symm
+  subst hKnil
+  subst haeq
+  simp only [fill] at hK'
+  cases hHead with
+  | binop hv => exact ⟨⟨_, hv, hK'⟩, rfl, rfl⟩
+
+/-- **Binop rule.** If the operator evaluates (`evalBinop op v1 v2 = some v`), the
+expression steps to `v`. The side condition is the progress witness: without it
+the expression is genuinely stuck. -/
+theorem wp_binop (γ : GName) [HasHeap γ GF F] (op : BinOp) (v1 v2 v : Val)
+    (Φ : Val → IProp GF) (hv : evalBinop op v1 v2 = some v) :
+    ▷ wp (F := F) γ (.val v) Φ ⊢ wp (F := F) γ (.binop op (.val v1) (.val v2)) Φ := by
+  apply wp_pure_det (hnv := rfl) (hred := fun _ => ⟨_, _, _, prim_step.head (Head.binop hv)⟩)
+  intro σ e' σ' efs h
+  obtain ⟨⟨v', hv', he'⟩, hσ, hefs⟩ := prim_step_binop_inv h
+  refine ⟨?_, hσ, hefs⟩
+  rw [he']
+  rw [hv] at hv'
+  exact congrArg Expr.val (Option.some.inj hv').symm
+
 end LeanliftIris.PhaseA
