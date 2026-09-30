@@ -36,3 +36,4 @@ import LeanliftIris.PhaseC.LogAtom
 import LeanliftIris.PhaseC.MPSC
 import LeanliftIris.PhaseC.ProphMachine
 import LeanliftIris.PhaseC.WpAtomic
+import LeanliftIris.PhaseC.Linearize

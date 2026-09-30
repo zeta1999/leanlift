@@ -12,6 +12,7 @@ import LeanliftIris.PhaseA.WpLifting
 import LeanliftIris.PhaseA.Adequacy
 import LeanliftIris.PhaseA.PoolAdequacy
 import LeanliftIris.PhaseA.Concrete
+import LeanliftIris.PhaseC.Linearize
 import LeanliftIris.PhaseA.Examples
 import LeanliftIris.PhaseA.Treiber
 import LeanliftIris.PhaseB.WeakMem
@@ -107,5 +108,11 @@ namespace LeanliftIris.PhaseA
 #print axioms forkThenFst_result_infFree
 #print axioms forkThenFst_result_unconditional
 #print axioms forkThenFst_safe_unconditional
+
+-- C1: linearizability from logical atomicity
+#print axioms LeanliftIris.PhaseC.linearize
+#print axioms LeanliftIris.PhaseC.linearize_lat
+#print axioms LeanliftIris.PhaseC.two_pushes_linearize
+#print axioms LeanliftIris.PhaseC.Realizes.seq
 
 end LeanliftIris.PhaseA

@@ -265,7 +265,7 @@ go/no-go review. If B stalls, Phase A alone is already a shippable capability.
 
 ## Phase C — linearizability & future-dependent linearization points
 
-- **C1 — logical atomicity, generalized.** 🚧 *Foundation done* (`PhaseC/LogAtom.lean`).
+- **C1 — logical atomicity, generalized.** ✅ *Linearizability done (2026-09-30, `PhaseC/Linearize.lean`; see the end of this entry). Foundation* (`PhaseC/LogAtom.lean`).
   A reusable logically-atomic-triple library `LAT P Q` over an abstract state:
   framing-prefix `pre` + single linearization point `commit` (`P → Q`) +
   framing-suffix `post`, with the payoff `LAT.atomic_commit` (running the whole
@@ -307,6 +307,22 @@ go/no-go review. If B stalls, Phase A alone is already a shippable capability.
   restores the empty stack (abstract state `[] → [v] → []`). *Still to do:* the full
   mask/atomic-update encoding (open the invariant at the LP, true `<<<P>>> e <<<Q>>>`
   against a concurrent context).
+  **The payoff (2026-09-30, `PhaseC/Linearize.lean`):** `Interleave ls h` (any
+  scheduler: at each step take the head of any non-empty sequence), tagged
+  micro-steps `LAT.steps i t` (non-LP steps framing), and **`linearize`**: for any
+  interleaving `h` of the step sequences of a family of logically-atomic
+  operations, running `h` from any state ends where running *only the LPs, in the
+  order they occur in `h`*, ends — the concurrent run equals its sequential history
+  at the abstract state. `linearize_lat` states it over triples; `two_pushes_linearize`
+  is the consumer (any interleaving of two Treiber pushes ends in `v2 :: v1 :: xs` or
+  `v1 :: v2 :: xs`, never a lost push). Structural rules added: `LAT.frameR`,
+  `LAT.conseq`, and `Realizes.seq` (sequential composition realizes the composed
+  effect through the real `wp`). *Scope limit, stated in the file:* this is
+  linearizability at the abstract state; an Iris-style atomic triple that lets a
+  client open an invariant around another thread's LP needs `fupd` inside `wp`,
+  which `PLAN-fupd.md` records as blocked by the `GenMap` mask representation
+  (`ownE ⊤` unrepresentable). `atomic_acc` makes such triples expressible; proving
+  programs against them waits on that representation.
 - **C2 — prophecy variables.** 🚧 *Foundation done* (`PhaseC/Prophecy.lean`). The
   prophecy mechanism in the small + the Chase–Lev last-element LP: the obstruction
   `lp_not_present_determined` (the LP is genuinely future-dependent — no present-only

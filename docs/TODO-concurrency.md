@@ -69,7 +69,7 @@ PLAN-concurrency on 2026-09-30 (B3–B6 had been done but left unchecked).
 - [x] B6 hazard-pointer reclamation #7 under weak memory (publish-then-revalidate; bounded garbage) — done, `PhaseB/HazardPtr.lean` (`hp_use_after_free_relacq`, `hp_sc_no_use_after_free`) + `PhaseB/HazardGC.lean` (`bounded_garbage`, `reclaim_progress`) (see PLAN B6)
 
 ## Phase C — linearizability & prophecy
-- [~] C1 reusable logically-atomic triple library (generalize A4) — foundation done, `PhaseC/LogAtom.lean` + `PhaseC/WpAtomic.lean` (`LAT`, `lat_realized`, three operations bridged to the real `wp`); see PLAN C1 for what remains
+- [x] C1 reusable logically-atomic triple library (generalize A4) — **DONE 2026-09-30**: foundation `PhaseC/LogAtom.lean` + `PhaseC/WpAtomic.lean` (`LAT`, `lat_realized`, three operations bridged to the real `wp`), and the payoff `PhaseC/Linearize.lean`: `Interleave` (any scheduler), `linearize`/`linearize_lat` (any interleaving of logically-atomic operations equals its LP history at the abstract state), consumer `two_pushes_linearize`, plus `LAT.frameR`, `LAT.conseq`, `Realizes.seq`. Scope limit recorded in the file and PLAN: Iris-style atomic triples over concurrently running `wp` proofs need `fupd` in `wp`, blocked by the mask representation (PLAN-fupd).
 - [~] C2 prophecy variables for future-dependent LPs: MPSC #2 stamp publish, Chase–Lev #8 last-element race — foundation done, `PhaseC/Prophecy.lean` (`proph_sound`), `PhaseC/MPSC.lean`, `PhaseC/ProphMachine.lean`; see PLAN C2 for what remains
 
 ## Phase D — integration with leanlift

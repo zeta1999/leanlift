@@ -28,6 +28,9 @@ open LeanliftIris.PhaseC
 
 -- Phase C — linearizability / prophecy.
 #print axioms proph_sound                     -- C2 prophecy soundness
+#print axioms linearize                       -- C1 linearizability: any interleaving = its LP history
+#print axioms two_pushes_linearize            -- C1 instantiated: two concurrent Treiber pushes
+#print axioms Realizes.seq                    -- C1 sequential composition through the real wp
 #print axioms owner_claim_lp                  -- C2 Chase–Lev LP, via SC safety
 #print axioms LAT.atomic_commit               -- C1 logically-atomic commit
 #print axioms take_linearizes                 -- C1 take linearizes
