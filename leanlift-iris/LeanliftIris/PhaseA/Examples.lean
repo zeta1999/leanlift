@@ -68,6 +68,6 @@ theorem ex_alloc_load_adequate (γ : GName) [HasHeap γ GF F] (v r : Val) (σ' :
     (hin : (iprop(True) : IProp GF) ⊢
       iprop(|==> ∃ γ' : GName, stateInterp γ' emptyHeap ∗
         wp (F := F) γ' (.load (.alloc (.val v))) (fun w => iprop(⌜w = v⌝)))) : r = v :=
-  wp_adequacy_closed (φ := fun w => w = v) hrun hin
+  wp_adequacy_closed (φ := fun w => w = v) emptyHeap_infFree hrun hin
 
 end LeanliftIris.PhaseA

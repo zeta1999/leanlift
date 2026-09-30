@@ -15,8 +15,14 @@ thread-pool adequacy (`PoolAdequacy.lean`) possible — without it a forked thre
 could mutate the heap behind the primary thread's back. `forkObl` is a plain
 list recursion (not `bigSep`, whose singleton case is not definitional), so
 `forkObl wp [] = emp` and `forkObl wp (ef :: efs) = wp ef True ∗ forkObl wp efs`
-hold by `rfl`. The progress (`reducible`) conjunct is still omitted, as in the
-upstream template. Sorry-free.
+hold by `rfl`.
+
+The step case also carries the **progress conjunct** `⌜reducible e σ⌝`: a verified
+non-value can always take a step, so verified programs never get stuck (safety, in
+`PoolAdequacy.lean`). Since `Heap` has no finiteness bookkeeping, progress for
+`alloc` needs a free cell; the step case therefore assumes the pure invariant
+`Heap.infFree σ` (infinitely many free locations), which every run preserves
+(`Lang.steps_preserves_infFree`) and the empty heap satisfies. Sorry-free.
 -/
 import LeanliftIris.PhaseA.HeapRes
 
@@ -76,8 +82,9 @@ def wpF (γ : GName) [HasHeap γ GF F]
   match toVal e with
   | some v => iprop(|==> Φ v)
   | none =>
-    iprop(∀ σ, stateInterp γ σ -∗ |==>
-      (∀ e' σ' efs, ⌜prim_step e σ e' σ' efs⌝ -∗
+    iprop(∀ σ, ⌜Heap.infFree σ⌝ -∗ stateInterp γ σ -∗ |==>
+      (⌜reducible e σ⌝ ∗
+       ∀ e' σ' efs, ⌜prim_step e σ e' σ' efs⌝ -∗
         ▷ |==> (stateInterp γ σ' ∗ wp e' Φ ∗ forkObl wp efs)))
 
 instance wpF_contractive (γ : GName) [HasHeap γ GF F] :
@@ -88,7 +95,9 @@ instance wpF_contractive (γ : GName) [HasHeap γ GF F] :
     · exact .of_eq rfl
     · refine forall_ne (fun σ => ?_)
       refine wand_ne.ne (.of_eq rfl) ?_
+      refine wand_ne.ne (.of_eq rfl) ?_
       refine BIUpdate.bupd_ne.ne ?_
+      refine sep_ne.ne (.of_eq rfl) ?_
       refine forall_ne (fun e' => ?_)
       refine forall_ne (fun σ' => ?_)
       refine forall_ne (fun efs => ?_)
@@ -135,8 +144,11 @@ theorem bupd_wpF (γ : GName) [HasHeap γ GF F]
   | none =>
     simp only [wpF, hv]
     iintro H
-    iintro %σ Hσ
+    iintro %σ %Hinf Hσ
     imod H with H
+    ispecialize H $$ %σ
+    ispecialize H $$ []
+    · ipure_intro; exact Hinf
     iapply H
     iexact Hσ
 
@@ -159,8 +171,9 @@ theorem wp_value_inv (γ : GName) [HasHeap γ GF F] (v : Val) (Φ : Val → IPro
 theorem wp_step (γ : GName) [HasHeap γ GF F] (e : Expr) (Φ : Val → IProp GF)
     (hnv : toVal e = none) :
     wp (F := F) γ e Φ ⊢
-      ∀ σ, stateInterp γ σ -∗ |==>
-        (∀ e' σ' efs, ⌜prim_step e σ e' σ' efs⌝ -∗
+      ∀ σ, ⌜Heap.infFree σ⌝ -∗ stateInterp γ σ -∗ |==>
+        (⌜reducible e σ⌝ ∗
+         ∀ e' σ' efs, ⌜prim_step e σ e' σ' efs⌝ -∗
           ▷ |==> (stateInterp γ σ' ∗ wp (F := F) γ e' Φ ∗ forkObl (wp (F := F) γ) efs)) := by
   refine (wp_unfold_fwd γ e Φ).trans ?_
   simp only [wpF, hnv]

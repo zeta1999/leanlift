@@ -29,15 +29,18 @@ variable {F} [UFraction F] {GF} [ElemG GF (FHeap (F := F))]
 stepped-to state, modulo the update/later the `wp` carries. -/
 theorem wp_step_pres (γ : GName) [HasHeap γ GF F] (e : Expr) (σ : Heap) (e' : Expr)
     (σ' : Heap) (efs : List Expr) (Φ : Val → IProp GF) (hnv : toVal e = none)
-    (hstep : prim_step e σ e' σ' efs) :
+    (hinf : Heap.infFree σ) (hstep : prim_step e σ e' σ' efs) :
     stateInterp γ σ ∗ wp (F := F) γ e Φ ⊢
       |==> ▷ |==> (stateInterp γ σ' ∗ wp (F := F) γ e' Φ ∗ forkObl (wp (F := F) γ) efs) := by
   iintro ⟨Hσ, Hwp⟩
   ihave H1 := (wp_step γ e Φ hnv) $$ [Hwp]
   · iexact Hwp
+  ispecialize H1 $$ %σ
+  ispecialize H1 $$ []
+  · ipure_intro; exact hinf
   ihave H2 := H1 $$ [Hσ]
   · iexact Hσ
-  imod H2 with H3
+  imod H2 with ⟨_, H3⟩
   ispecialize H3 $$ %e'
   ispecialize H3 $$ %σ'
   ispecialize H3 $$ %efs
@@ -49,14 +52,30 @@ theorem wp_step_pres (γ : GName) [HasHeap γ GF F] (e : Expr) (σ : Heap) (e' :
 /-- **Preservation, fork-free step.** When the step spawns nothing the fork
 obligation is `emp` and drops out. -/
 theorem wp_step_pres_nil (γ : GName) [HasHeap γ GF F] (e : Expr) (σ : Heap) (e' : Expr)
-    (σ' : Heap) (Φ : Val → IProp GF) (hnv : toVal e = none)
+    (σ' : Heap) (Φ : Val → IProp GF) (hnv : toVal e = none) (hinf : Heap.infFree σ)
     (hstep : prim_step e σ e' σ' []) :
     stateInterp γ σ ∗ wp (F := F) γ e Φ ⊢
       |==> ▷ |==> (stateInterp γ σ' ∗ wp (F := F) γ e' Φ) := by
-  refine (wp_step_pres γ e σ e' σ' [] Φ hnv hstep).trans ?_
+  refine (wp_step_pres γ e σ e' σ' [] Φ hnv hinf hstep).trans ?_
   refine BIUpdate.mono (later_mono (BIUpdate.mono ?_))
   simp only [forkObl_nil]
   exact sep_mono_r sep_emp.mp
+
+/-- **Progress.** A verified non-value can step (given the free-space invariant). -/
+theorem wp_reducible (γ : GName) [HasHeap γ GF F] (e : Expr) (σ : Heap) (Φ : Val → IProp GF)
+    (hnv : toVal e = none) (hinf : Heap.infFree σ) :
+    stateInterp γ σ ∗ wp (F := F) γ e Φ ⊢ |==> (⌜reducible e σ⌝ : IProp GF) := by
+  iintro ⟨Hσ, Hwp⟩
+  ihave H1 := (wp_step γ e Φ hnv) $$ [Hwp]
+  · iexact Hwp
+  ispecialize H1 $$ %σ
+  ispecialize H1 $$ []
+  · ipure_intro; exact hinf
+  ihave H2 := H1 $$ [Hσ]
+  · iexact Hσ
+  imod H2 with ⟨%Hred, _⟩
+  iintro !>
+  ipure_intro; exact Hred
 
 /-- **Adequacy, base case.** A value verified against a pure postcondition
 satisfies it at the meta level. Exercises the soundness path
@@ -120,6 +139,13 @@ inductive primSteps : Expr → Heap → Expr → Heap → Prop where
   | tail {e σ e' σ' e'' σ''} :
       primSteps e σ e' σ' → prim_step e' σ' e'' σ'' [] → primSteps e σ e'' σ''
 
+/-- Fork-free runs preserve unbounded free space. -/
+theorem primSteps_preserves_infFree {e : Expr} {σ : Heap} {e' : Expr} {σ' : Heap}
+    (h : primSteps e σ e' σ') (hinf : Heap.infFree σ) : Heap.infFree σ' := by
+  induction h with
+  | refl => exact hinf
+  | tail _ hstep ih => exact prim_step_preserves_infFree hstep ih
+
 /-- A stepping expression is not a value. -/
 theorem toVal_none_of_prim_step {e : Expr} {σ : Heap} {e' : Expr} {σ' : Heap}
     {efs : List Expr} (h : prim_step e σ e' σ' efs) : toVal e = none := by
@@ -130,17 +156,19 @@ theorem toVal_none_of_prim_step {e : Expr} {σ : Heap} {e' : Expr} {σ' : Heap}
 step-update tower. The iProp-level core of sequential adequacy: proved by
 induction on the run from the one-step `wp_step_pres`. -/
 theorem wp_primSteps_pres (γ : GName) [HasHeap γ GF F] (Φ : Val → IProp GF)
-    {e : Expr} {σ : Heap} {e' : Expr} {σ' : Heap} (h : primSteps e σ e' σ') :
+    {e : Expr} {σ : Heap} {e' : Expr} {σ' : Heap} (h : primSteps e σ e' σ')
+    (hinf : Heap.infFree σ) :
     ∃ k, iprop(stateInterp γ σ ∗ wp (F := F) γ e Φ) ⊢
       sfupdN k iprop(stateInterp γ σ' ∗ wp (F := F) γ e' Φ) := by
   induction h with
   | refl => exact ⟨0, BIUpdate.intro⟩
-  | tail _hsteps hstep ih =>
+  | tail hsteps hstep ih =>
       obtain ⟨k, ih⟩ := ih
       refine ⟨k + 1, ?_⟩
       have hone :
           iprop(stateInterp γ _ ∗ wp (F := F) γ _ Φ) ⊢ sfupdN 1 iprop(stateInterp γ _ ∗ wp (F := F) γ _ Φ) :=
-        wp_step_pres_nil γ _ _ _ _ Φ (toVal_none_of_prim_step hstep) hstep
+        wp_step_pres_nil γ _ _ _ _ Φ (toVal_none_of_prim_step hstep)
+          (primSteps_preserves_infFree hsteps hinf) hstep
       refine ih.trans ((sfupdN_mono k hone).trans ?_)
       exact sfupdN_compose k 1 _
 
@@ -193,11 +221,11 @@ under an update (`|==>` — the authoritative heap is ghost state and can only b
 from heap `σ` to a value `v` (at heap `σ'`), then `φ v` holds at the meta level.
 Partial correctness: nothing is claimed about runs that diverge or get stuck. -/
 theorem wp_adequacy_seq (γ : GName) [HasHeap γ GF F] (e : Expr) (σ : Heap)
-    (v : Val) (σ' : Heap) (φ : Val → Prop)
+    (v : Val) (σ' : Heap) (φ : Val → Prop) (hinf : Heap.infFree σ)
     (hrun : primSteps e σ (.val v) σ')
     (h : (iprop(True) : IProp GF) ⊢
       iprop(|==> (stateInterp γ σ ∗ wp (F := F) γ e (fun w => iprop(⌜φ w⌝))))) : φ v := by
-  obtain ⟨k, hpres⟩ := wp_primSteps_pres γ (fun w => iprop(⌜φ w⌝)) hrun
+  obtain ⟨k, hpres⟩ := wp_primSteps_pres γ (fun w => iprop(⌜φ w⌝)) hrun hinf
   -- the end payload (state interp + wp at the final value) entails the pure goal
   have bpe : (iprop(|==> ⌜φ v⌝) : IProp GF) ⊢ iprop(⌜φ v⌝) :=
     (BIUpdate.mono plainly_pure.mpr).trans BIBUpdatePlainly.bupd_plainly
@@ -233,6 +261,13 @@ inductive primStepsN : Nat → Expr → Heap → Expr → Heap → Prop where
   | tail {n e σ e' σ' e'' σ''} :
       primStepsN n e σ e' σ' → prim_step e' σ' e'' σ'' [] →
       primStepsN (n + 1) e σ e'' σ''
+
+/-- Length-indexed fork-free runs preserve unbounded free space. -/
+theorem primStepsN_preserves_infFree {n : Nat} {e : Expr} {σ : Heap} {e' : Expr} {σ' : Heap}
+    (h : primStepsN n e σ e' σ') (hinf : Heap.infFree σ) : Heap.infFree σ' := by
+  induction h with
+  | refl => exact hinf
+  | tail _ hstep ih => exact prim_step_preserves_infFree hstep (ih hinf)
 
 /-- A fork-free run has some explicit length. -/
 theorem primStepsN_of_primSteps {e : Expr} {σ : Heap} {e' : Expr} {σ' : Heap}
@@ -273,16 +308,17 @@ theorem primSteps.trans {a : Expr} {σa : Heap} {b : Expr} {σb : Heap} {c : Exp
 the tower height is the run's length `n` — fixed independently of any ghost name. -/
 theorem wp_primStepsN_pres (γ : GName) [HasHeap γ GF F] (Φ : Val → IProp GF)
     {n : Nat} {e : Expr} {σ : Heap} {e' : Expr} {σ' : Heap}
-    (h : primStepsN n e σ e' σ') :
+    (h : primStepsN n e σ e' σ') (hinf : Heap.infFree σ) :
     iprop(stateInterp γ σ ∗ wp (F := F) γ e Φ) ⊢
       sfupdN n iprop(stateInterp γ σ' ∗ wp (F := F) γ e' Φ) := by
   induction h with
   | refl => exact BIUpdate.intro
-  | @tail n e σ e1 σ1 e2 σ2 _hsteps hstep ih =>
+  | @tail n e σ e1 σ1 e2 σ2 hsteps hstep ih =>
       have hone :
           iprop(stateInterp γ _ ∗ wp (F := F) γ _ Φ) ⊢ sfupdN 1 iprop(stateInterp γ _ ∗ wp (F := F) γ _ Φ) :=
-        wp_step_pres_nil γ _ _ _ _ Φ (toVal_none_of_prim_step hstep) hstep
-      exact ih.trans ((sfupdN_mono n hone).trans (sfupdN_compose n 1 _))
+        wp_step_pres_nil γ _ _ _ _ Φ (toVal_none_of_prim_step hstep)
+          (primStepsN_preserves_infFree hsteps hinf) hstep
+      exact (ih hinf).trans ((sfupdN_mono n hone).trans (sfupdN_compose n 1 _))
 
 /-- **Closed adequacy.** If — *from nothing* — one can `|==>`-allocate a ghost
 heap interpreting `σ` together with a `wp` proof of a pure `φ` (the shape
@@ -291,7 +327,7 @@ heap interpreting `σ` together with a `wp` proof of a pure `φ` (the shape
 meta-level guarantee. The step count is fixed by the run, so it is uniform under
 the existential over the freshly-allocated ghost name. -/
 theorem wp_adequacy_closed {e : Expr} {σ : Heap} {v : Val} {σ' : Heap}
-    {φ : Val → Prop} (hrun : primSteps e σ (.val v) σ')
+    {φ : Val → Prop} (hinf : Heap.infFree σ) (hrun : primSteps e σ (.val v) σ')
     (h : (iprop(True) : IProp GF) ⊢
       iprop(|==> ∃ γ : GName,
         stateInterp γ σ ∗ wp (F := F) γ e (fun w => iprop(⌜φ w⌝)))) : φ v := by
@@ -307,7 +343,7 @@ theorem wp_adequacy_closed {e : Expr} {σ : Heap} {v : Val} {σ' : Heap}
     iintro ⟨_, H⟩
     iapply ((wp_value_inv γ v (fun w => iprop(⌜φ w⌝))).trans bpe)
     iexact H
-  iapply ((wp_primStepsN_pres γ (fun w => iprop(⌜φ w⌝)) hn).trans (sfupdN_mono n hpayload))
+  iapply ((wp_primStepsN_pres γ (fun w => iprop(⌜φ w⌝)) hn hinf).trans (sfupdN_mono n hpayload))
   iexact Hpre
 
 end LeanliftIris.PhaseA

@@ -82,6 +82,13 @@ theorem fill_step_inv {K : List Frame} {e : Expr} {σ : Heap} {e'' : Expr} {σ' 
   refine ⟨fill K2 a', ?_, ⟨K2, a, a', heq, rfl, hHead⟩⟩
   rw [hK', fill_app]
 
+/-- A step of `e` is a step of `fill K e` (contexts compose), so reducibility lifts
+through evaluation contexts — the progress half of `wp_bind`. -/
+theorem reducible_fill (K : List Frame) {e : Expr} {σ : Heap} (h : reducible e σ) :
+    reducible (fill K e) σ := by
+  obtain ⟨e', σ', efs, K0, a, a', hK, hK', hHead⟩ := h
+  exact ⟨fill K e', σ', efs, K ++ K0, a, a', by rw [hK, fill_app], by rw [hK', fill_app], hHead⟩
+
 /-- **Context inversion for `load`.** If a redex plugs to `load (loc l)`, the
 context is empty and the redex is the whole `load`. -/
 theorem ctx_nil_of_load {K : List Frame} {a : Expr} {l : Nat} (ha : toVal a = none)
@@ -349,8 +356,9 @@ interpretation and the continuation `wp` after any primitive step) suffices to
 verify a non-value expression. The per-operation rules below are corollaries. -/
 theorem wp_lift_step (γ : GName) [HasHeap γ GF F] (e : Expr) (Φ : Val → IProp GF)
     (hnv : toVal e = none) :
-    (∀ σ, stateInterp γ σ -∗ |==>
-      (∀ e' σ' efs, ⌜prim_step e σ e' σ' efs⌝ -∗
+    (∀ σ, ⌜Heap.infFree σ⌝ -∗ stateInterp γ σ -∗ |==>
+      (⌜reducible e σ⌝ ∗
+       ∀ e' σ' efs, ⌜prim_step e σ e' σ' efs⌝ -∗
         ▷ |==> (stateInterp γ σ' ∗ wp (F := F) γ e' Φ ∗ forkObl (wp (F := F) γ) efs)))
     ⊢ wp (F := F) γ e Φ := by
   iintro H
@@ -359,17 +367,21 @@ theorem wp_lift_step (γ : GName) [HasHeap γ GF F] (e : Expr) (Φ : Val → IPr
   iexact H
 
 /-- **Pure-step rule.** If every step of `e` is deterministic, heap-preserving,
-and fork-free (going to `etgt`), then `▷ wp etgt Φ ⊢ wp e Φ`. The determinism
-hypothesis is discharged per-operation by a `prim_step_*_inv` lemma. -/
+and fork-free (going to `etgt`), and can always step (`hred`, the progress
+witness), then `▷ wp etgt Φ ⊢ wp e Φ`. The determinism hypothesis is discharged
+per-operation by a `prim_step_*_inv` lemma; the witness by the head rule. -/
 theorem wp_pure_det (γ : GName) [HasHeap γ GF F] (e etgt : Expr) (Φ : Val → IProp GF)
     (hnv : toVal e = none)
-    (hdet : ∀ σ e' σ' efs, prim_step e σ e' σ' efs → e' = etgt ∧ σ' = σ ∧ efs = []) :
+    (hdet : ∀ σ e' σ' efs, prim_step e σ e' σ' efs → e' = etgt ∧ σ' = σ ∧ efs = [])
+    (hred : ∀ σ, reducible e σ) :
     ▷ wp (F := F) γ etgt Φ ⊢ wp (F := F) γ e Φ := by
   iintro H
   iapply wp_unfold
   simp only [wpF, hnv]
-  iintro %σ Hsi
+  iintro %σ %_ Hsi
   iintro !>
+  isplitl []
+  · ipure_intro; exact hred σ
   iintro %e' %σ' %efs %Hstep
   obtain ⟨he, hσ, hefs⟩ := hdet σ e' σ' efs Hstep
   subst he; subst hσ; subst hefs
@@ -383,28 +395,28 @@ theorem wp_pure_det (γ : GName) [HasHeap γ GF F] (e etgt : Expr) (Φ : Val →
 /-- **`if true` rule.** -/
 theorem wp_if_true (γ : GName) [HasHeap γ GF F] (e1 e2 : Expr) (Φ : Val → IProp GF) :
     ▷ wp (F := F) γ e1 Φ ⊢ wp (F := F) γ (.ite (.val (.bool true)) e1 e2) Φ := by
-  apply wp_pure_det (hnv := rfl)
+  apply wp_pure_det (hnv := rfl) (hred := fun _ => ⟨_, _, _, prim_step.head Head.iteT⟩)
   intro σ e' σ' efs h
   exact prim_step_ite_true_inv h
 
 /-- **Pair rule.** Building a pair of two values. -/
 theorem wp_pair (γ : GName) [HasHeap γ GF F] (x y : Val) (Φ : Val → IProp GF) :
     ▷ wp (F := F) γ (.val (.pair x y)) Φ ⊢ wp (F := F) γ (.pairE (.val x) (.val y)) Φ := by
-  apply wp_pure_det (hnv := rfl)
+  apply wp_pure_det (hnv := rfl) (hred := fun _ => ⟨_, _, _, prim_step.head Head.pair⟩)
   intro σ e' σ' efs h
   exact prim_step_pair_inv h
 
 /-- **First-projection rule.** `fst (x, y)` steps to `x`. -/
 theorem wp_fst (γ : GName) [HasHeap γ GF F] (x y : Val) (Φ : Val → IProp GF) :
     ▷ wp (F := F) γ (.val x) Φ ⊢ wp (F := F) γ (.fstE (.val (.pair x y))) Φ := by
-  apply wp_pure_det (hnv := rfl)
+  apply wp_pure_det (hnv := rfl) (hred := fun _ => ⟨_, _, _, prim_step.head Head.fst⟩)
   intro σ e' σ' efs h
   exact prim_step_fst_inv h
 
 /-- **Second-projection rule.** `snd (x, y)` steps to `y`. -/
 theorem wp_snd (γ : GName) [HasHeap γ GF F] (x y : Val) (Φ : Val → IProp GF) :
     ▷ wp (F := F) γ (.val y) Φ ⊢ wp (F := F) γ (.sndE (.val (.pair x y))) Φ := by
-  apply wp_pure_det (hnv := rfl)
+  apply wp_pure_det (hnv := rfl) (hred := fun _ => ⟨_, _, _, prim_step.head Head.snd⟩)
   intro σ e' σ' efs h
   exact prim_step_snd_inv h
 
@@ -413,7 +425,7 @@ theorem wp_beta (γ : GName) [HasHeap γ GF F] (f x : String) (body : Expr) (w :
     (Φ : Val → IProp GF) :
     ▷ wp (F := F) γ (substE x w (substE f (.clos f x body) body)) Φ ⊢
       wp (F := F) γ (.app (.val (.clos f x body)) (.val w)) Φ := by
-  apply wp_pure_det (hnv := rfl)
+  apply wp_pure_det (hnv := rfl) (hred := fun _ => ⟨_, _, _, prim_step.head Head.beta⟩)
   intro σ e' σ' efs h
   exact prim_step_beta_inv h
 
@@ -449,10 +461,12 @@ theorem wp_load (γ : GName) [HasHeap γ GF F] (l : Nat) (v : Val) (Φ : Val →
   iintro ⟨Hpt, HΦ⟩
   iapply wp_unfold
   simp only [wpF, toVal]
-  iintro %σ Hsi
+  iintro %σ %_ Hsi
   iintro !>
   ihave %Hag := stateInterp_pointsTo_agree (γ := γ) σ l v $$ [Hsi, Hpt]
   · isplitl [Hsi] <;> iassumption
+  isplitl []
+  · ipure_intro; exact ⟨_, _, _, prim_step.head (Head.load Hag)⟩
   iintro %e' %σ' %efs %Hstep
   obtain ⟨w, hσl, he', hσ', hefs⟩ := prim_step_load_inv Hstep
   have hwv : w = v := by rw [hσl] at Hag; exact Option.some.inj Hag
@@ -488,8 +502,12 @@ theorem wp_store (γ : GName) [HasHeap γ GF F] (l : Nat) (v_old v_new : Val)
   iintro ⟨Hpt, HΦ⟩
   iapply wp_unfold
   simp only [wpF, toVal]
-  iintro %σ Hsi
+  iintro %σ %_ Hsi
   iintro !>
+  ihave %Hag := stateInterp_pointsTo_agree (γ := γ) σ l v_old $$ [Hsi, Hpt]
+  · isplitl [Hsi] <;> iassumption
+  isplitl []
+  · ipure_intro; exact ⟨_, _, _, prim_step.head (Head.store Hag)⟩
   iintro %e' %σ' %efs %Hstep
   obtain ⟨_, he', hσ', hefs⟩ := prim_step_store_inv Hstep
   subst he'; subst hσ'; subst hefs
@@ -547,10 +565,12 @@ theorem wp_faa (γ : GName) [HasHeap γ GF F] (l : Nat) (m n : Int)
   iintro ⟨Hpt, HΦ⟩
   iapply wp_unfold
   simp only [wpF, toVal]
-  iintro %σ Hsi
+  iintro %σ %_ Hsi
   iintro !>
   ihave %Hag := stateInterp_pointsTo_agree (γ := γ) σ l (.int m) $$ [Hsi, Hpt]
   · isplitl [Hsi] <;> iassumption
+  isplitl []
+  · ipure_intro; exact ⟨_, _, _, prim_step.head (Head.faa Hag)⟩
   iintro %e' %σ' %efs %Hstep
   obtain ⟨m', hσl, he', hσ', hefs⟩ := prim_step_faa_inv Hstep
   have hmm : m = m' := by
@@ -609,10 +629,12 @@ theorem wp_cas_fail (γ : GName) [HasHeap γ GF F] (l : Nat) (v_cur v1 v2 : Val)
   iintro ⟨Hpt, HΦ⟩
   iapply wp_unfold
   simp only [wpF, toVal]
-  iintro %σ Hsi
+  iintro %σ %_ Hsi
   iintro !>
   ihave %Hag := stateInterp_pointsTo_agree (γ := γ) σ l v_cur $$ [Hsi, Hpt]
   · isplitl [Hsi] <;> iassumption
+  isplitl []
+  · ipure_intro; exact ⟨_, _, _, prim_step.head (Head.casF Hag hne)⟩
   iintro %e' %σ' %efs %Hstep
   obtain ⟨v0, hσl, hcase⟩ := prim_step_cas_inv Hstep
   have hv0 : v0 = v_cur := by rw [hσl] at Hag; exact Option.some.inj Hag
@@ -638,10 +660,12 @@ theorem wp_cas_suc (γ : GName) [HasHeap γ GF F] (l : Nat) (v1 v2 : Val)
   iintro ⟨Hpt, HΦ⟩
   iapply wp_unfold
   simp only [wpF, toVal]
-  iintro %σ Hsi
+  iintro %σ %_ Hsi
   iintro !>
   ihave %Hag := stateInterp_pointsTo_agree (γ := γ) σ l v1 $$ [Hsi, Hpt]
   · isplitl [Hsi] <;> iassumption
+  isplitl []
+  · ipure_intro; exact ⟨_, _, _, prim_step.head (Head.casS Hag rfl)⟩
   iintro %e' %σ' %efs %Hstep
   obtain ⟨v0, hσl, hcase⟩ := prim_step_cas_inv Hstep
   have hv0 : v0 = v1 := by rw [hσl] at Hag; exact Option.some.inj Hag
@@ -698,8 +722,12 @@ theorem wp_alloc (γ : GName) [HasHeap γ GF F] (v : Val) (Φ : Val → IProp GF
   iintro Hcont
   iapply wp_unfold
   simp only [wpF, toVal]
-  iintro %σ Hsi
+  iintro %σ %Hinf Hsi
   iintro !>
+  isplitl []
+  · ipure_intro
+    obtain ⟨l0, hl0⟩ := Heap.infFree.fresh Hinf
+    exact ⟨_, _, _, prim_step.head (Head.alloc hl0)⟩
   iintro %e' %σ' %efs %Hstep
   obtain ⟨l, hfresh, he', hσ', hefs⟩ := prim_step_alloc_inv Hstep
   subst he'
@@ -764,13 +792,18 @@ theorem wp_bind (γ : GName) [HasHeap γ GF F] (K : List Frame) (e : Expr)
     | none =>
       iapply wp_unfold
       simp only [wpF, fill_toVal_none hv K]
-      iintro %σ Hσ
+      iintro %σ %Hinf Hσ
       ihave HwpStep := (wp_step γ ee (fun v => wp (F := F) γ (fill K (.val v)) Φ) hv) $$ [Hwp]
       · iexact Hwp
+      ispecialize HwpStep $$ %σ
+      ispecialize HwpStep $$ []
+      · ipure_intro; exact Hinf
       ihave HwpBody := HwpStep $$ [Hσ]
       · iexact Hσ
-      imod HwpBody with HwpInner
+      imod HwpBody with ⟨%Hred, HwpInner⟩
       iintro !>
+      isplitl []
+      · ipure_intro; exact reducible_fill K Hred
       iintro %ee2 %σ2 %efs2 %Hstep
       obtain ⟨e', he'', hstep'⟩ := fill_step_inv Hstep hv
       subst he''
@@ -815,13 +848,18 @@ theorem wp_mono (γ : GName) [HasHeap γ GF F] (e : Expr) (Φ Ψ : Val → IProp
     | none =>
       iapply wp_unfold
       simp only [wpF, hv]
-      iintro %σ Hσ
+      iintro %σ %Hinf Hσ
       ihave HwpS := (wp_step γ ee Φ hv) $$ [Hwp]
       · iexact Hwp
+      ispecialize HwpS $$ %σ
+      ispecialize HwpS $$ []
+      · ipure_intro; exact Hinf
       ihave HwpB := HwpS $$ [Hσ]
       · iexact Hσ
-      imod HwpB with HwpI
+      imod HwpB with ⟨%Hred, HwpI⟩
       iintro !>
+      isplitl []
+      · ipure_intro; exact Hred
       iintro %ee2 %σ2 %efs2 %Hstep
       ispecialize HwpI $$ %ee2
       ispecialize HwpI $$ %σ2
@@ -904,8 +942,10 @@ theorem wp_fork (γ : GName) [HasHeap γ GF F] (e : Expr) (Φ : Val → IProp GF
   iintro ⟨He, HΦ⟩
   iapply wp_unfold
   simp only [wpF, toVal]
-  iintro %σ Hsi
+  iintro %σ %_ Hsi
   iintro !>
+  isplitl []
+  · ipure_intro; exact ⟨_, _, _, prim_step.head Head.fork⟩
   iintro %e' %σ' %efs %Hstep
   obtain ⟨he', hσ', hefs⟩ := prim_step_fork_inv Hstep
   subst he'; subst hσ'; subst hefs

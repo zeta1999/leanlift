@@ -95,5 +95,8 @@ namespace LeanliftIris.PhaseA
 #print axioms wp_adequacy_pool
 #print axioms wp_adequacy_pool_closed
 #print axioms forkThenFst_result
+#print axioms wp_reducible
+#print axioms wp_adequacy_safe
+#print axioms forkThenFst_safe
 
 end LeanliftIris.PhaseA

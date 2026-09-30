@@ -210,6 +210,58 @@ inductive steps : Cfg → Cfg → Prop where
   | refl {c} : steps c c
   | tail {c c' c''} : steps c c' → step c' c'' → steps c c''
 
+/-! ## Unbounded free space
+
+`Heap` is a total map on `Nat` with no finiteness bookkeeping, so a heap could in
+principle be fully allocated and `alloc` stuck. Real programs start from a heap with
+infinitely many free cells and every step allocates at most one, so the property
+below is an invariant of every run; it is the pure side condition the program
+logic's progress (`reducible`) conjunct needs for `alloc`. -/
+
+/-- Infinitely many free locations: above every bound there is an unallocated cell. -/
+def Heap.infFree (σ : Heap) : Prop := ∀ n : Nat, ∃ l, n ≤ l ∧ σ l = none
+
+theorem emptyHeap_infFree : Heap.infFree emptyHeap := fun n => ⟨n, Nat.le_refl n, rfl⟩
+
+/-- A free cell exists. -/
+theorem Heap.infFree.fresh {σ : Heap} (h : Heap.infFree σ) : ∃ l, σ l = none := by
+  obtain ⟨l, _, hl⟩ := h 0; exact ⟨l, hl⟩
+
+/-- Filling one cell keeps infinitely many free. -/
+theorem Heap.infFree.set {σ : Heap} (h : Heap.infFree σ) (l : Nat) (v : Val) :
+    Heap.infFree (σ.set l v) := by
+  intro n
+  obtain ⟨k, hnk, hk⟩ := h (max n (l + 1))
+  refine ⟨k, Nat.le_trans (Nat.le_max_left _ _) hnk, ?_⟩
+  have hkl : k ≠ l := by
+    intro hkl; subst hkl
+    exact absurd (Nat.le_trans (Nat.le_max_right _ _) hnk) (Nat.not_succ_le_self k)
+  simp [Heap.set, hkl, hk]
+
+/-- Head reduction preserves unbounded free space (the heap changes only by `set`). -/
+theorem Head.preserves_infFree {a : Expr} {σ : Heap} {a' : Expr} {σ' : Heap}
+    {efs : List Expr} (h : Head a σ a' σ' efs) (hσ : Heap.infFree σ) : Heap.infFree σ' := by
+  cases h <;> first | exact hσ | exact Heap.infFree.set hσ _ _
+
+/-- Primitive steps preserve unbounded free space. -/
+theorem prim_step_preserves_infFree {e : Expr} {σ : Heap} {e' : Expr} {σ' : Heap}
+    {efs : List Expr} (h : prim_step e σ e' σ' efs) (hσ : Heap.infFree σ) : Heap.infFree σ' := by
+  obtain ⟨_, _, _, _, _, hHead⟩ := h
+  exact hHead.preserves_infFree hσ
+
+/-- Scheduling steps preserve unbounded free space. -/
+theorem step_preserves_infFree {c c' : Cfg} (h : step c c') (hσ : Heap.infFree c.heap) :
+    Heap.infFree c'.heap := by
+  obtain ⟨_, _, _, _, _, _, hstep, _⟩ := h
+  exact prim_step_preserves_infFree hstep hσ
+
+/-- Runs preserve unbounded free space. -/
+theorem steps_preserves_infFree {c c' : Cfg} (h : steps c c') (hσ : Heap.infFree c.heap) :
+    Heap.infFree c'.heap := by
+  induction h with
+  | refl => exact hσ
+  | tail _ hstep ih => exact step_preserves_infFree hstep ih
+
 /-! ## Sanity metatheory -/
 
 /-- `fill []` is the identity (empty context). -/

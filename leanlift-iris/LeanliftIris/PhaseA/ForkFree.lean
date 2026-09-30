@@ -248,4 +248,4 @@ theorem wp_adequacy_steps {F} [UFraction F] {GF} (γ : GName) [HasHeap γ GF F]
   -- htp : [.val v] = [e'] ⇒ e' = .val v
   have : e' = .val v := by simpa using htp.symm
   subst this
-  exact wp_adequacy_seq γ e emptyHeap v σ' φ hps h
+  exact wp_adequacy_seq γ e emptyHeap v σ' φ emptyHeap_infFree hps h

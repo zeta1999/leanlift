@@ -169,9 +169,15 @@ corpus' control flow.
   thread-pool `steps` run — any interleaving, any forks — reaching `.val v :: tp'`
   yields `φ v`. No fork-freedom side condition; `wp_adequacy_seq`/`wp_adequacy_steps`
   are subsumed. Worked: `forkThenFst_result` (every run of `let _ = fork unit in
-  fst (3,4)` returns `3` on the primary thread). *Still omitted:* the progress
-  (`reducible`) conjunct — safety, i.e. verified programs never get stuck — which
-  would require every lifting rule to exhibit a step.
+  fst (3,4)` returns `3` on the primary thread). ✅ *Progress / safety done
+  (2026-09-30).* `wpF`'s step case now carries `⌜reducible e σ⌝` under the pure
+  free-space invariant `Heap.infFree σ` (infinitely many free cells — needed
+  because `Heap` has no finiteness bookkeeping, so `alloc` could otherwise be
+  stuck; every step preserves it and the empty heap satisfies it). Every lifting
+  rule exhibits its step; `wp_reducible` extracts progress; **`wp_adequacy_safe`**:
+  in every configuration reachable from a verified program, every thread is a
+  value or can step. Instantiated on the forking example (`forkThenFst_safe`).
+  Adequacy in this lane is now Iris-standard: result *and* no-stuck-states.
 - **A3 — first functional proofs (SC).** Verify the **#9 order-book** invariant
   (`best = max occupied level`, fall-back correctness) and the **#10 sweep**
   (exact 128-bit notional, `Q==0`/over-ask/drained-level cases, `best_ask ≤ VWAP

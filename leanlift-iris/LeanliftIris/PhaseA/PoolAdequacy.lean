@@ -18,12 +18,16 @@ thread is the same lemma at the trivial postcondition inside `forkObl`. The towe
 forked-thread obligation in `wpF` buys: without it a forked thread could mutate
 the heap with no `wp` to account for it and preservation would fail.
 
-**Partial correctness.** As everywhere in this lane, `wpF` omits the progress
-(`reducible`) conjunct, so these theorems constrain the *result* of runs that
-reach a value; no thread is claimed to be non-stuck. The `wp` hypothesis is stated
-under `|==>`: the authoritative heap is ghost state that can only be allocated
-(`heap_init`), so `True ⊢ stateInterp ∗ …` without the update would be
-unsatisfiable and the theorem vacuous. Sorry-free.
+**Safety.** `wpF` carries the progress (`reducible`) conjunct under the pure
+free-space invariant `Heap.infFree` (Lang.lean), which every run preserves. So
+besides the result theorems (`wp_adequacy_pool*`, partial correctness of the
+primary thread) this file proves **`wp_adequacy_safe`**: in every configuration
+reachable from a verified program, every thread is a value or can step — no thread
+is ever stuck. The `wp` hypotheses are stated under `|==>`: the authoritative heap
+is ghost state that can only be allocated (`heap_init`), so `True ⊢ stateInterp ∗ …`
+without the update would be unsatisfiable and the theorem vacuous. Both headline
+theorems are instantiated on a worked forking program (`forkThenFst_result`,
+`forkThenFst_safe`), so neither is a consumer-less statement. Sorry-free.
 -/
 import LeanliftIris.PhaseA.Adequacy
 
@@ -101,13 +105,14 @@ def tpInterp (γ : GName) [HasHeap γ GF F] (Φ : Val → IProp GF) : List Expr 
 /-- Pool preservation, primary-thread case: the head stepped, its forks go to the
 end of the pool. -/
 theorem tp_step_pres_head (γ : GName) [HasHeap γ GF F] (Φ : Val → IProp GF)
-    {σ σ' : Heap} {e e' : Expr} {t2 efs : List Expr} (hstep : prim_step e σ e' σ' efs) :
+    {σ σ' : Heap} {e e' : Expr} {t2 efs : List Expr} (hinf : Heap.infFree σ)
+    (hstep : prim_step e σ e' σ' efs) :
     stateInterp γ σ ∗ (wp (F := F) γ e Φ ∗ forkObl (wp (F := F) γ) t2) ⊢
       |==> ▷ |==> (stateInterp γ σ' ∗
         (wp (F := F) γ e' Φ ∗ forkObl (wp (F := F) γ) (t2 ++ efs))) := by
   have hnv : toVal e = none := toVal_none_of_prim_step hstep
   iintro ⟨Hsi, Hwp, Hrest⟩
-  ihave H := (wp_step_pres γ e σ e' σ' efs Φ hnv hstep) $$ [Hsi, Hwp]
+  ihave H := (wp_step_pres γ e σ e' σ' efs Φ hnv hinf hstep) $$ [Hsi, Hwp]
   · isplitl [Hsi]
     · iexact Hsi
     · iexact Hwp
@@ -128,7 +133,7 @@ theorem tp_step_pres_head (γ : GName) [HasHeap γ GF F] (Φ : Val → IProp GF)
 /-- Pool preservation, forked-thread case: some non-primary thread stepped; the
 primary thread is untouched. -/
 theorem tp_step_pres_tail (γ : GName) [HasHeap γ GF F] (Φ : Val → IProp GF)
-    {σ σ' : Heap} {e0 e e' : Expr} {t1 t2 efs : List Expr}
+    {σ σ' : Heap} {e0 e e' : Expr} {t1 t2 efs : List Expr} (hinf : Heap.infFree σ)
     (hstep : prim_step e σ e' σ' efs) :
     stateInterp γ σ ∗ (wp (F := F) γ e0 Φ ∗ forkObl (wp (F := F) γ) (t1 ++ e :: t2)) ⊢
       |==> ▷ |==> (stateInterp γ σ' ∗
@@ -137,7 +142,8 @@ theorem tp_step_pres_tail (γ : GName) [HasHeap γ GF F] (Φ : Val → IProp GF)
   iintro ⟨Hsi, Hwp0, Hrest⟩
   ihave ⟨H1, He, H2⟩ := (forkObl_split (wp (F := F) γ) t1 t2 e) $$ [Hrest]
   · iexact Hrest
-  ihave H := (wp_step_pres γ e σ e' σ' efs (fun _ => iprop(True)) hnv hstep) $$ [Hsi, He]
+  ihave H := (wp_step_pres γ e σ e' σ' efs (fun _ => iprop(True)) hnv hinf hstep)
+    $$ [Hsi, He]
   · isplitl [Hsi]
     · iexact Hsi
     · iexact He
@@ -162,14 +168,14 @@ theorem tp_step_pres_tail (γ : GName) [HasHeap γ GF F] (Φ : Val → IProp GF)
 /-- **Pool preservation.** One scheduling step of the thread pool preserves the
 state interpretation and the pool interpretation, modulo `|==> ▷ |==>`. -/
 theorem tp_step_pres (γ : GName) [HasHeap γ GF F] (Φ : Val → IProp GF) {c c' : Cfg}
-    (h : step c c') :
+    (hinf : Heap.infFree c.heap) (h : step c c') :
     stateInterp γ c.heap ∗ tpInterp (F := F) γ Φ c.tp ⊢
       |==> ▷ |==> (stateInterp γ c'.heap ∗ tpInterp (F := F) γ Φ c'.tp) := by
   obtain ⟨t1, t2, e, e', efs, htp, hstep, htp'⟩ := h
   rw [htp, htp']
   cases t1 with
-  | nil => exact tp_step_pres_head γ Φ hstep
-  | cons e0 t1 => exact tp_step_pres_tail γ Φ hstep
+  | nil => exact tp_step_pres_head γ Φ hinf hstep
+  | cons e0 t1 => exact tp_step_pres_tail γ Φ hinf hstep
 
 /-! ## Multi-step preservation over the real `steps` -/
 
@@ -177,6 +183,13 @@ theorem tp_step_pres (γ : GName) [HasHeap γ GF F] (Φ : Val → IProp GF) {c c
 inductive stepsN : Nat → Cfg → Cfg → Prop where
   | refl {c} : stepsN 0 c c
   | tail {n c c' c''} : stepsN n c c' → step c' c'' → stepsN (n + 1) c c''
+
+/-- Length-indexed runs preserve unbounded free space. -/
+theorem stepsN_preserves_infFree {n : Nat} {c c' : Cfg} (h : stepsN n c c')
+    (hinf : Heap.infFree c.heap) : Heap.infFree c'.heap := by
+  induction h with
+  | refl => exact hinf
+  | tail _ hstep ih => exact step_preserves_infFree hstep (ih hinf)
 
 /-- Every `steps` run has some explicit length. -/
 theorem stepsN_of_steps {c c' : Cfg} (h : steps c c') : ∃ n, stepsN n c c' := by
@@ -187,17 +200,17 @@ theorem stepsN_of_steps {c c' : Cfg} (h : steps c c') : ∃ n, stepsN n c c' := 
 /-- **Pool multi-step preservation.** An `n`-step pool run carries
 `stateInterp ∗ tpInterp` to the end configuration under an `n`-tall tower. -/
 theorem tp_stepsN_pres (γ : GName) [HasHeap γ GF F] (Φ : Val → IProp GF)
-    {n : Nat} {c c' : Cfg} (h : stepsN n c c') :
+    {n : Nat} {c c' : Cfg} (h : stepsN n c c') (hinf : Heap.infFree c.heap) :
     stateInterp γ c.heap ∗ tpInterp (F := F) γ Φ c.tp ⊢
       sfupdN n iprop(stateInterp γ c'.heap ∗ tpInterp (F := F) γ Φ c'.tp) := by
   induction h with
   | refl => exact BIUpdate.intro
-  | @tail n c c1 c2 _hsteps hstep ih =>
+  | @tail n c c1 c2 hsteps hstep ih =>
       have hone :
           iprop(stateInterp γ c1.heap ∗ tpInterp (F := F) γ Φ c1.tp) ⊢
             sfupdN 1 iprop(stateInterp γ c2.heap ∗ tpInterp (F := F) γ Φ c2.tp) :=
-        tp_step_pres γ Φ hstep
-      exact ih.trans ((sfupdN_mono n hone).trans (sfupdN_compose n 1 _))
+        tp_step_pres γ Φ (stepsN_preserves_infFree hsteps hinf) hstep
+      exact (ih hinf).trans ((sfupdN_mono n hone).trans (sfupdN_compose n 1 _))
 
 /-! ## Concurrent adequacy — the general theorem -/
 
@@ -220,7 +233,7 @@ freely — to a configuration whose primary thread is the value `v`, then `φ v`
 holds at the meta level. Subsumes `wp_adequacy_seq`/`wp_adequacy_steps`: no
 fork-freedom is assumed. Partial correctness (see the file header). -/
 theorem wp_adequacy_pool (γ : GName) [HasHeap γ GF F] (e : Expr) (σ : Heap)
-    (v : Val) (σ' : Heap) (tp' : List Expr) (φ : Val → Prop)
+    (v : Val) (σ' : Heap) (tp' : List Expr) (φ : Val → Prop) (hinf : Heap.infFree σ)
     (hrun : steps ⟨[e], σ⟩ ⟨.val v :: tp', σ'⟩)
     (h : (iprop(True) : IProp GF) ⊢
       iprop(|==> (stateInterp γ σ ∗ wp (F := F) γ e (fun w => iprop(⌜φ w⌝))))) : φ v := by
@@ -231,14 +244,14 @@ theorem wp_adequacy_pool (γ : GName) [HasHeap γ GF F] (e : Expr) (σ : Heap)
     simp only [tpInterp_cons, forkObl_nil]
     exact sep_mono_r sep_emp.mpr
   exact sfupdN_pure_soundness n
-    (h.trans ((BIUpdate.mono (hinit.trans ((tp_stepsN_pres γ _ hn).trans
+    (h.trans ((BIUpdate.mono (hinit.trans ((tp_stepsN_pres γ _ hn hinf).trans
       (sfupdN_mono n (tpInterp_val_pure γ v σ' tp' φ))))).trans (sfupdN_bupd_absorb n _)))
 
 /-- **Closed concurrent adequacy.** As `wp_adequacy_closed`, but over the real
 thread-pool semantics with forking: from nothing, allocate the ghost heap and a
 `wp` proof; any pool run bringing the primary thread to `v` gives `φ v`. -/
 theorem wp_adequacy_pool_closed {e : Expr} {σ : Heap} {v : Val} {σ' : Heap}
-    {tp' : List Expr} {φ : Val → Prop}
+    {tp' : List Expr} {φ : Val → Prop} (hinf : Heap.infFree σ)
     (hrun : steps ⟨[e], σ⟩ ⟨.val v :: tp', σ'⟩)
     (h : (iprop(True) : IProp GF) ⊢
       iprop(|==> ∃ γ : GName,
@@ -251,9 +264,70 @@ theorem wp_adequacy_pool_closed {e : Expr} {σ : Heap} {v : Val} {σ' : Heap}
         iprop(stateInterp γ σ ∗ tpInterp (F := F) γ (fun w => iprop(⌜φ w⌝)) [e]) := by
     simp only [tpInterp_cons, forkObl_nil]
     exact sep_mono_r sep_emp.mpr
-  iapply (hinit.trans ((tp_stepsN_pres γ _ hn).trans
+  iapply (hinit.trans ((tp_stepsN_pres γ _ hn hinf).trans
     (sfupdN_mono n (tpInterp_val_pure γ v σ' tp' φ))))
   iexact Hpre
+
+/-! ## Safety — no reachable thread is stuck -/
+
+/-- The pool interpretation exposes a `wp` (at some postcondition) for every thread. -/
+theorem tpInterp_thread (γ : GName) [HasHeap γ GF F] (Φ : Val → IProp GF)
+    (t1 t2 : List Expr) (t : Expr) :
+    tpInterp (F := F) γ Φ (t1 ++ t :: t2) ⊢ ∃ Ψ, wp (F := F) γ t Ψ := by
+  cases t1 with
+  | nil =>
+      simp only [List.nil_append, tpInterp_cons]
+      iintro ⟨H, _⟩
+      iexists Φ
+      iexact H
+  | cons e0 t1 =>
+      simp only [List.cons_append, tpInterp_cons]
+      iintro ⟨_, H⟩
+      ihave ⟨_, Ht, _⟩ := (forkObl_split (wp (F := F) γ) t1 t2 t) $$ [H]
+      · iexact H
+      iexists (fun _ => iprop(True))
+      iexact Ht
+
+/-- **Safety.** In every configuration reachable from a verified program (any
+interleaving, any forks), every thread is either a value or can take a step: no
+thread is ever stuck. The `wp` hypothesis is the closed form (`heap_init` +
+`wp`), as in `wp_adequacy_pool_closed`. -/
+theorem wp_adequacy_safe {e : Expr} {σ : Heap} {φ : Val → Prop} (hinf : Heap.infFree σ)
+    {c : Cfg} (hrun : steps ⟨[e], σ⟩ c)
+    (h : (iprop(True) : IProp GF) ⊢
+      iprop(|==> ∃ γ : GName,
+        stateInterp γ σ ∗ wp (F := F) γ e (fun w => iprop(⌜φ w⌝)))) :
+    ∀ t ∈ c.tp, toVal t ≠ none ∨ reducible t c.heap := by
+  intro t ht
+  by_cases hnv : toVal t = none
+  · right
+    obtain ⟨t1, t2, htp⟩ := List.append_of_mem ht
+    obtain ⟨n, hn⟩ := stepsN_of_steps hrun
+    have hinf' : Heap.infFree c.heap := stepsN_preserves_infFree hn hinf
+    refine sfupdN_pure_soundness (n + 0)
+      (h.trans ((BIUpdate.mono ?_).trans (sfupdN_bupd_absorb (n + 0) _)))
+    iintro ⟨%γ, Hpre⟩
+    have hinit :
+        iprop(stateInterp γ σ ∗ wp (F := F) γ e (fun w => iprop(⌜φ w⌝))) ⊢
+          iprop(stateInterp γ σ ∗ tpInterp (F := F) γ (fun w => iprop(⌜φ w⌝)) [e]) := by
+      simp only [tpInterp_cons, forkObl_nil]
+      exact sep_mono_r sep_emp.mpr
+    -- at the end of the run: the thread's wp + the state interp give reducibility
+    have hend :
+        iprop(stateInterp γ c.heap ∗ tpInterp (F := F) γ (fun w => iprop(⌜φ w⌝)) c.tp) ⊢
+          iprop(|==> ⌜reducible t c.heap⌝) := by
+      rw [htp]
+      iintro ⟨Hsi, Htp⟩
+      ihave ⟨%Ψ, Hwp⟩ := (tpInterp_thread γ _ t1 t2 t) $$ [Htp]
+      · iexact Htp
+      iapply (wp_reducible γ t c.heap Ψ hnv hinf')
+      isplitl [Hsi]
+      · iexact Hsi
+      · iexact Hwp
+    iapply (hinit.trans ((tp_stepsN_pres γ _ hn hinf).trans
+      ((sfupdN_mono n hend).trans (sfupdN_compose n 0 _))))
+    iexact Hpre
+  · left; exact hnv
 
 /-! ### Worked example: a program that forks
 
@@ -294,12 +368,29 @@ however the scheduler interleaved it. Obtained from `heap_init` + `forkThenFst_w
 via `wp_adequacy_pool_closed`, with no fork-freedom side condition. The ghost name
 is allocated fresh inside; only the functor setup is assumed. -/
 theorem forkThenFst_result {GF₀ : BundledGFunctors.{0, 0, 0}} [ElemG GF₀ (FHeap (F := F))]
-    (σ : Heap) (v : Val) (σ' : Heap) (tp' : List Expr)
+    (σ : Heap) (hinf : Heap.infFree σ) (v : Val) (σ' : Heap) (tp' : List Expr)
     (hrun : steps ⟨[forkThenFst], σ⟩ ⟨.val v :: tp', σ'⟩) : v = .int 3 := by
   have hte : (iprop(True) : IProp GF₀) ⊢ (emp : IProp GF₀) :=
     biaffine_iff_true_emp.1 inferInstance
-  refine wp_adequacy_pool_closed (F := F) (GF := GF₀) (φ := fun w => w = .int 3) hrun
+  refine wp_adequacy_pool_closed (F := F) (GF := GF₀) (φ := fun w => w = .int 3) hinf hrun
     (hte.trans ((heap_init (F := F) (GF := GF₀) σ).trans (BIUpdate.mono ?_)))
+  iintro ⟨%γ', Hsi⟩
+  iexists γ'
+  isplitl [Hsi]
+  · iexact Hsi
+  · exact forkThenFst_wp γ'
+
+/-- **Closed safety fact through a fork.** From the empty heap, no thread of any
+run of `forkThenFst` — the primary or the spawned one, under any scheduler — is
+ever stuck. Instantiates `wp_adequacy_safe` with the same closed input as
+`forkThenFst_result`. -/
+theorem forkThenFst_safe {GF₀ : BundledGFunctors.{0, 0, 0}} [ElemG GF₀ (FHeap (F := F))]
+    {c : Cfg} (hrun : steps ⟨[forkThenFst], emptyHeap⟩ c) :
+    ∀ t ∈ c.tp, toVal t ≠ none ∨ reducible t c.heap := by
+  have hte : (iprop(True) : IProp GF₀) ⊢ (emp : IProp GF₀) :=
+    biaffine_iff_true_emp.1 inferInstance
+  refine wp_adequacy_safe (F := F) (GF := GF₀) (φ := fun w => w = .int 3) emptyHeap_infFree
+    hrun (hte.trans ((heap_init (F := F) (GF := GF₀) emptyHeap).trans (BIUpdate.mono ?_)))
   iintro ⟨%γ', Hsi⟩
   iexists γ'
   isplitl [Hsi]

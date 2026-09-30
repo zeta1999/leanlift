@@ -58,6 +58,8 @@ open LeanliftIris.PhaseC
 #print axioms LeanliftIris.PhaseA.wp_adequacy_pool     -- A2: concurrent adequacy (forking pool, any interleaving)
 #print axioms LeanliftIris.PhaseA.wp_adequacy_pool_closed -- A2: closed concurrent adequacy
 #print axioms LeanliftIris.PhaseA.forkThenFst_result    -- A2: a forking program's result pinned in every run
+#print axioms LeanliftIris.PhaseA.wp_adequacy_safe     -- A2: safety — no reachable thread is stuck
+#print axioms LeanliftIris.PhaseA.forkThenFst_safe      -- A2: safety instantiated on the forking example
 #print axioms LeanliftIris.PhaseA.wp_seq               -- A2: statement-sequencing rule
 #print axioms LeanliftIris.PhaseA.twoIncr_spec         -- A4: verified ops compose (via wp_seq)
 #print axioms LeanliftIris.PhaseA.pushPop_spec         -- A4: stack round-trip (push then pop = id)
