@@ -325,9 +325,22 @@ go/no-go review. If B stalls, Phase A alone is already a shippable capability.
   `Realizes.seq`. *What it is not, stated in the file:* Herlihy–Wing linearizability
   of *programs* — no invocation/response events or return values, no pending ops, and
   each trace is a fixed list of state-independent effects (a CAS-retry loop is not an
-  `AtomicOp`). **Open (next C1 item): the erasure lemma** from a real thread-pool
-  `steps` run (`Lang`, `PoolAdequacy`) to an `Interleave` of abstract traces — today
-  the two schedulers are unconnected. Beyond that, an Iris-style atomic triple letting
+  `AtomicOp`). ✅ **Erasure done (2026-09-30, `PhaseC/Erasure.lean`):** a real
+  thread-pool run is annotated (`Trace`: per scheduling step, the thread position
+  and the heaps before/after; `Trace.steps`/`steps_trace` relate it to `steps`
+  both ways), and **`real_run_linearizes`** states the connection as a theorem
+  with **two explicit per-program obligations** — (1) commutation: an abstraction
+  of heaps agrees with each recorded step's abstract effect; (2) trace shape: the
+  erased trace is an `Interleave` of a family's abstract traces — under which the
+  abstract final heap is the sequential history's result with one LP per operation.
+  Obligation (2) is exactly where a CAS-retry loop fails (its steps are not a fixed
+  effect list), so the gap is now a hypothesis to discharge, not prose. Consumer,
+  a real program: **`two_incrs_steps`** — for the pool `[FAA(c,1), FAA(c,1)]` from
+  `c ↦ k`, every `steps` run finishing both threads ends with `c ↦ k + 2` (both
+  obligations discharged via an invariant, `incr_inv`: each thread steps exactly
+  once, every step is the fetch-and-add). Still open: programs whose traces are
+  not fixed effect lists (CAS-retry) need a per-program simulation argument to
+  discharge (2). Beyond that, an Iris-style atomic triple letting
   a client open an invariant around another thread's LP needs `fupd` inside `wp`,
   which `PLAN-fupd.md` records as blocked by the `GenMap` mask representation
   (`ownE ⊤` unrepresentable); `atomic_acc` makes such triples expressible only.

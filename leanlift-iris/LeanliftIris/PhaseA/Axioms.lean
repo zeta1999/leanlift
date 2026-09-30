@@ -13,6 +13,7 @@ import LeanliftIris.PhaseA.Adequacy
 import LeanliftIris.PhaseA.PoolAdequacy
 import LeanliftIris.PhaseA.Concrete
 import LeanliftIris.PhaseC.Linearize
+import LeanliftIris.PhaseC.Erasure
 import LeanliftIris.PhaseA.Examples
 import LeanliftIris.PhaseA.Treiber
 import LeanliftIris.PhaseB.WeakMem
@@ -117,5 +118,13 @@ namespace LeanliftIris.PhaseA
 #print axioms LeanliftIris.PhaseC.realtime_order
 #print axioms LeanliftIris.PhaseC.two_pushes_linearize
 #print axioms LeanliftIris.PhaseC.Realizes.seq
+
+-- C1 erasure: real thread-pool runs → abstract interleavings
+#print axioms LeanliftIris.PhaseC.Trace.steps
+#print axioms LeanliftIris.PhaseC.steps_trace
+#print axioms LeanliftIris.PhaseC.trace_runSteps
+#print axioms LeanliftIris.PhaseC.real_run_linearizes
+#print axioms LeanliftIris.PhaseC.two_incrs
+#print axioms LeanliftIris.PhaseC.two_incrs_steps
 
 end LeanliftIris.PhaseA

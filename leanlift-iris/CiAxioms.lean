@@ -33,6 +33,8 @@ open LeanliftIris.PhaseC
 #print axioms Interleave.flatten              -- C1 non-vacuity: every family of traces has an interleaving
 #print axioms two_pushes_linearize            -- C1 instantiated through the general theorem: two concurrent Treiber pushes
 #print axioms Realizes.seq                    -- C1 sequential composition through the real wp
+#print axioms real_run_linearizes             -- C1 erasure: a real pool run linearizes, under two explicit obligations
+#print axioms two_incrs_steps                 -- C1 erasure instantiated: two concurrent FAA increments on the real pool never lose an update
 #print axioms owner_claim_lp                  -- C2 Chase–Lev LP, via SC safety
 #print axioms LAT.atomic_commit               -- C1 logically-atomic commit
 #print axioms take_linearizes                 -- C1 take linearizes
