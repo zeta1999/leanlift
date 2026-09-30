@@ -60,6 +60,9 @@ open LeanliftIris.PhaseC
 #print axioms LeanliftIris.PhaseA.forkThenFst_result    -- A2: a forking program's result pinned in every run
 #print axioms LeanliftIris.PhaseA.wp_adequacy_safe     -- A2: safety — no reachable thread is stuck
 #print axioms LeanliftIris.PhaseA.forkThenFst_safe      -- A2: safety instantiated on the forking example
+#print axioms LeanliftIris.PhaseA.ex_alloc_load_unconditional    -- A2: closed fact with NO ambient hypotheses (PosNat/GF₀)
+#print axioms LeanliftIris.PhaseA.forkThenFst_result_unconditional -- A2: forking result, unconditional
+#print axioms LeanliftIris.PhaseA.forkThenFst_safe_unconditional   -- A2: forking safety, unconditional
 #print axioms LeanliftIris.PhaseA.wp_seq               -- A2: statement-sequencing rule
 #print axioms LeanliftIris.PhaseA.twoIncr_spec         -- A4: verified ops compose (via wp_seq)
 #print axioms LeanliftIris.PhaseA.pushPop_spec         -- A4: stack round-trip (push then pop = id)

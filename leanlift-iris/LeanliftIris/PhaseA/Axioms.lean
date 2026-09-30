@@ -11,6 +11,7 @@ import LeanliftIris.PhaseA.Wp
 import LeanliftIris.PhaseA.WpLifting
 import LeanliftIris.PhaseA.Adequacy
 import LeanliftIris.PhaseA.PoolAdequacy
+import LeanliftIris.PhaseA.Concrete
 import LeanliftIris.PhaseA.Examples
 import LeanliftIris.PhaseA.Treiber
 import LeanliftIris.PhaseB.WeakMem
@@ -100,5 +101,10 @@ namespace LeanliftIris.PhaseA
 #print axioms forkThenFst_safe
 #print axioms wp_if_false
 #print axioms wp_binop
+
+-- Concrete instantiation: unconditional operational facts (no typeclass/iProp hyps)
+#print axioms ex_alloc_load_unconditional
+#print axioms forkThenFst_result_unconditional
+#print axioms forkThenFst_safe_unconditional
 
 end LeanliftIris.PhaseA

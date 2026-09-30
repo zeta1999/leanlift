@@ -178,6 +178,18 @@ corpus' control flow.
   in every configuration reachable from a verified program, every thread is a
   value or can step. Instantiated on the forking example (`forkThenFst_safe`).
   Adequacy in this lane is now Iris-standard: result *and* no-stuck-states.
+  *Scope limit, recorded:* with `Heap.infFree` as a wand antecedent, allocation is
+  infallible — a program that legitimately runs out of memory cannot be modelled
+  in this lane (the `wp` says nothing at a full heap). Moving the invariant into
+  `stateInterp` (or a finite-map heap) is the hygiene alternative; the current
+  threading is correct. ✅ *Concrete instantiation (2026-09-30):*
+  `PhaseA/Concrete.lean` exhibits `PosNat` as a `UFraction` (the trivial,
+  unsplittable fraction type — all the full-ownership heap camera needs) and a
+  functor list `GF₀`, and derives `ex_alloc_load_unconditional`,
+  `forkThenFst_result_unconditional`, `forkThenFst_safe_unconditional`: pure
+  operational facts with no typeclass or iProp hypothesis left. Until then every
+  "closed" fact was conditional on `[UFraction F] [ElemG GF …]`, which nothing was
+  known to satisfy — the vacuity trap one level up.
 - **A3 — first functional proofs (SC).** Verify the **#9 order-book** invariant
   (`best = max occupied level`, fall-back correctness) and the **#10 sweep**
   (exact 128-bit notional, `Q==0`/over-ask/drained-level cases, `best_ask ≤ VWAP
