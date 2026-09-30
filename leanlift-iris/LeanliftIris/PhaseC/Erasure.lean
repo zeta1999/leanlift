@@ -10,9 +10,9 @@ thread pool. This file connects them, honestly: the connection is a theorem with
 
   * `Trace c tr c'` — a real pool run annotated with, per scheduling step, the
     thread *position* that stepped, the expressions and the heaps before/after
-    (`TStep`). Positions are stable across a run: `step` splices the stepped
-    thread back in place and appends forks at the end. `Trace.steps`: a trace is
-    a `steps` run; `steps_trace`: every `steps` run has a trace.
+    (`TStep`). `step_iff_stepAt`: a step is exactly an annotated step;
+    `Trace.steps`: a trace is a `steps` run; `steps_trace`: every `steps` run has
+    a trace.
   * An erasure `er : TStep → Step σ` and an abstraction `abs : Heap → σ`.
     Obligation 1, **commutation** on the recorded steps: what each step did to the
     heap is what its abstract effect does to the abstract state.
@@ -24,15 +24,25 @@ thread pool. This file connects them, honestly: the connection is a theorem with
     operation and every LP its operation's commit — `linearizable_abstract`, now
     about a real run.
 
-Obligation 2 is exactly where a CAS-retry loop fails: its steps are not a fixed
-effect list, so no family of `AtomicOp`s has it as an interleaving. The theorem
-turns that gap into a hypothesis to discharge per program, instead of prose.
+Both obligations are **per run** (`tr` is quantified with them). A program-level
+statement needs a *run-independent* discharge: one family `os` and one shape
+argument covering every run, which is what `incr_inv` provides for the increment
+pool below. That is where a CAS-retry loop differs: for any single run a family
+can be cooked to fit (pad `pre` with identities for the failed attempts), but the
+retry count varies between runs while `LAT.pre`/`post` are fixed-length lists, so
+no run-independent family exists and the theorem yields no program-level result
+for it. The gap is a stated hypothesis, and this paragraph says exactly which
+programs can discharge it uniformly.
 
-  * **`two_incrs`** — the consumer, a real program: two threads each executing
-    `FAA(c, 1)` on the `λ-conc` pool. **Every** real run from a heap with `c ↦ k`
-    that finishes both threads ends with `c ↦ k + 2`: no lost update, under any
-    interleaving. Both obligations are discharged from `prim_step_faa_inv` and the
-    fact that each thread steps exactly once (`incr_inv`).
+  * **`two_incrs`** / **`two_incrs_steps`** — the consumer, a real program: two
+    threads each executing `FAA(c, 1)` on the `λ-conc` pool. **Every** real run
+    from a heap with `c ↦ k` that finishes both threads ends with `c ↦ k + 2`: no
+    lost update, under any interleaving. Both obligations are discharged from
+    `prim_step_faa_inv` and the fact that each thread steps exactly once
+    (`incr_inv`). `two_incrs_run_exists` is the real-side non-vacuity certificate:
+    such a run exists. Partial correctness: runs that do not finish both threads
+    are not constrained, and `Lang` is SC by construction (one shared heap, the
+    fetch-and-add is one head step), so this is model-internal, not weak memory.
 
 Sorry-free.
 -/
@@ -68,6 +78,15 @@ theorem stepAt.step {ts : TStep} {c c' : Cfg} (h : stepAt ts c c') : step c c' :
   obtain ⟨t1, t2, htp, _, hσ, hprim, hσ', htp'⟩ := h
   refine ⟨t1, t2, ts.e, ts.e', ts.efs, htp, ?_, htp'⟩
   rw [hσ, hσ']; exact hprim
+
+/-- **Faithfulness, in one statement.** A scheduling step is exactly an annotated
+step. -/
+theorem step_iff_stepAt {c c' : Cfg} : step c c' ↔ ∃ ts, stepAt ts c c' := by
+  constructor
+  · rintro ⟨t1, t2, e, e', efs, htp, hprim, htp'⟩
+    exact ⟨⟨t1.length, e, c.heap, e', c'.heap, efs⟩, t1, t2, htp, rfl, rfl, hprim, rfl, htp'⟩
+  · rintro ⟨ts, h⟩
+    exact h.step
 
 /-- An annotated run is a real run. -/
 theorem Trace.steps {c : Cfg} {tr : List TStep} {c' : Cfg} (h : Trace c tr c') : steps c c' := by
@@ -137,14 +156,15 @@ theorem counter_of_some {c : Nat} {σ : Heap} {m : Int} (h : σ c = some (.int m
 theorem counter_set {c : Nat} (σ : Heap) (m : Int) : counter c (σ.set c (.int m)) = m := by
   simp [counter, Heap.set]
 
-/-- The increment as an abstract operation: one LP, effect `+1`. -/
-def incrOp : AtomicOp Int where
-  P := fun _ => True
-  Q := fun _ => True
+/-- The increment as an abstract operation: one LP, effect `+1`, taking the
+counter from `k` to `k + 1` (so `history_legal` says something for it). -/
+def incrOp (k : Int) : AtomicOp Int where
+  P := fun s => s = k
+  Q := fun s => s = k + 1
   t := { pre := [], commit := (· + 1), post := []
          pre_frame := fun _ hf => absurd hf List.not_mem_nil
          post_frame := fun _ hf => absurd hf List.not_mem_nil
-         commits := fun _ _ => trivial }
+         commits := fun _ hs => by rw [hs] }
 
 /-- The erasure for increments: every recorded step is its thread's LP, `+1`. -/
 def incrEr (ts : TStep) : Step Int := ⟨ts.k, (· + 1), true⟩
@@ -316,7 +336,7 @@ theorem two_incrs {c : Nat} {σ0 : Heap} {m0 : Int} (h0 : σ0 c = some (.int m0)
   obtain ⟨x, y, htr, hcase⟩ := incr_trace_shape hinv
   have hcomm : ∀ ts ∈ tr, counter c ts.σ' = (incrEr ts).eff (counter c ts.σ) :=
     fun ts hts => incr_commutes (hinv.2.1 ts hts)
-  have hshape : Interleave (stepsFrom 0 [incrOp, incrOp]) (tr.map incrEr) := by
+  have hshape : Interleave (stepsFrom 0 [incrOp m0, incrOp (m0 + 1)]) (tr.map incrEr) := by
     rw [htr]
     rcases hcase with ⟨hx, hy⟩ | ⟨hx, hy⟩
     · show Interleave [[(⟨0, (· + 1), true⟩ : Step Int)], [(⟨1, (· + 1), true⟩ : Step Int)]]
@@ -327,7 +347,8 @@ theorem two_incrs {c : Nat} {σ0 : Heap} {m0 : Int} (h0 : σ0 c = some (.int m0)
         [(⟨x.k, (· + 1), true⟩ : Step Int), (⟨y.k, (· + 1), true⟩ : Step Int)]
       rw [hx, hy]
       exact Interleave.step (k := 1) rfl (Interleave.step (k := 0) rfl (Interleave.done (by simp)))
-  obtain ⟨heq, _, _⟩ := real_run_linearizes incrEr (counter c) [incrOp, incrOp] h hcomm hshape
+  obtain ⟨heq, _, _⟩ :=
+    real_run_linearizes incrEr (counter c) [incrOp m0, incrOp (m0 + 1)] h hcomm hshape
   obtain ⟨m, hm⟩ := hinv.2.2.1
   have hm' : σ' c = some (.int m) := hm
   have hval : counter c σ' = m0 + 2 := by
@@ -336,6 +357,22 @@ theorem two_incrs {c : Nat} {σ0 : Heap} {m0 : Int} (h0 : σ0 c = some (.int m0)
     rcases hcase with ⟨hx, hy⟩ | ⟨hx, hy⟩ <;> simp [lps, runSteps, incrEr] <;> omega
   have hmv : m = m0 + 2 := by rw [← counter_of_some hm', hval]
   rw [hm', hmv]
+
+/-- **Real-side non-vacuity certificate.** The premise of `two_incrs_steps` is
+inhabited: schedule thread 0 then thread 1. -/
+theorem two_incrs_run_exists {c : Nat} {σ0 : Heap} {m0 : Int} (h0 : σ0 c = some (.int m0)) :
+    steps ⟨[incr c, incr c], σ0⟩
+      ⟨[.val (.int m0), .val (.int (m0 + 1))],
+       (σ0.set c (.int (m0 + 1))).set c (.int (m0 + 1 + 1))⟩ := by
+  have h1 : (σ0.set c (.int (m0 + 1))) c = some (.int (m0 + 1)) := by simp [Heap.set]
+  have s1 : step ⟨[incr c, incr c], σ0⟩ ⟨[.val (.int m0), incr c], σ0.set c (.int (m0 + 1))⟩ :=
+    ⟨[], [incr c], incr c, .val (.int m0), [], rfl, prim_step.head (Head.faa h0), rfl⟩
+  have s2 : step ⟨[.val (.int m0), incr c], σ0.set c (.int (m0 + 1))⟩
+      ⟨[.val (.int m0), .val (.int (m0 + 1))],
+       (σ0.set c (.int (m0 + 1))).set c (.int (m0 + 1 + 1))⟩ :=
+    ⟨[.val (.int m0)], [], incr c, .val (.int (m0 + 1)), [], rfl,
+      prim_step.head (Head.faa (l := c) (m := m0 + 1) (n := 1) h1), rfl⟩
+  exact (steps.refl.tail s1).tail s2
 
 /-- The same over the unannotated semantics: every real `steps` run of the pool. -/
 theorem two_incrs_steps {c : Nat} {σ0 : Heap} {m0 : Int} (h0 : σ0 c = some (.int m0))

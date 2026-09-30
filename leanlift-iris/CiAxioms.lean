@@ -35,6 +35,7 @@ open LeanliftIris.PhaseC
 #print axioms Realizes.seq                    -- C1 sequential composition through the real wp
 #print axioms real_run_linearizes             -- C1 erasure: a real pool run linearizes, under two explicit obligations
 #print axioms two_incrs_steps                 -- C1 erasure instantiated: two concurrent FAA increments on the real pool never lose an update
+#print axioms two_incrs_run_exists            -- C1 erasure: real-side non-vacuity (such a run exists)
 #print axioms owner_claim_lp                  -- C2 Chase–Lev LP, via SC safety
 #print axioms LAT.atomic_commit               -- C1 logically-atomic commit
 #print axioms take_linearizes                 -- C1 take linearizes

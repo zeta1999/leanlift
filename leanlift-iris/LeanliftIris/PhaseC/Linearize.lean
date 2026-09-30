@@ -34,9 +34,9 @@ invocation/response events, no return values, no pending operations, and each
 thread's trace is a fixed list of state-independent effects — a CAS-retry loop
 whose continuation depends on another thread is not expressible as an
 `AtomicOp`. The repository's real concurrent semantics (`Lang.step`/`steps`,
-`PoolAdequacy`) is a different relation, and **no erasure lemma connects a real
-`steps` run to an `Interleave` of abstract traces**; that erasure is the next
-item, recorded in `../docs/PLAN-concurrency.md` (C1). The further step — an
+`PoolAdequacy`) is a different relation; `Erasure.lean` connects the two
+(`real_run_linearizes`) under two explicit per-run obligations, and discharges
+them uniformly for a real two-thread increment program. The further step — an
 Iris-style atomic triple `<<< α >>> e <<< β >>>` letting a client open an
 invariant around another thread's LP — needs `fupd` inside `wp`, which
 `../docs/PLAN-fupd.md` records as blocked by the `GenMap` mask representation

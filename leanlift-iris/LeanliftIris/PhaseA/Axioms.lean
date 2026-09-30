@@ -126,5 +126,7 @@ namespace LeanliftIris.PhaseA
 #print axioms LeanliftIris.PhaseC.real_run_linearizes
 #print axioms LeanliftIris.PhaseC.two_incrs
 #print axioms LeanliftIris.PhaseC.two_incrs_steps
+#print axioms LeanliftIris.PhaseC.step_iff_stepAt
+#print axioms LeanliftIris.PhaseC.two_incrs_run_exists
 
 end LeanliftIris.PhaseA
