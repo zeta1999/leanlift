@@ -16,9 +16,9 @@ whole `1` cannot be split, so fractional ownership is impossible. That is exactl
 here — the heap camera only ever uses full ownership (`own one`) — and it is genuinely
 a `UFraction`. `GF₀` is the functor list holding the heap functor at slot 0, and the
 `ElemG` instance is definitional. The three `*_unconditional` theorems below are pure
-operational facts about `λ-conc` programs with **no** remaining typeclass or iProp
-hypothesis; they are the consumers that keep this instance from drifting into an
-unused declaration. Sorry-free.
+operational facts about `λ-conc` programs whose only hypothesis is the run itself —
+no typeclass, no iProp, no side condition; they are the consumers that keep this
+instance from drifting into an unused declaration. Sorry-free.
 -/
 import LeanliftIris.PhaseA.PoolAdequacy
 import LeanliftIris.PhaseA.Examples
@@ -76,12 +76,20 @@ theorem ex_alloc_load_unconditional (v r : Val) (σ' : Heap)
   ex_alloc_load_adequate (F := PosNat) (GF := GF₀) 0 v r σ' hrun
     (ex_alloc_load_closed_input (F := PosNat) (GF := GF₀) 0 v)
 
-/-- **Unconditional.** Every thread-pool run of `let _ = fork unit in fst (3, 4)` from a
-heap with unbounded free space whose primary thread terminates returns `3`. -/
-theorem forkThenFst_result_unconditional (σ : Heap) (hinf : Heap.infFree σ) (v : Val)
+/-- Every thread-pool run of `let _ = fork unit in fst (3, 4)` from a heap with
+unbounded free space (`Heap.infFree σ`, the invariant the progress conjunct needs)
+whose primary thread terminates returns `3`. Typeclass-free, but it carries the
+free-space hypothesis; the `_unconditional` form below fixes the empty heap. -/
+theorem forkThenFst_result_infFree (σ : Heap) (hinf : Heap.infFree σ) (v : Val)
     (σ' : Heap) (tp' : List Expr) (hrun : steps ⟨[forkThenFst], σ⟩ ⟨.val v :: tp', σ'⟩) :
     v = .int 3 :=
   forkThenFst_result (F := PosNat) (GF₀ := GF₀) σ hinf v σ' tp' hrun
+
+/-- **Unconditional.** Every thread-pool run of `forkThenFst` from the empty heap whose
+primary thread terminates returns `3`. The run is the only hypothesis. -/
+theorem forkThenFst_result_unconditional (v : Val) (σ' : Heap) (tp' : List Expr)
+    (hrun : steps ⟨[forkThenFst], emptyHeap⟩ ⟨.val v :: tp', σ'⟩) : v = .int 3 :=
+  forkThenFst_result_infFree emptyHeap emptyHeap_infFree v σ' tp' hrun
 
 /-- **Unconditional.** No thread of any run of `forkThenFst` from the empty heap is
 ever stuck. -/

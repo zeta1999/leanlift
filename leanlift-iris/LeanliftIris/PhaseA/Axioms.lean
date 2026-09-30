@@ -104,6 +104,7 @@ namespace LeanliftIris.PhaseA
 
 -- Concrete instantiation: unconditional operational facts (no typeclass/iProp hyps)
 #print axioms ex_alloc_load_unconditional
+#print axioms forkThenFst_result_infFree
 #print axioms forkThenFst_result_unconditional
 #print axioms forkThenFst_safe_unconditional
 
