@@ -244,9 +244,11 @@ The combined claim leanlift can honestly make for a structure is therefore:
 *leanlift's SC-model result for the generated code* **and** *a hand proof from the
 `[IRIS]` lane for that specific structure's memory-order behaviour* — and the
 second half exists only for the structures named above. Absent that hand proof,
-"verified by leanlift" means "verified under sequential consistency". See
-[`docs/PLAN-concurrency.md`](docs/PLAN-concurrency.md) (Phase D) for the trust
-boundary in full.
+"verified by leanlift" means "verified under sequential consistency". The
+per-structure table — which theorem, which memory model, which half — is
+[`docs/CERTIFICATE-concurrency.md`](docs/CERTIFICATE-concurrency.md); today no
+structure has both halves. See [`docs/PLAN-concurrency.md`](docs/PLAN-concurrency.md)
+(Phase D) for the plan.
 
 ## Project structure
 
