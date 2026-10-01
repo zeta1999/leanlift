@@ -28,6 +28,8 @@ pub const NAMES: &[&str] = &[
     // Deterministic, no LLM; self-skips when cpp2rust is not built.
     "c2r-avg", "c2r-isqrt", "c2r-dot2",
     "link-buffer", "rta-kernel",
+    // PLAN-concurrency E1: the SC-only order-book / sweep cores in safe Rust.
+    "orderbook-bid", "orderbook-ask", "sweep-fill",
     // float path (Phase 1 smoke + the optimization ladder)
     "fadd", "cpp-fadd",
     "opt-gss", "cpp-opt-gss",
@@ -293,6 +295,51 @@ pub fn lookup(name: &str) -> Option<Example> {
         // it sorry-free against the concrete u32 instances of `Petri.lean`'s
         // `fire_le` / `le_preserved`. Prove-only: the verify/oracle fields are
         // unused by `lift prove`. `lift prove models-fire`.
+        // PLAN-concurrency E1: the order-book bitmap scans and the sweep's fill
+        // step, in safe Rust, extracted by Charon+Aeneas and proved (L3).
+        // Prove-only: the verify/oracle fields are unused by `lift prove`.
+        "orderbook-bid" => Some(Example {
+            name: "orderbook-bid",
+            lang: Lang::Cpp,
+            source: "examples/rust-kernels/src/lib.rs".into(),
+            fn_name: "best_bid",
+            signature: u(IntType::U64, 1),
+            profile: Profile::Avg, // unused by prove
+            gen: vectors::avg_vectors, // unused by prove
+            frontend: Frontend::RustAeneas {
+                crate_dir: "examples/rust-kernels".into(),
+                entrypoint: "best_bid".into(),
+            },
+            proof_frag: Some("examples/orderbook/BestBidProofs.lean".into()),
+        }),
+        "orderbook-ask" => Some(Example {
+            name: "orderbook-ask",
+            lang: Lang::Cpp,
+            source: "examples/rust-kernels/src/lib.rs".into(),
+            fn_name: "best_ask",
+            signature: u(IntType::U64, 1),
+            profile: Profile::Avg, // unused by prove
+            gen: vectors::avg_vectors, // unused by prove
+            frontend: Frontend::RustAeneas {
+                crate_dir: "examples/rust-kernels".into(),
+                entrypoint: "best_ask".into(),
+            },
+            proof_frag: Some("examples/orderbook/BestAskProofs.lean".into()),
+        }),
+        "sweep-fill" => Some(Example {
+            name: "sweep-fill",
+            lang: Lang::Cpp,
+            source: "examples/rust-kernels/src/lib.rs".into(),
+            fn_name: "fill_take",
+            signature: u(IntType::U32, 3),
+            profile: Profile::Avg, // unused by prove
+            gen: vectors::avg_vectors, // unused by prove
+            frontend: Frontend::RustAeneas {
+                crate_dir: "examples/rust-kernels".into(),
+                entrypoint: "fill_take".into(),
+            },
+            proof_frag: Some("examples/orderbook/FillTakeProofs.lean".into()),
+        }),
         "models-fire" => Some(Example {
             name: "models-fire",
             lang: Lang::Cpp,

@@ -105,3 +105,46 @@ pub fn bisect_sqrt(n: u32, eps: u32) -> u32 {
     }
     lo
 }
+
+/// Order book (#9), best bid over a 64-tick occupancy bitmap: the index of the
+/// highest set bit, or 64 when no tick is occupied. The bit-scan refinement of
+/// the abstract `maxOcc` (`leanlift-iris/LeanliftIris/PhaseA/OrderBook.lean`),
+/// written as a plain loop so Charon+Aeneas extract it; proved in
+/// `examples/orderbook/OrderBookProofs.lean`.
+pub fn best_bid(occ: u64) -> u32 {
+    let mut i: u32 = 64;
+    let mut found: u32 = 64;
+    while i > 0 && found == 64 {
+        i -= 1;
+        if (occ >> i) & 1 == 1 {
+            found = i;
+        }
+    }
+    found
+}
+
+/// Order book (#9), best ask: the index of the lowest set bit, or 64 when no
+/// tick is occupied. The bit-scan refinement of the abstract `minOcc`.
+pub fn best_ask(occ: u64) -> u32 {
+    let mut i: u32 = 0;
+    let mut found: u32 = 64;
+    while i < 64 && found == 64 {
+        if (occ >> i) & 1 == 1 {
+            found = i;
+        }
+        i += 1;
+    }
+    found
+}
+
+/// Sweep (#10), one level's fill: take `min(qty, q - filled)` from a level
+/// when `filled` of the requested `q` is already filled. The body of the sweep
+/// loop (`fillStep` in `PhaseA/Sweep.lean`). PRECONDITION: `filled <= q`.
+pub fn fill_take(filled: u32, qty: u32, q: u32) -> u32 {
+    let rem = q - filled;
+    if qty < rem {
+        qty
+    } else {
+        rem
+    }
+}
