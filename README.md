@@ -201,6 +201,53 @@ The **M-ladder** mirrors the code ladder: M1 checked (native BFS), M2
 model-checked (PRISM/CTMC), M3 proved (Lean). Each example ships a `*.recipe.md`;
 all are exercised by `tests/run.sh`.
 
+## What leanlift does not verify: memory-order correctness
+
+This is a limit, not a credit. **Nothing produced by `lift prove`, `lift model`,
+the four translation lanes, or the behavioural-model families proves anything
+about memory ordering.** Every theorem those paths generate is stated over a
+sequentially consistent model: one shared state, every read sees the last write
+in a single global order. A lock-free structure that is correct in that model can
+still be wrong on real hardware under release/acquire or relaxed atomics, and
+leanlift's automated output will not detect it. If a generated proof mentions a
+queue, a ring, a seqlock or a CAS loop, that proof says the *algorithm* is right
+under sequential consistency, nothing more.
+
+The only memory-order results in this repository are **hand-written** proofs in
+the separate `[IRIS]` lane, [`leanlift-iris/`](leanlift-iris/), and they cover
+**only the structures someone has proved by hand**, not anything leanlift
+translates or generates. Which theorems are on which side of the line:
+
+- **Automated, sequentially consistent only:** everything the `lift` subcommands
+  produce, the Lean theory under `lean/LeanLift/` including
+  `lean/LeanLift/Models/*.lean` (M3), the `leanproofs/` package, and every
+  `.lean` file the translation lanes emit.
+- **Hand-proved, weak-memory aware:** the Phase B theorems listed in
+  [`leanlift-iris/CiAxioms.lean`](leanlift-iris/CiAxioms.lean) — message
+  passing under release/acquire (`message_passing`), the SPSC ring handoff
+  (`spsc_consumer_reads_payload`), seqlock torn-read freedom
+  (`seqlock_consistent_read`), SPMC freshest-wins and its necessity
+  (`spmc_reads_latest`, `spmc_relaxed_lap_in_flight`), that `seq_cst` forbids
+  store buffering and the Chase–Lev double claim (`sb_sc_no_both_zero`,
+  `chase_lev_sc_no_double_claim`), and hazard-pointer use-after-free safety
+  (`hp_sc_no_use_after_free`). These are kernel-checked and sorry-free (CI runs
+  `#print axioms` on each), but they are about a view-based weak-memory model
+  built in that lane, not about C++ or Rust source leanlift has seen.
+- **Hand-proved, sequentially consistent by construction:** the rest of the
+  `[IRIS]` lane — the `λ-conc` program logic, its adequacy and safety theorems,
+  linearizability at the abstract state, the erasure to real thread-pool runs,
+  and the CAS-race prophecy result. These are concurrency results, and they say
+  so in their files, but their language has one shared heap with atomic
+  read-modify-writes, so they carry no memory-order content either.
+
+The combined claim leanlift can honestly make for a structure is therefore:
+*leanlift's SC-model result for the generated code* **and** *a hand proof from the
+`[IRIS]` lane for that specific structure's memory-order behaviour* — and the
+second half exists only for the structures named above. Absent that hand proof,
+"verified by leanlift" means "verified under sequential consistency". See
+[`docs/PLAN-concurrency.md`](docs/PLAN-concurrency.md) (Phase D) for the trust
+boundary in full.
+
 ## Project structure
 
 ```
