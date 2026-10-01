@@ -1,36 +1,49 @@
 /-
-Phase C (step 8) — **a future-dependent linearization point on the real pool**:
-prophecy resolution attached to a `λ-conc` execution.
+Phase C (step 8) — **a run-indexed abstract family on the real pool**: the
+abstract specification a thread linearizes against is selected by the schedule.
 
 `Prophecy.lean`/`ProphMachine.lean` establish the prophecy mechanism abstractly
-and on a small resolution machine. The plan's remaining C2 item is to attach a
-prophecy-resolved LP to the real execution. With `Erasure.lean` in place this is
-now a theorem about `Lang.steps`, for the simplest program whose LP is genuinely
-future-dependent: two threads racing `CAS(f, 0, 1)` on a flag.
+and on a small resolution machine. This file takes the simplest real program in
+which *which operation a thread performs* is decided by the schedule — two threads
+racing `CAS(f, 0, 1)` on a flag — and proves, on `Lang.steps`:
 
-  * Which thread's CAS succeeds is decided by the schedule — nothing in either
-    thread's own code determines it. That is the prophecy: `pv = true` iff thread
-    0 wins. Its **resolution** is the real run itself: the first recorded step.
-  * The abstract family is **indexed by the prophecy**: the winner is `setOp`
-    (`0 ↦ 1`, LP at its CAS), the loser is `noopOp` (observes `1`, LP at its
-    failed CAS, no abstract effect). `casFamily pv` picks which thread is which.
-  * **`two_cas_linearizes`**: every real run finishing both threads has a
-    prophecy value `pv`, resolved by its first step, such that the erased trace is
-    an `Interleave` of `stepsFrom 0 (casFamily pv)` — so `real_run_linearizes`
-    applies: the flag ends `1`, one LP per thread, each LP its op's commit.
+  * Each thread's linearization point is its own CAS, and it is
+    **present-determined**: the step's own result says whether it won. So this
+    program needs no prophecy *variable* — Iris proves a CAS race without one —
+    and nothing here is future-dependent. What depends on the run is the
+    **family**: the winner implements `setOp` (`0 ↦ 1`), the loser `noopOp`
+    (observes `1`, no abstract effect), and which thread is which is a function
+    of the first recorded step. `casFamily pv` is that function's output;
+    `no_run_independent_family` proves no single family covers both schedules,
+    so the index is not decorative.
+  * The resolution discipline of `Prophecy.lean` is instantiated, not imitated:
+    `pv` is obtained from `proph_sound` with a resolver that reads only the
+    physical trace (its first step), and `two_cas_linearizes` states `pv` equals
+    both that resolution and the observable outcome (`pv ↔ v1 = true`).
   * **`two_cas_steps`** — the operational payoff, with no abstract vocabulary:
     every `steps` run from `f ↦ 0` that finishes both threads ends with `f ↦ 1`
-    and **exactly one** thread returning `true` — the one that stepped first.
-    `two_cas_run_exists_0` / `_1` certify both outcomes occur.
+    and **exactly one** thread returning `true`. `first_to_step_wins` adds the
+    order over annotated runs: the winner is the first recorded step.
+    `two_cas_run_exists_0` / `_1` certify both outcomes occur, and
+    `two_cas_prophecy_0` / `_1` exhibit the erased trace inside the family for
+    each value of the index.
 
-What this is: the prophecy phenomenon on the real semantics — the family of
-abstract operations a run linearizes against depends on that run, and the
-dependency is resolved by the schedule, exactly as `Prophecy.lean` models it in
-the small. What it is not: a prophecy *variable* inside `λ-conc` with `NewProph`/
-`Resolve` as program steps (that is `ProphMachine.lean`'s machine), nor a `wp`
-rule for prophecies; those remain open. Sorry-free.
+Degeneracy, disclosed: `setOp.commit` is the constant `fun _ => 1`, so the
+abstract state equation `counter f σ'' = 1` would also hold if both threads had
+won; exclusivity lives in the permutation conjunct (one LP tagged `0`, one tagged
+`1`) and in `two_cas`, not in the abstract fold. `noopOp` is `LAT.refl` with its
+single step flagged as the LP: the `LAT.steps` encoding has no LP-free operation,
+and a failed CAS is conventionally linearized at the CAS that observed the flag.
+For both operations `history_legal` is tautological (`setOp.commits` ignores its
+precondition; `noopOp` preserves `s = 1` by `id`).
+
+What remains for C2 is unchanged by this file: a prophecy *variable* inside
+`λ-conc` (`NewProph`/`Resolve` as program steps, `ProphMachine.lean`'s machine)
+and a `wp` rule for it, which is what a client proof of a genuinely
+future-dependent LP (Chase–Lev `take`, `Prophecy.lean`) would use. Sorry-free.
 -/
 import LeanliftIris.PhaseC.Erasure
+import LeanliftIris.PhaseC.Prophecy
 
 namespace LeanliftIris.PhaseC
 open LeanliftIris.PhaseA
@@ -307,6 +320,15 @@ theorem two_cas {f : Nat} {σ0 : Heap} (h0 : σ0 f = some (.int 0))
     simp at hx hy
     exact Or.inr ⟨hy, hx⟩
 
+/-- **The first to step wins.** Over annotated runs, the trace is exactly two
+steps: the first won, the second lost. -/
+theorem first_to_step_wins {f : Nat} {σ0 : Heap} (h0 : σ0 f = some (.int 0))
+    {tr : List TStep} {v1 v2 : Val} {σ' : Heap}
+    (h : Trace ⟨[casF f, casF f], σ0⟩ tr ⟨[.val v1, .val v2], σ'⟩) :
+    ∃ x y, tr = [x, y] ∧ WinStep f x ∧ LoseStep f y := by
+  obtain ⟨x, y, htr, _, hw, hl, _⟩ := cas_trace_shape (cas_inv h0 h)
+  exact ⟨x, y, htr, hw, hl⟩
+
 /-- The same over the unannotated semantics. -/
 theorem two_cas_steps {f : Nat} {σ0 : Heap} (h0 : σ0 f = some (.int 0)) {v1 v2 : Val} {σ' : Heap}
     (h : steps ⟨[casF f, casF f], σ0⟩ ⟨[.val v1, .val v2], σ'⟩) :
@@ -353,7 +375,10 @@ def setOp : AtomicOp Int where
          post_frame := fun _ hf => absurd hf List.not_mem_nil
          commits := fun _ _ => rfl }
 
-/-- The loser: observes `1`, LP at its failed CAS, no abstract effect. -/
+/-- The loser: observes `1`, no abstract effect. This is `LAT.refl` (an
+operation with no effect); its single step is flagged as the LP because the
+`LAT.steps` encoding has no LP-free operation, and a failed CAS is
+conventionally linearized at the CAS that observed the flag. -/
 def noopOp : AtomicOp Int where
   P := fun s => s = 1
   Q := fun s => s = 1
@@ -383,20 +408,50 @@ theorem cas_commutes {f : Nat} {ts : TStep} (h : WinStep f ts ∨ LoseStep f ts)
   · rw [casEr_win hw, hw.2.2.2.2, counter_set]
   · rw [casEr_lose hl, hl.2.2.2.2]; rfl
 
-/-- **The race linearizes against a prophecy-indexed family.** Every finished run
-has a prophecy value `pv` — resolved by the run: `pv = true` iff the first step is
-thread 0's — such that the erased trace is an interleaving of `casFamily pv`'s
-traces; hence (`real_run_linearizes`) the abstract flag ends at the sequential
-history's result `1`, with one LP per thread, each its op's commit. -/
+/-- The resolver: a function of the physical trace alone — its first recorded
+step is thread 0's. This is the `resolve` of `Prophecy.lean`'s `proph_sound`. -/
+def resolveFirst (tr : List TStep) : Bool := decide (tr.head?.map (·.k) = some 0)
+
+/-- **The index is not decorative.** No single family of abstract operations has
+both schedules' erased traces as interleavings: the two traces are not
+permutations of each other (`(fun _ => 1) ≠ id`), while `Interleave.perm_flatten`
+would make both permutations of the same flattening. The analogue of
+`lp_not_present_determined`, for the family rather than the effect. -/
+theorem no_run_independent_family :
+    ¬ ∃ os : List (AtomicOp Int),
+      Interleave (stepsFrom 0 os) [⟨0, fun _ => 1, true⟩, ⟨1, id, true⟩] ∧
+      Interleave (stepsFrom 0 os) [⟨1, fun _ => 1, true⟩, ⟨0, id, true⟩] := by
+  rintro ⟨os, h1, h2⟩
+  have hp := h1.perm_flatten.trans h2.perm_flatten.symm
+  have hmem : (⟨0, fun _ => 1, true⟩ : Step Int) ∈ [(⟨1, fun _ => 1, true⟩ : Step Int), ⟨0, id, true⟩] :=
+    hp.mem_iff.mp (by simp)
+  simp only [List.mem_cons, List.not_mem_nil, or_false, Step.mk.injEq] at hmem
+  rcases hmem with ⟨h, _, _⟩ | ⟨_, h, _⟩
+  · exact absurd h (by decide)
+  · have := congrFun h 0
+    simp at this
+
+/-- **The race linearizes against a run-indexed family.** Every finished run
+has an index `pv`, obtained by `proph_sound` from the physical resolver
+`resolveFirst` (so `pv = true` iff the first recorded step is thread 0's) and equal
+to the observable outcome (`pv ↔ v1 = true`), such that the erased trace is an
+interleaving of `casFamily pv`'s traces; hence (`real_run_linearizes`) the abstract
+flag ends at the sequential history's `1`, with one LP per thread (the permutation
+conjunct) and each LP its op's commit. See the header for what `counter = 1` does
+and does not carry. -/
 theorem two_cas_linearizes {f : Nat} {σ0 : Heap} (h0 : σ0 f = some (.int 0))
     {tr : List TStep} {v1 v2 : Val} {σ'' : Heap}
     (h : Trace ⟨[casF f, casF f], σ0⟩ tr ⟨[.val v1, .val v2], σ''⟩) :
-    ∃ pv : Bool, (∃ x rest, tr = x :: rest ∧ (pv = true ↔ x.k = 0)) ∧
+    ∃ pv : Bool, pv = resolveFirst tr ∧ (∃ x rest, tr = x :: rest ∧ (pv = true ↔ x.k = 0)) ∧
       (pv = true ↔ v1 = .bool true) ∧
       Interleave (stepsFrom 0 (casFamily pv)) (tr.map casEr) ∧
       counter f σ'' = runSteps (lps (tr.map casEr)) (counter f σ0) ∧
       ((lps (tr.map casEr)).map (·.op)).Perm (List.range' 0 2) ∧
+      (∀ x ∈ lps (tr.map casEr), ∃ k, ∃ hk : k < (casFamily pv).length,
+        x.op = k ∧ x.eff = (casFamily pv)[k].t.commit) ∧
       counter f σ'' = 1 := by
+  -- the prophecy value, by the resolution discipline: a function of the physical trace alone
+  obtain ⟨pv0, hpv0, _⟩ := proph_sound resolveFirst tr
   have hinv := cas_inv h0 h
   obtain ⟨x, y, htr, hcase, hw, hl, hf⟩ := cas_trace_shape hinv
   obtain ⟨_, _, hpos, _⟩ := hinv
@@ -415,7 +470,8 @@ theorem two_cas_linearizes {f : Nat} {σ0 : Heap} (h0 : σ0 f = some (.int 0))
     rw [htr]; simp only [List.map_cons, List.map_nil, casEr_win hw, casEr_lose hl]
   rcases hcase with ⟨hk0, hk1⟩ | ⟨hk0, hk1⟩
   · have hv1 : v1 = .bool true := by rw [hk0] at hx; simpa using hx
-    refine ⟨true, ⟨x, [y], htr, by simp [hk0]⟩, by simp [hv1], ?_⟩
+    have hres : resolveFirst tr = true := by simp [resolveFirst, htr, hk0]
+    refine ⟨true, hres.symm, ⟨x, [y], htr, by simp [hk0]⟩, by simp [hv1], ?_⟩
     have hshape : Interleave (stepsFrom 0 (casFamily true)) (tr.map casEr) := by
       rw [hmap, hk0, hk1]
       show Interleave [[(⟨0, fun _ => 1, true⟩ : Step Int)], [(⟨1, id, true⟩ : Step Int)]] _
@@ -424,12 +480,13 @@ theorem two_cas_linearizes {f : Nat} {σ0 : Heap} (h0 : σ0 f = some (.int 0))
         simp only [List.set_cons_zero, List.set_cons_succ, List.mem_cons, List.not_mem_nil,
           or_false] at hl
         rcases hl with rfl | rfl <;> rfl)))
-    obtain ⟨heq, hperm, _⟩ :=
+    obtain ⟨heq, hperm, hcommit⟩ :=
       real_run_linearizes casEr (counter f) (casFamily true) h hcomm hshape
-    refine ⟨hshape, heq, hperm, ?_⟩
+    refine ⟨hshape, heq, hperm, hcommit, ?_⟩
     rw [counter_of_some hf]
   · have hv1 : v1 = .bool false := by rw [hk1] at hy; simpa using hy
-    refine ⟨false, ⟨x, [y], htr, by simp [hk0]⟩, by simp [hv1], ?_⟩
+    have hres : resolveFirst tr = false := by simp [resolveFirst, htr, hk0]
+    refine ⟨false, hres.symm, ⟨x, [y], htr, by simp [hk0]⟩, by simp [hv1], ?_⟩
     have hshape : Interleave (stepsFrom 0 (casFamily false)) (tr.map casEr) := by
       rw [hmap, hk0, hk1]
       show Interleave [[(⟨0, id, true⟩ : Step Int)], [(⟨1, fun _ => 1, true⟩ : Step Int)]] _
@@ -438,9 +495,9 @@ theorem two_cas_linearizes {f : Nat} {σ0 : Heap} (h0 : σ0 f = some (.int 0))
         simp only [List.set_cons_zero, List.set_cons_succ, List.mem_cons, List.not_mem_nil,
           or_false] at hl
         rcases hl with rfl | rfl <;> rfl)))
-    obtain ⟨heq, hperm, _⟩ :=
+    obtain ⟨heq, hperm, hcommit⟩ :=
       real_run_linearizes casEr (counter f) (casFamily false) h hcomm hshape
-    refine ⟨hshape, heq, hperm, ?_⟩
+    refine ⟨hshape, heq, hperm, hcommit, ?_⟩
     rw [counter_of_some hf]
 
 /-- **Both branches of the prophecy are inhabited**, with the erased trace exhibited
@@ -449,7 +506,7 @@ theorem two_cas_prophecy_0 {f : Nat} {σ0 : Heap} (h0 : σ0 f = some (.int 0)) :
     ∃ tr, Trace ⟨[casF f, casF f], σ0⟩ tr ⟨[.val (.bool true), .val (.bool false)], σ0.set f (.int 1)⟩ ∧
       Interleave (stepsFrom 0 (casFamily true)) (tr.map casEr) := by
   obtain ⟨tr, htr⟩ := steps_trace (two_cas_run_exists_0 h0)
-  obtain ⟨pv, _, hpv, hshape, _⟩ := two_cas_linearizes h0 htr
+  obtain ⟨pv, _, _, hpv, hshape, _⟩ := two_cas_linearizes h0 htr
   have : pv = true := hpv.mpr rfl
   subst this
   exact ⟨tr, htr, hshape⟩
@@ -459,7 +516,7 @@ theorem two_cas_prophecy_1 {f : Nat} {σ0 : Heap} (h0 : σ0 f = some (.int 0)) :
     ∃ tr, Trace ⟨[casF f, casF f], σ0⟩ tr ⟨[.val (.bool false), .val (.bool true)], σ0.set f (.int 1)⟩ ∧
       Interleave (stepsFrom 0 (casFamily false)) (tr.map casEr) := by
   obtain ⟨tr, htr⟩ := steps_trace (two_cas_run_exists_1 h0)
-  obtain ⟨pv, _, hpv, hshape, _⟩ := two_cas_linearizes h0 htr
+  obtain ⟨pv, _, _, hpv, hshape, _⟩ := two_cas_linearizes h0 htr
   have : pv = false := by
     cases pv with
     | true => exact absurd (hpv.mp rfl) (by simp)

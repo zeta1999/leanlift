@@ -364,23 +364,30 @@ go/no-go review. If B stalls, Phase A alone is already a shippable capability.
   `resolved_stable` (a resolution is permanent) and `proph_predicts_future` (the
   prophesied value read from the final state equals the value resolved
   mid-execution — soundness over the transition system, not an assumed resolution
-  function). ✅ **Lifted onto the real execution (2026-10-01, `PhaseC/ProphReal.lean`):**
-  the simplest genuinely future-dependent LP, two threads racing `CAS(f,0,1)` on
-  the real `λ-conc` pool. `two_cas_steps`: every `steps` run from `f ↦ 0` that
-  finishes both threads ends with `f ↦ 1` and exactly one thread returning `true`
-  — the one that stepped first (derived: the first step wins by `Head.casS`, every
-  later step loses by `Head.casF`; `cas_inv`). `two_cas_linearizes`: each such run
-  has a prophecy value `pv` ("thread 0 wins"), **resolved by the run's first step**
-  and equal to the observable outcome (`pv ↔ v1 = true`), such that the erased
-  trace is an `Interleave` of the **prophecy-indexed family** `casFamily pv`
-  (winner `setOp`: `0 ↦ 1`; loser `noopOp`: observes `1`, no-op LP at its failed
-  CAS) — so `real_run_linearizes` applies and the flag ends at the sequential
-  history's `1`. Both prophecy branches are inhabited with the erased trace
-  exhibited in the family (`two_cas_prophecy_0/_1`, via `two_cas_run_exists_0/_1`).
-  *Still open:* a prophecy *variable* inside `λ-conc` (`NewProph`/`Resolve` as
-  program steps — `ProphMachine.lean`'s machine) and a `wp` rule for it; those are
-  what a client proof would use. Here the family's dependence on the run is the
-  phenomenon, stated and proved on the real semantics.
+  function). 🚧 **On the real execution (2026-10-01, `PhaseC/ProphReal.lean`) — a
+  run-indexed family, not a future-dependent LP.** Two threads racing `CAS(f,0,1)`
+  on the real `λ-conc` pool. `two_cas_steps`: every `steps` run from `f ↦ 0` that
+  finishes both threads ends with `f ↦ 1` and exactly one thread returning `true`;
+  `first_to_step_wins`: over annotated runs the winner is the first recorded step
+  (derived: `Head.casS` then `Head.casF`; `cas_inv`). Each thread's LP is its own
+  CAS and is *present-determined* — this program needs no prophecy variable, as in
+  Iris. What depends on the schedule is **which operation each thread implements**:
+  winner `setOp` (`0 ↦ 1`), loser `noopOp` (observes `1`, `LAT.refl`), selected by
+  `casFamily pv`; `no_run_independent_family` proves no single family covers both
+  schedules, so the index is load-bearing. `two_cas_linearizes`: `pv` is obtained
+  by `proph_sound` from a resolver that reads only the physical trace (its first
+  step) and equals the observable outcome (`pv ↔ v1 = true`); the erased trace is
+  an `Interleave` of `casFamily pv`, so `real_run_linearizes` gives one LP per
+  thread, each its op's commit. Both index values are inhabited with the trace
+  exhibited in the family (`two_cas_prophecy_0/_1`). Disclosed: `setOp.commit` is
+  constant, so the abstract fold's `counter = 1` carries no exclusivity (that lives
+  in the permutation conjunct and in `two_cas`), and `history_legal` is
+  tautological for both ops. An independent review of the first version called
+  the "future-dependent LP" framing an overclaim; this paragraph and the file now
+  say what is proved. *C2's lift is therefore NOT discharged:* a prophecy
+  *variable* inside `λ-conc` (`NewProph`/`Resolve` as program steps,
+  `ProphMachine.lean`'s machine) and a `wp` rule for it — what a client proof of
+  a genuinely future-dependent LP such as Chase–Lev `take` would use — remain open.
 
 ## Phase D — integration with leanlift (the seam)
 

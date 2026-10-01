@@ -236,7 +236,7 @@ translates or generates. Which theorems are on which side of the line:
 - **Hand-proved, sequentially consistent by construction:** the rest of the
   `[IRIS]` lane — the `λ-conc` program logic, its adequacy and safety theorems,
   linearizability at the abstract state, the erasure to real thread-pool runs,
-  and the CAS-race prophecy result. These are concurrency results, and they say
+  and the CAS-race result. These are concurrency results, and they say
   so in their files, but their language has one shared heap with atomic
   read-modify-writes, so they carry no memory-order content either.
 

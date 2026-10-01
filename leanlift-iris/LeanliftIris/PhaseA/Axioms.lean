@@ -132,7 +132,9 @@ namespace LeanliftIris.PhaseA
 
 -- C2 on the real pool: a future-dependent LP, prophecy resolved by the run
 #print axioms LeanliftIris.PhaseC.two_cas_steps
+#print axioms LeanliftIris.PhaseC.first_to_step_wins
 #print axioms LeanliftIris.PhaseC.two_cas_linearizes
+#print axioms LeanliftIris.PhaseC.no_run_independent_family
 #print axioms LeanliftIris.PhaseC.two_cas_run_exists_0
 #print axioms LeanliftIris.PhaseC.two_cas_run_exists_1
 #print axioms LeanliftIris.PhaseC.two_cas_prophecy_0
