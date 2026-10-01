@@ -81,7 +81,7 @@ PLAN-concurrency on 2026-09-30 (B3–B6 had been done but left unchecked).
 
 ## Phase E — Rust variant (AFTER the C++ corpus)
 - [ ] E1 sequential slice via Aeneas → Lean (order book, sweep, bitmap in safe Rust) — reuses leanlift's existing Rust path
-- [ ] E2 automated weak-memory screening: Loom (+ optionally Kani/Shuttle) over the concurrency cores; tag `[LOOM]`, off-CI
+- [x] E2 automated weak-memory screening: Loom (+ optionally Kani/Shuttle) over the concurrency cores; tag `[LOOM]`, off-CI — **done 2026-10-02, `leanlift-loom/`** (Loom only; Kani/Shuttle skipped): six cores (SPSC, seqlock, MPSC, SPMC, Treiber, Chase–Lev) reimplemented on loom atomics; every clean model passes and every core's single injected ordering bug (feature `mutant-<core>`) is caught — three as data races with source locations, three as the safety assertion (torn snapshot, torn slot, double claim `[1, 2, 2]`). Bounds, execution counts and times per core in `leanlift-loom/LOOM.md`; five of six also finish with no preemption bound; SPMC did not finish unbounded within 30 min, so its completed search is bound 3 only. Finding recorded there: a loom harness that runs one role on the main thread explored a single execution for SPSC (mutant passed); every role spawned is required. README D3 section and `CERTIFICATE-concurrency.md` updated: `[LOOM]` is weak-memory aware but bounded evidence, not a proof.
 - [ ] E3 deductive lane — pick: Verus (SMT, ~SC permission model) OR RustBelt-style Iris-in-Lean (full iRC11, reuses Phase B)
 - [ ] E4 certificate seam: Aeneas ∧ Loom ∧ (Verus|Iris); document which axis each tool owns
 - [ ] note: Aeneas itself covers ONLY the sequential slice — atomics/`unsafe` are outside its model (same boundary as C++)

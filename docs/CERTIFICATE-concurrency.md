@@ -77,6 +77,18 @@ linearizability at the abstract state (`linearizable_abstract`), the erasure
 from real pool runs (`real_run_linearizes`, `two_incrs_steps`), and the CAS race
 as a run-indexed family (`two_cas_steps`, `two_cas_linearizes`).
 
+## Bounded evidence: `[LOOM]` (not part of either half)
+
+Since 2026-10-02, `leanlift-loom/` model-checks small Rust reimplementations of
+six rows above under loom's C11 model: #1 SPSC, #3 seqlock, #2 MPSC, #5 SPMC,
+#7 Treiber (no reclamation), #8 Chase–Lev (no growth). Every clean model
+passes and every core's injected ordering bug is caught; bounds and execution
+counts are in `leanlift-loom/LOOM.md`. This is **evidence, not a certificate
+half**: bounded, a tiny test per core, reimplementations rather than the corpus
+C++, and loom does not explore load-buffering executions. It does not upgrade
+any row, and it is independent of the `[IRIS]` proofs — agreement between them
+is not checked anywhere.
+
 ## What would make a row "combined"
 
 For a structure `S` in the table: a leanlift behavioural model of `S` (or a

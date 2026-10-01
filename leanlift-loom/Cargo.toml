@@ -1,0 +1,24 @@
+[package]
+name = "leanlift-loom"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "[LOOM] bounded weak-memory model checking of the concurrency corpus (off-CI)."
+
+# Standalone: not part of the root package or any workspace CI builds.
+[workspace]
+
+[dependencies]
+loom = "0.7"
+
+# One deliberate ordering mutation per core (see each module's doc comment).
+[features]
+mutant-spsc = []
+mutant-seqlock = []
+mutant-mpsc = []
+mutant-spmc = []
+mutant-treiber = []
+mutant-chaselev = []
+
+[profile.test]
+opt-level = 2

@@ -205,7 +205,8 @@ all are exercised by `tests/run.sh`.
 
 This is a limit, not a credit. **Nothing produced by `lift prove`, `lift model`,
 the four translation lanes, or the behavioural-model families proves anything
-about memory ordering.** Every theorem those paths generate is stated over a
+about memory ordering**, and the one automated weak-memory tool here, `[LOOM]`
+(below), is bounded model checking of reimplementations, not a proof. Every theorem those paths generate is stated over a
 sequentially consistent model: one shared state, every read sees the last write
 in a single global order. A lock-free structure that is correct in that model can
 still be wrong on real hardware under release/acquire or relaxed atomics, and
@@ -222,6 +223,16 @@ translates or generates. Which theorems are on which side of the line:
   produce, the Lean theory under `lean/LeanLift/` including
   `lean/LeanLift/Models/*.lean` (M3), the `leanproofs/` package, and every
   `.lean` file the translation lanes emit.
+- **Automated, weak-memory aware, but bounded — evidence, not proof:** the
+  `[LOOM]` package [`leanlift-loom/`](leanlift-loom/), off-CI. It model-checks
+  small Rust reimplementations of six corpus cores (SPSC, seqlock, MPSC, SPMC,
+  Treiber, Chase–Lev) under loom's C11 model, which explores executions the SC
+  models above cannot. A clean run means no bug was found *in that small test,
+  within its bound, within what loom models* — and loom does not explore
+  load-buffering executions, so it can miss real bugs. Each core ships one
+  injected ordering bug that loom must catch, and the bound and execution count
+  per core are in [`leanlift-loom/LOOM.md`](leanlift-loom/LOOM.md). It checks
+  reimplementations, not the C++ corpus or anything leanlift translates.
 - **Hand-proved, weak-memory aware:** the Phase B theorems listed in
   [`leanlift-iris/CiAxioms.lean`](leanlift-iris/CiAxioms.lean) — message
   passing under release/acquire (`message_passing`), the SPSC ring handoff
