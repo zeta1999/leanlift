@@ -307,8 +307,8 @@ go/no-go review. If B stalls, Phase A alone is already a shippable capability.
   restores the empty stack (abstract state `[] → [v] → []`). *Still to do:* the full
   mask/atomic-update encoding (open the invariant at the LP, true `<<<P>>> e <<<Q>>>`
   against a concurrent context).
-  **The payoff (2026-09-30, `PhaseC/Linearize.lean`), after an unprimed cross-model
-  review (opus) found the first version "weaker than claimed" — an identity-erasure
+  **The payoff (2026-09-30, `PhaseC/Linearize.lean`), after an independent cross-model
+  review found the first version "weaker than claimed" — an identity-erasure
   lemma named linearizability, no LP uniqueness, no legality, consumer bypassing it —
   and the file was strengthened to earn the name where the model allows:**
   `Interleave ls h` (any scheduler of the given traces; `Interleave.flatten` certifies
@@ -364,9 +364,23 @@ go/no-go review. If B stalls, Phase A alone is already a shippable capability.
   `resolved_stable` (a resolution is permanent) and `proph_predicts_future` (the
   prophesied value read from the final state equals the value resolved
   mid-execution — soundness over the transition system, not an assumed resolution
-  function). *Still to do for full C:* lift these onto the Phase-A `wp`/adequacy so
-  the LP/resolution attach to the real `λ-conc` execution (C1 currently runs an
-  abstract micro-step list; resolution lives on its own small machine).
+  function). ✅ **Lifted onto the real execution (2026-10-01, `PhaseC/ProphReal.lean`):**
+  the simplest genuinely future-dependent LP, two threads racing `CAS(f,0,1)` on
+  the real `λ-conc` pool. `two_cas_steps`: every `steps` run from `f ↦ 0` that
+  finishes both threads ends with `f ↦ 1` and exactly one thread returning `true`
+  — the one that stepped first (derived: the first step wins by `Head.casS`, every
+  later step loses by `Head.casF`; `cas_inv`). `two_cas_linearizes`: each such run
+  has a prophecy value `pv` ("thread 0 wins"), **resolved by the run's first step**
+  and equal to the observable outcome (`pv ↔ v1 = true`), such that the erased
+  trace is an `Interleave` of the **prophecy-indexed family** `casFamily pv`
+  (winner `setOp`: `0 ↦ 1`; loser `noopOp`: observes `1`, no-op LP at its failed
+  CAS) — so `real_run_linearizes` applies and the flag ends at the sequential
+  history's `1`. Both prophecy branches are inhabited with the erased trace
+  exhibited in the family (`two_cas_prophecy_0/_1`, via `two_cas_run_exists_0/_1`).
+  *Still open:* a prophecy *variable* inside `λ-conc` (`NewProph`/`Resolve` as
+  program steps — `ProphMachine.lean`'s machine) and a `wp` rule for it; those are
+  what a client proof would use. Here the family's dependence on the run is the
+  phenomenon, stated and proved on the real semantics.
 
 ## Phase D — integration with leanlift (the seam)
 

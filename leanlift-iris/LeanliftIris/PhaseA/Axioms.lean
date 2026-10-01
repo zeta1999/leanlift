@@ -14,6 +14,7 @@ import LeanliftIris.PhaseA.PoolAdequacy
 import LeanliftIris.PhaseA.Concrete
 import LeanliftIris.PhaseC.Linearize
 import LeanliftIris.PhaseC.Erasure
+import LeanliftIris.PhaseC.ProphReal
 import LeanliftIris.PhaseA.Examples
 import LeanliftIris.PhaseA.Treiber
 import LeanliftIris.PhaseB.WeakMem
@@ -128,5 +129,13 @@ namespace LeanliftIris.PhaseA
 #print axioms LeanliftIris.PhaseC.two_incrs_steps
 #print axioms LeanliftIris.PhaseC.step_iff_stepAt
 #print axioms LeanliftIris.PhaseC.two_incrs_run_exists
+
+-- C2 on the real pool: a future-dependent LP, prophecy resolved by the run
+#print axioms LeanliftIris.PhaseC.two_cas_steps
+#print axioms LeanliftIris.PhaseC.two_cas_linearizes
+#print axioms LeanliftIris.PhaseC.two_cas_run_exists_0
+#print axioms LeanliftIris.PhaseC.two_cas_run_exists_1
+#print axioms LeanliftIris.PhaseC.two_cas_prophecy_0
+#print axioms LeanliftIris.PhaseC.two_cas_prophecy_1
 
 end LeanliftIris.PhaseA

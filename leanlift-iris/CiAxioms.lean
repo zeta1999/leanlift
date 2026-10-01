@@ -36,6 +36,10 @@ open LeanliftIris.PhaseC
 #print axioms real_run_linearizes             -- C1 erasure: a real pool run linearizes, under two explicit obligations
 #print axioms two_incrs_steps                 -- C1 erasure instantiated: two concurrent FAA increments on the real pool never lose an update
 #print axioms two_incrs_run_exists            -- C1 erasure: real-side non-vacuity (such a run exists)
+#print axioms two_cas_steps                   -- C2 on the real pool: CAS race, exactly one winner, flag ends 1
+#print axioms two_cas_linearizes              -- C2: the race linearizes against a prophecy-indexed family
+#print axioms two_cas_prophecy_0              -- C2: both prophecy branches inhabited (thread 0 first)
+#print axioms two_cas_prophecy_1              -- C2: both prophecy branches inhabited (thread 1 first)
 #print axioms owner_claim_lp                  -- C2 Chase–Lev LP, via SC safety
 #print axioms LAT.atomic_commit               -- C1 logically-atomic commit
 #print axioms take_linearizes                 -- C1 take linearizes

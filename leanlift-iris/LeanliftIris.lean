@@ -38,3 +38,4 @@ import LeanliftIris.PhaseC.ProphMachine
 import LeanliftIris.PhaseC.WpAtomic
 import LeanliftIris.PhaseC.Linearize
 import LeanliftIris.PhaseC.Erasure
+import LeanliftIris.PhaseC.ProphReal
